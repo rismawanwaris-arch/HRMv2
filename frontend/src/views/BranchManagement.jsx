@@ -1,5 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import API_BASE from '../config';
+import { branchApi } from '../services/api';
+
+const iStyle = { background: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '10px 14px', color: 'var(--text-primary)', fontSize: '14px', width: '100%', boxSizing: 'border-box', display: 'block', outline: 'none', fontFamily: 'inherit', transition: 'border-color 0.2s' };
+const lStyle = { display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' };
+
+const EMPTY_FORM = { code: '', name: '', address: '', city: '', location_type: 'Konter', has_petshop: false, rent_amount: '' };
+
+function Field({ label, required, children }) {
+  return (
+    <div>
+      <label style={lStyle}>{label}{required && <span style={{ color: '#ef4444' }}> *</span>}</label>
+      {children}
+    </div>
+  );
+}
 
 function BranchManagement({ setView }) {
   const [branches, setBranches] = useState([]);
@@ -7,8 +21,8 @@ function BranchManagement({ setView }) {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [form, setForm] = useState({ code: '', name: '', address: '', city: '' });
-  const [editForm, setEditForm] = useState({ id: null, code: '', name: '', address: '', city: '', status: 'Active' });
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [editForm, setEditForm] = useState({ ...EMPTY_FORM, id: null, status: 'Active' });
   const [error, setError] = useState('');
 
   useEffect(() => { fetchBranches(); }, []);
@@ -16,9 +30,8 @@ function BranchManagement({ setView }) {
   const fetchBranches = async () => {
     try {
       setLoading(true);
-      const res = await fetch(`${API_BASE}/branches`);
-      const data = await res.json();
-      if (data.success) setBranches(data.data);
+      const res = await branchApi.getAll();
+      if (res.success) setBranches(res.data);
     } catch (err) {
       console.error('Error fetching branches:', err);
     } finally {
@@ -35,21 +48,16 @@ function BranchManagement({ setView }) {
     }
     try {
       setSubmitting(true);
-      const res = await fetch(`${API_BASE}/branches`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form)
-      });
-      const data = await res.json();
-      if (data.success) {
-        setBranches(prev => [...prev, data.data].sort((a, b) => a.name.localeCompare(b.name)));
+      const res = await branchApi.create({ ...form, has_petshop: form.has_petshop ? 1 : 0, rent_amount: parseFloat(form.rent_amount) || 0 });
+      if (res.success) {
+        setBranches(prev => [...prev, res.data].sort((a, b) => a.name.localeCompare(b.name)));
         setShowAddModal(false);
-        setForm({ code: '', name: '', address: '', city: '' });
+        setForm(EMPTY_FORM);
       } else {
-        setError(data.message || 'Gagal menambahkan cabang.');
+        setError(res.message || 'Gagal menambahkan cabang.');
       }
     } catch (err) {
-      setError('Gagal terhubung ke server.');
+      setError(err.message || 'Gagal terhubung ke server.');
     } finally {
       setSubmitting(false);
     }
@@ -64,79 +72,173 @@ function BranchManagement({ setView }) {
     }
     try {
       setSubmitting(true);
-      const res = await fetch(`${API_BASE}/branches/${editForm.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editForm)
-      });
-      const data = await res.json();
-      if (data.success) {
-        setBranches(prev => prev.map(b => b.id === editForm.id ? data.data : b).sort((a, b) => a.name.localeCompare(b.name)));
+      const res = await branchApi.update(editForm.id, { ...editForm, has_petshop: editForm.has_petshop ? 1 : 0, rent_amount: parseFloat(editForm.rent_amount) || 0 });
+      if (res.success) {
+        setBranches(prev => prev.map(b => b.id === editForm.id ? res.data : b).sort((a, b) => a.name.localeCompare(b.name)));
         setShowEditModal(false);
       } else {
-        setError(data.message || 'Gagal memperbarui cabang.');
+        setError(res.message || 'Gagal memperbarui cabang.');
       }
     } catch (err) {
-      setError('Gagal terhubung ke server.');
+      setError(err.message || 'Gagal terhubung ke server.');
     } finally {
       setSubmitting(false);
     }
   };
 
   const handleDelete = async (branch) => {
-    if (!window.confirm(`Hapus cabang "${branch.name}"?\n\nKaryawan yang terdaftar di cabang ini akan menjadi tidak memiliki cabang.`)) return;
+    if (!window.confirm(`Hapus cabang "${branch.name}"?\n\nKaryawan aktif yang terdaftar di cabang ini akan menjadi tidak memiliki cabang.`)) return;
     try {
-      const res = await fetch(`${API_BASE}/branches/${branch.id}`, { method: 'DELETE' });
-      const data = await res.json();
-      if (data.success) {
+      const res = await branchApi.delete(branch.id);
+      if (res.success) {
         setBranches(prev => prev.filter(b => b.id !== branch.id));
       } else {
-        alert(data.message || 'Gagal menghapus cabang.');
+        alert(res.message || 'Gagal menghapus cabang.');
       }
     } catch (err) {
-      alert('Gagal terhubung ke server.');
+      alert(err.message || 'Gagal terhubung ke server.');
     }
   };
 
+  const openEdit = (branch) => {
+    setEditForm({
+      id: branch.id,
+      code: branch.code,
+      name: branch.name,
+      address: branch.address || '',
+      city: branch.city || '',
+      status: branch.status || 'Active',
+      location_type: branch.location_type || 'Konter',
+      has_petshop: !!branch.has_petshop,
+      rent_amount: branch.rent_amount || '',
+    });
+    setError('');
+    setShowEditModal(true);
+  };
+
+  const fmt = (n) => n ? new Intl.NumberFormat('id-ID').format(n) : '0';
+
+  const totalActive = branches.filter(b => b.status === 'Active').length;
+  const totalKonter = branches.filter(b => b.location_type === 'Konter').length;
+  const totalGudang = branches.filter(b => b.location_type === 'Gudang').length;
+
+  const BranchForm = ({ data, setData, onSubmit, isEdit = false }) => (
+    <form onSubmit={onSubmit} style={{ padding: '0 32px 32px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '4px' }}>
+        <div style={{ width: '3px', height: '18px', background: isEdit ? '#3b82f6' : '#8b5cf6', borderRadius: '2px' }} />
+        <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1.2px', color: isEdit ? '#3b82f6' : '#8b5cf6' }}>Informasi Cabang</span>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+        <Field label="Kode Cabang" required>
+          <input style={{ ...iStyle, fontFamily: 'monospace', letterSpacing: '1px', textTransform: 'uppercase' }}
+            placeholder="JKT-01" value={data.code}
+            onChange={e => setData(p => ({ ...p, code: e.target.value.toUpperCase() }))} required />
+        </Field>
+        <Field label="Tipe Lokasi">
+          <select style={iStyle} value={data.location_type} onChange={e => setData(p => ({ ...p, location_type: e.target.value }))}>
+            <option value="Konter">Konter (Outlet)</option>
+            <option value="Gudang">Gudang (Pusat)</option>
+          </select>
+        </Field>
+      </div>
+
+      <Field label="Nama Cabang" required>
+        <input style={iStyle} placeholder="Cabang Sudirman" value={data.name}
+          onChange={e => setData(p => ({ ...p, name: e.target.value }))} required />
+      </Field>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+        <Field label="Kota">
+          <input style={iStyle} placeholder="Jakarta" value={data.city}
+            onChange={e => setData(p => ({ ...p, city: e.target.value }))} />
+        </Field>
+        <Field label="Biaya Sewa / Bulan (Rp)">
+          <input type="number" min="0" style={iStyle} placeholder="0" value={data.rent_amount}
+            onChange={e => setData(p => ({ ...p, rent_amount: e.target.value }))} />
+        </Field>
+      </div>
+
+      <Field label="Alamat Lengkap">
+        <textarea style={{ ...iStyle, resize: 'vertical', minHeight: '80px' }}
+          placeholder="Masukkan alamat lengkap cabang..." value={data.address}
+          onChange={e => setData(p => ({ ...p, address: e.target.value }))} rows={3} />
+      </Field>
+
+      {/* Petshop & Status row */}
+      <div style={{ display: 'flex', gap: '20px', alignItems: 'flex-start' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 16px', background: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: '10px', cursor: 'pointer', userSelect: 'none' }}
+          onClick={() => setData(p => ({ ...p, has_petshop: !p.has_petshop }))}>
+          <div style={{ width: '18px', height: '18px', borderRadius: '4px', border: `2px solid ${data.has_petshop ? '#10b981' : 'var(--border-color)'}`, background: data.has_petshop ? '#10b981' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s', flexShrink: 0 }}>
+            {data.has_petshop && <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>}
+          </div>
+          <div>
+            <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>Punya Petshop</div>
+            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Tampilkan komponen petshop di laporan</div>
+          </div>
+        </div>
+
+        {isEdit && (
+          <Field label="Status">
+            <select style={iStyle} value={data.status} onChange={e => setData(p => ({ ...p, status: e.target.value }))}>
+              <option value="Active">Aktif</option>
+              <option value="Inactive">Nonaktif</option>
+            </select>
+          </Field>
+        )}
+      </div>
+
+      {error && (
+        <div style={{ background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '10px', padding: '12px 16px', color: '#f87171', fontSize: '13px' }}>
+          ⚠️ {error}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: '12px', paddingTop: '8px', borderTop: '1px solid var(--border-color)' }}>
+        <button type="button"
+          onClick={() => { isEdit ? setShowEditModal(false) : setShowAddModal(false); setError(''); }}
+          style={{ flex: 1, padding: '14px', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '12px', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '15px', fontWeight: 600, fontFamily: 'inherit' }}>
+          Batal
+        </button>
+        <button type="submit" disabled={submitting}
+          style={{ flex: 2, padding: '14px', background: submitting ? 'rgba(139,92,246,0.4)' : isEdit ? 'linear-gradient(135deg, #3b82f6, #2563eb)' : 'linear-gradient(135deg, #7c3aed, #6d28d9)', border: 'none', borderRadius: '12px', color: 'white', cursor: submitting ? 'not-allowed' : 'pointer', fontSize: '15px', fontWeight: 700, fontFamily: 'inherit' }}>
+          {submitting ? 'Menyimpan...' : isEdit ? '✓ Simpan Perubahan' : '✓ Simpan Cabang'}
+        </button>
+      </div>
+    </form>
+  );
+
   return (
     <div>
-      {/* Header */}
       <div className="page-header">
         <div>
           <h1 className="page-title">Manajemen Cabang Outlet</h1>
-          <p className="page-subtitle">Kelola daftar cabang dan outlet perusahaan.</p>
+          <p className="page-subtitle">Kelola daftar cabang, konter, dan gudang perusahaan.</p>
         </div>
-        <button
-          className="btn btn-primary"
-          onClick={() => { setShowAddModal(true); setError(''); }}
-        >
+        <button className="btn btn-primary" onClick={() => { setShowAddModal(true); setError(''); setForm(EMPTY_FORM); }}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '6px' }}><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           Tambah Cabang
         </button>
       </div>
 
-      {/* Stats */}
-      <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)', marginBottom: '24px' }}>
-        <div className="glass-panel stat-card" style={{ borderColor: 'rgba(139,92,246,0.3)' }}>
-          <div className="stat-card-title">Total Cabang</div>
-          <div className="stat-card-value" style={{ color: 'var(--color-primary)' }}>{branches.length}</div>
-          <div className="stat-card-desc">Cabang terdaftar</div>
-        </div>
-        <div className="glass-panel stat-card" style={{ borderColor: 'rgba(16,185,129,0.3)' }}>
-          <div className="stat-card-title">Status Aktif</div>
-          <div className="stat-card-value" style={{ color: 'var(--color-success)' }}>
-            {branches.filter(b => b.status === 'Active').length}
+      <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)', marginBottom: '24px' }}>
+        {[
+          { label: 'Total Cabang', value: branches.length, color: 'var(--color-primary)', desc: 'Semua cabang' },
+          { label: 'Aktif', value: totalActive, color: '#10b981', desc: `Konter: ${totalKonter} · Gudang: ${totalGudang}` },
+          { label: 'Punya Petshop', value: branches.filter(b => b.has_petshop).length, color: '#f59e0b', desc: 'Komponen aktif' },
+        ].map(s => (
+          <div key={s.label} className="glass-panel stat-card" style={{ borderColor: `${s.color}40` }}>
+            <div className="stat-card-title">{s.label}</div>
+            <div className="stat-card-value" style={{ color: s.color }}>{s.value}</div>
+            <div className="stat-card-desc">{s.desc}</div>
           </div>
-          <div className="stat-card-desc">Cabang beroperasi</div>
-        </div>
+        ))}
       </div>
 
-      {/* Branches Table */}
       <div className="glass-panel">
         {loading ? (
           <div style={{ textAlign: 'center', padding: '48px', color: 'var(--text-muted)' }}>
-            <div className="loading-spinner" style={{ margin: '0 auto 12px' }} />
-            Memuat data cabang...
+            <div className="loading-spinner" style={{ margin: '0 auto 12px' }} />Memuat data cabang...
           </div>
         ) : branches.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '64px 24px', color: 'var(--text-muted)' }}>
@@ -151,10 +253,12 @@ function BranchManagement({ setView }) {
                 <tr>
                   <th>Kode</th>
                   <th>Nama Cabang</th>
+                  <th>Tipe</th>
                   <th>Kota</th>
-                  <th>Alamat</th>
+                  <th>Karyawan</th>
+                  <th>Petshop</th>
+                  <th>Sewa/Bln</th>
                   <th>Status</th>
-                  <th>Terdaftar</th>
                   <th style={{ textAlign: 'center' }}>Aksi</th>
                 </tr>
               </thead>
@@ -162,93 +266,45 @@ function BranchManagement({ setView }) {
                 {branches.map(branch => (
                   <tr key={branch.id}>
                     <td>
-                      <span style={{
-                        background: 'rgba(139,92,246,0.15)',
-                        color: 'var(--color-primary)',
-                        padding: '3px 10px',
-                        borderRadius: '6px',
-                        fontFamily: 'monospace',
-                        fontWeight: 700,
-                        fontSize: '13px',
-                        letterSpacing: '0.5px'
-                      }}>
+                      <span style={{ background: 'rgba(139,92,246,0.15)', color: 'var(--color-primary)', padding: '3px 10px', borderRadius: '6px', fontFamily: 'monospace', fontWeight: 700, fontSize: '13px', letterSpacing: '0.5px' }}>
                         {branch.code}
                       </span>
                     </td>
                     <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{branch.name}</td>
+                    <td>
+                      <span style={{ background: branch.location_type === 'Gudang' ? 'rgba(139,92,246,0.15)' : 'rgba(59,130,246,0.15)', color: branch.location_type === 'Gudang' ? '#8b5cf6' : '#3b82f6', padding: '3px 10px', borderRadius: '20px', fontSize: '12px', fontWeight: 600 }}>
+                        {branch.location_type || 'Konter'}
+                      </span>
+                    </td>
                     <td style={{ color: 'var(--text-muted)' }}>{branch.city || '-'}</td>
-                    <td style={{ color: 'var(--text-muted)', maxWidth: '220px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {branch.address || '-'}
+                    <td style={{ color: 'var(--text-primary)', fontWeight: 600, textAlign: 'center' }}>
+                      {branch.employee_count ?? 0}
+                    </td>
+                    <td style={{ textAlign: 'center' }}>
+                      {branch.has_petshop
+                        ? <span style={{ color: '#10b981', fontWeight: 700 }}>✓</span>
+                        : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                    </td>
+                    <td style={{ color: 'var(--text-muted)', fontSize: '13px' }}>
+                      {branch.rent_amount ? `Rp ${fmt(branch.rent_amount)}` : '—'}
                     </td>
                     <td>
-                      <span style={{
-                        padding: '3px 10px',
-                        borderRadius: '20px',
-                        fontSize: '12px',
-                        fontWeight: 600,
-                        background: branch.status === 'Active' ? 'rgba(16,185,129,0.15)' : 'rgba(107,114,128,0.15)',
-                        color: branch.status === 'Active' ? 'var(--color-success)' : 'var(--text-muted)'
-                      }}>
+                      <span style={{ padding: '3px 10px', borderRadius: '20px', fontSize: '12px', fontWeight: 600, background: branch.status === 'Active' ? 'rgba(16,185,129,0.15)' : 'rgba(107,114,128,0.15)', color: branch.status === 'Active' ? 'var(--color-success)' : 'var(--text-muted)' }}>
                         {branch.status === 'Active' ? '● Aktif' : '● Nonaktif'}
                       </span>
                     </td>
-                    <td style={{ color: 'var(--text-muted)', fontSize: '13px' }}>
-                      {new Date(branch.created_at).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}
-                    </td>
-                    <td style={{ textAlign: 'center' }}>
-                      <button
-                        onClick={() => {
-                          setEditForm({
-                            id: branch.id,
-                            code: branch.code,
-                            name: branch.name,
-                            address: branch.address || '',
-                            city: branch.city || '',
-                            status: branch.status || 'Active'
-                          });
-                          setShowEditModal(true);
-                          setError('');
-                        }}
-                        style={{
-                          background: 'rgba(59,130,246,0.12)',
-                          border: '1px solid rgba(59,130,246,0.25)',
-                          color: '#3b82f6',
-                          padding: '6px 14px',
-                          borderRadius: '8px',
-                          cursor: 'pointer',
-                          fontSize: '13px',
-                          fontWeight: 600,
-                          transition: 'all 0.2s',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '6px',
-                          marginRight: '8px'
-                        }}
+                    <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
+                      <button onClick={() => openEdit(branch)}
+                        style={{ background: 'rgba(59,130,246,0.12)', border: '1px solid rgba(59,130,246,0.25)', color: '#3b82f6', padding: '6px 14px', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: 600, marginRight: '8px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
                         onMouseOver={e => e.currentTarget.style.background = 'rgba(59,130,246,0.22)'}
-                        onMouseOut={e => e.currentTarget.style.background = 'rgba(59,130,246,0.12)'}
-                      >
+                        onMouseOut={e => e.currentTarget.style.background = 'rgba(59,130,246,0.12)'}>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                         Edit
                       </button>
-                      <button
-                        onClick={() => handleDelete(branch)}
-                        style={{
-                          background: 'rgba(239,68,68,0.12)',
-                          border: '1px solid rgba(239,68,68,0.25)',
-                          color: '#ef4444',
-                          padding: '6px 14px',
-                          borderRadius: '8px',
-                          cursor: 'pointer',
-                          fontSize: '13px',
-                          fontWeight: 600,
-                          transition: 'all 0.2s',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '6px'
-                        }}
+                      <button onClick={() => handleDelete(branch)}
+                        style={{ background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.25)', color: '#ef4444', padding: '6px 14px', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '6px' }}
                         onMouseOver={e => e.currentTarget.style.background = 'rgba(239,68,68,0.22)'}
-                        onMouseOut={e => e.currentTarget.style.background = 'rgba(239,68,68,0.12)'}
-                      >
+                        onMouseOut={e => e.currentTarget.style.background = 'rgba(239,68,68,0.12)'}>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
                         Hapus
                       </button>
@@ -261,249 +317,38 @@ function BranchManagement({ setView }) {
         )}
       </div>
 
-      {/* Add Branch Modal */}
+      {/* Add Modal */}
       {showAddModal && (
-        <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          zIndex: 1000, padding: '20px', backdropFilter: 'blur(6px)'
-        }}>
-          <div style={{
-            width: '100%', maxWidth: '460px',
-            background: 'var(--bg-surface-opaque)',
-            border: '1px solid var(--border-color)', borderRadius: '24px',
-            boxShadow: '0 32px 64px rgba(0,0,0,0.25)'
-          }}>
-            {/* Modal Header */}
-            <div style={{ padding: '28px 32px 24px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px', backdropFilter: 'blur(6px)', overflowY: 'auto' }}>
+          <div style={{ width: '100%', maxWidth: '520px', background: 'var(--bg-surface-opaque)', border: '1px solid var(--border-color)', borderRadius: '24px', boxShadow: '0 32px 64px rgba(0,0,0,0.25)', marginTop: 'auto', marginBottom: 'auto' }}>
+            <div style={{ padding: '28px 32px 20px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div>
-                <h2 style={{ margin: 0, fontSize: '22px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.3px' }}>Tambah Cabang Baru</h2>
-                <p style={{ margin: '6px 0 0', fontSize: '13px', color: 'var(--text-secondary)' }}>Daftarkan cabang atau outlet baru</p>
+                <h2 style={{ margin: 0, fontSize: '22px', fontWeight: 800, color: 'var(--text-primary)' }}>Tambah Cabang Baru</h2>
+                <p style={{ margin: '6px 0 0', fontSize: '13px', color: 'var(--text-secondary)' }}>Daftarkan cabang, konter, atau gudang</p>
               </div>
-              <button
-                onClick={() => { setShowAddModal(false); setError(''); setForm({ code: '', name: '', address: '', city: '' }); }}
-                style={{ background: 'var(--bg-hover)', border: 'none', borderRadius: '10px', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '20px', width: '36px', height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-              >×</button>
+              <button onClick={() => { setShowAddModal(false); setError(''); }} style={{ background: 'var(--bg-hover)', border: 'none', borderRadius: '10px', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '20px', width: '36px', height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
             </div>
-
-            {error && (
-              <div style={{ background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '10px', padding: '12px 16px', marginBottom: '20px', color: '#f87171', fontSize: '14px' }}>
-                ⚠️ {error}
-              </div>
-            )}
-
-            {/* Form */}
-            <form onSubmit={handleAdd} style={{ padding: '0 32px 32px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
-              {/* Section Header */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '4px' }}>
-                <div style={{ width: '3px', height: '18px', background: '#8b5cf6', borderRadius: '2px' }} />
-                <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1.2px', color: '#8b5cf6' }}>Informasi Cabang</span>
-              </div>
-
-              {/* Kode Cabang */}
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                  Kode Cabang <span style={{ color: '#ef4444' }}>*</span>
-                </label>
-                <input
-                  style={{ background: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '10px 14px', color: 'var(--text-primary)', fontSize: '14px', width: '100%', boxSizing: 'border-box', display: 'block', outline: 'none', fontFamily: 'monospace', letterSpacing: '1px', textTransform: 'uppercase', transition: 'border-color 0.2s' }}
-                  placeholder="Contoh: JKT-01, BGR-02"
-                  value={form.code}
-                  onChange={e => setForm(p => ({ ...p, code: e.target.value.toUpperCase() }))}
-                  required
-                />
-              </div>
-
-              {/* Nama Cabang */}
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                  Nama Cabang <span style={{ color: '#ef4444' }}>*</span>
-                </label>
-                <input
-                  style={{ background: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '10px 14px', color: 'var(--text-primary)', fontSize: '14px', width: '100%', boxSizing: 'border-box', display: 'block', outline: 'none', fontFamily: 'inherit', transition: 'border-color 0.2s' }}
-                  placeholder="Contoh: Cabang Sudirman"
-                  value={form.name}
-                  onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
-                  required
-                />
-              </div>
-
-              {/* Kota */}
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                  Kota
-                </label>
-                <input
-                  style={{ background: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '10px 14px', color: 'var(--text-primary)', fontSize: '14px', width: '100%', boxSizing: 'border-box', display: 'block', outline: 'none', fontFamily: 'inherit', transition: 'border-color 0.2s' }}
-                  placeholder="Contoh: Jakarta"
-                  value={form.city}
-                  onChange={e => setForm(p => ({ ...p, city: e.target.value }))}
-                />
-              </div>
-
-              {/* Alamat */}
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                  Alamat Lengkap
-                </label>
-                <textarea
-                  style={{ background: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '10px 14px', color: 'var(--text-primary)', fontSize: '14px', width: '100%', boxSizing: 'border-box', display: 'block', outline: 'none', fontFamily: 'inherit', resize: 'vertical', minHeight: '90px', transition: 'border-color 0.2s' }}
-                  placeholder="Masukkan alamat lengkap cabang..."
-                  value={form.address}
-                  onChange={e => setForm(p => ({ ...p, address: e.target.value }))}
-                  rows={3}
-                />
-              </div>
-
-              {/* Buttons */}
-              <div style={{ display: 'flex', gap: '12px', paddingTop: '8px', borderTop: '1px solid var(--border-color)' }}>
-                <button
-                  type="button"
-                  onClick={() => { setShowAddModal(false); setError(''); setForm({ code: '', name: '', address: '', city: '' }); }}
-                  style={{ flex: 1, padding: '14px', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '12px', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '15px', fontWeight: 600, fontFamily: 'inherit', transition: 'all 0.2s' }}
-                >
-                  Batal
-                </button>
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  style={{ flex: 2, padding: '14px', background: submitting ? 'rgba(139,92,246,0.4)' : 'linear-gradient(135deg, #7c3aed, #6d28d9)', border: 'none', borderRadius: '12px', color: 'white', cursor: submitting ? 'not-allowed' : 'pointer', fontSize: '15px', fontWeight: 700, boxShadow: submitting ? 'none' : '0 4px 14px rgba(109,40,217,0.4)', fontFamily: 'inherit', transition: 'all 0.2s' }}
-                >
-                  {submitting ? 'Menyimpan...' : '✓ Simpan Cabang'}
-                </button>
-              </div>
-            </form>
+            <div style={{ padding: '20px 0 0' }}>
+              <BranchForm data={form} setData={setForm} onSubmit={handleAdd} isEdit={false} />
+            </div>
           </div>
         </div>
       )}
 
-      {/* Edit Branch Modal */}
+      {/* Edit Modal */}
       {showEditModal && (
-        <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          zIndex: 1000, padding: '20px', backdropFilter: 'blur(6px)'
-        }}>
-          <div style={{
-            width: '100%', maxWidth: '460px',
-            background: 'var(--bg-surface-opaque)',
-            border: '1px solid var(--border-color)', borderRadius: '24px',
-            boxShadow: '0 32px 64px rgba(0,0,0,0.25)'
-          }}>
-            {/* Modal Header */}
-            <div style={{ padding: '28px 32px 24px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px', backdropFilter: 'blur(6px)', overflowY: 'auto' }}>
+          <div style={{ width: '100%', maxWidth: '520px', background: 'var(--bg-surface-opaque)', border: '1px solid var(--border-color)', borderRadius: '24px', boxShadow: '0 32px 64px rgba(0,0,0,0.25)', marginTop: 'auto', marginBottom: 'auto' }}>
+            <div style={{ padding: '28px 32px 20px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div>
-                <h2 style={{ margin: 0, fontSize: '22px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.3px' }}>Edit Cabang</h2>
+                <h2 style={{ margin: 0, fontSize: '22px', fontWeight: 800, color: 'var(--text-primary)' }}>Edit Cabang</h2>
                 <p style={{ margin: '6px 0 0', fontSize: '13px', color: 'var(--text-secondary)' }}>Ubah data cabang atau outlet</p>
               </div>
-              <button
-                onClick={() => setShowEditModal(false)}
-                style={{ background: 'var(--bg-hover)', border: 'none', borderRadius: '10px', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '20px', width: '36px', height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-              >×</button>
+              <button onClick={() => { setShowEditModal(false); setError(''); }} style={{ background: 'var(--bg-hover)', border: 'none', borderRadius: '10px', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '20px', width: '36px', height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
             </div>
-
-            {error && (
-              <div style={{ background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '10px', padding: '12px 16px', marginBottom: '20px', color: '#f87171', fontSize: '14px' }}>
-                ⚠️ {error}
-              </div>
-            )}
-
-            {/* Form */}
-            <form onSubmit={handleEditSubmit} style={{ padding: '0 32px 32px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
-              {/* Section Header */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '4px' }}>
-                <div style={{ width: '3px', height: '18px', background: '#3b82f6', borderRadius: '2px' }} />
-                <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1.2px', color: '#3b82f6' }}>Informasi Cabang</span>
-              </div>
-
-              {/* Kode Cabang */}
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                  Kode Cabang <span style={{ color: '#ef4444' }}>*</span>
-                </label>
-                <input
-                  style={{ background: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '10px 14px', color: 'var(--text-primary)', fontSize: '14px', width: '100%', boxSizing: 'border-box', display: 'block', outline: 'none', fontFamily: 'monospace', letterSpacing: '1px', textTransform: 'uppercase', transition: 'border-color 0.2s' }}
-                  placeholder="Contoh: JKT-01, BGR-02"
-                  value={editForm.code}
-                  onChange={e => setEditForm(p => ({ ...p, code: e.target.value.toUpperCase() }))}
-                  required
-                />
-              </div>
-
-              {/* Nama Cabang */}
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                  Nama Cabang <span style={{ color: '#ef4444' }}>*</span>
-                </label>
-                <input
-                  style={{ background: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '10px 14px', color: 'var(--text-primary)', fontSize: '14px', width: '100%', boxSizing: 'border-box', display: 'block', outline: 'none', fontFamily: 'inherit', transition: 'border-color 0.2s' }}
-                  placeholder="Contoh: Cabang Sudirman"
-                  value={editForm.name}
-                  onChange={e => setEditForm(p => ({ ...p, name: e.target.value }))}
-                  required
-                />
-              </div>
-
-              {/* Kota */}
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                  Kota
-                </label>
-                <input
-                  style={{ background: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '10px 14px', color: 'var(--text-primary)', fontSize: '14px', width: '100%', boxSizing: 'border-box', display: 'block', outline: 'none', fontFamily: 'inherit', transition: 'border-color 0.2s' }}
-                  placeholder="Contoh: Jakarta"
-                  value={editForm.city}
-                  onChange={e => setEditForm(p => ({ ...p, city: e.target.value }))}
-                />
-              </div>
-
-              {/* Alamat */}
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                  Alamat Lengkap
-                </label>
-                <textarea
-                  style={{ background: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '10px 14px', color: 'var(--text-primary)', fontSize: '14px', width: '100%', boxSizing: 'border-box', display: 'block', outline: 'none', fontFamily: 'inherit', resize: 'vertical', minHeight: '90px', transition: 'border-color 0.2s' }}
-                  placeholder="Masukkan alamat lengkap cabang..."
-                  value={editForm.address}
-                  onChange={e => setEditForm(p => ({ ...p, address: e.target.value }))}
-                  rows={3}
-                />
-              </div>
-              
-              {/* Status */}
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                  Status
-                </label>
-                <select
-                  style={{ background: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '10px 14px', color: 'var(--text-primary)', fontSize: '14px', width: '100%', boxSizing: 'border-box', display: 'block', outline: 'none', fontFamily: 'inherit', transition: 'border-color 0.2s' }}
-                  value={editForm.status}
-                  onChange={e => setEditForm(p => ({ ...p, status: e.target.value }))}
-                >
-                  <option value="Active" style={{ background: 'var(--bg-surface-opaque)', color: 'var(--text-primary)' }}>Aktif</option>
-                  <option value="Inactive" style={{ background: 'var(--bg-surface-opaque)', color: 'var(--text-primary)' }}>Nonaktif</option>
-                </select>
-              </div>
-
-              {/* Buttons */}
-              <div style={{ display: 'flex', gap: '12px', paddingTop: '8px', borderTop: '1px solid var(--border-color)' }}>
-                <button
-                  type="button"
-                  onClick={() => setShowEditModal(false)}
-                  style={{ flex: 1, padding: '14px', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '12px', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '15px', fontWeight: 600, fontFamily: 'inherit', transition: 'all 0.2s' }}
-                >
-                  Batal
-                </button>
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  style={{ flex: 2, padding: '14px', background: submitting ? 'rgba(59,130,246,0.4)' : 'linear-gradient(135deg, #3b82f6, #2563eb)', border: 'none', borderRadius: '12px', color: 'white', cursor: submitting ? 'not-allowed' : 'pointer', fontSize: '15px', fontWeight: 700, boxShadow: submitting ? 'none' : '0 4px 14px rgba(37,99,235,0.4)', fontFamily: 'inherit', transition: 'all 0.2s' }}
-                >
-                  {submitting ? 'Menyimpan...' : '✓ Simpan Perubahan'}
-                </button>
-              </div>
-            </form>
+            <div style={{ padding: '20px 0 0' }}>
+              <BranchForm data={editForm} setData={setEditForm} onSubmit={handleEditSubmit} isEdit={true} />
+            </div>
           </div>
         </div>
       )}
@@ -512,4 +357,3 @@ function BranchManagement({ setView }) {
 }
 
 export default BranchManagement;
-

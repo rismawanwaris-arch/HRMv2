@@ -25,14 +25,18 @@ const buildQueryString = (params) => {
  */
 async function fetchApi(endpoint, options = {}) {
   const url = `${API_BASE}${endpoint}`;
-  console.log('fetchApi request:', url);
-  
-  // Set default headers if not uploading files (FormData)
+
+  const token = localStorage.getItem('auth_token');
+  const authHeader = token ? { Authorization: `Bearer ${token}` } : {};
+
   if (!(options.body instanceof FormData)) {
     options.headers = {
       'Content-Type': 'application/json',
+      ...authHeader,
       ...options.headers,
     };
+  } else {
+    options.headers = { ...authHeader, ...options.headers };
   }
 
   const response = await fetch(url, options);
@@ -371,6 +375,34 @@ export const portalTrainingApi = {
    * @returns {Promise<Object>} Resolves to score and evaluation status.
    */
   submitEvaluation: (data) => api.post('/training-test/submit', data),
+};
+
+/**
+ * --- SETTINGS API ---
+ */
+export const settingsApi = {
+  getSettings: () => api.get('/settings'),
+  updateSettings: (data) => api.put('/settings', data),
+  getPenaltyRules: () => api.get('/settings/penalty-rules'),
+  createPenaltyRule: (data) => api.post('/settings/penalty-rules', data),
+  updatePenaltyRule: (id, data) => api.put(`/settings/penalty-rules/${id}`, data),
+  deletePenaltyRule: (id) => api.delete(`/settings/penalty-rules/${id}`),
+};
+
+/**
+ * --- STAFF API (tabel employees terpisah) ---
+ */
+export const staffApi = {
+  getAll: (params) => {
+    const qs = new URLSearchParams(params || {}).toString();
+    return api.get(`/staff${qs ? '?' + qs : ''}`);
+  },
+  getById: (id) => api.get(`/staff/${id}`),
+  create: (data) => api.post('/staff', data),
+  update: (id, data) => api.put(`/staff/${id}`, data),
+  deactivate: (id, data) => api.put(`/staff/${id}/status`, data),
+  promote: (candidateId, data) => api.post(`/staff/promote/${candidateId}`, data),
+  getHiredCandidates: () => api.get('/staff/hired-candidates'),
 };
 
 /**

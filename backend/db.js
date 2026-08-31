@@ -396,6 +396,111 @@ async function initDb() {
 
       await migrateFieldEncryption();
 
+      // Branch attribute migrations
+      await query.run("ALTER TABLE branches ADD COLUMN location_type TEXT DEFAULT 'Konter'").catch(e => {
+        if (!e.message.includes('duplicate column')) console.error('Migration error (location_type):', e.message);
+      });
+      await query.run('ALTER TABLE branches ADD COLUMN has_petshop INTEGER DEFAULT 0').catch(e => {
+        if (!e.message.includes('duplicate column')) console.error('Migration error (has_petshop):', e.message);
+      });
+      await query.run('ALTER TABLE branches ADD COLUMN rent_amount REAL DEFAULT 0').catch(e => {
+        if (!e.message.includes('duplicate column')) console.error('Migration error (rent_amount):', e.message);
+      });
+
+      // System Settings (key-value store for configurable parameters)
+      await query.run(`
+        CREATE TABLE IF NOT EXISTS system_settings (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+      const settingsCount = await query.get('SELECT COUNT(*) as count FROM system_settings');
+      if (settingsCount.count === 0) {
+        for (const [key, value] of [
+          ['payroll_period_start_day', '29'],
+          ['payroll_period_end_day', '28'],
+          ['working_days_per_month', '25'],
+        ]) {
+          await query.run('INSERT INTO system_settings (key, value) VALUES (?, ?)', [key, value]);
+        }
+      }
+
+      // Late Penalty Rules (ASBEN — configurable denda keterlambatan)
+      await query.run(`
+        CREATE TABLE IF NOT EXISTS late_penalty_rules (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          min_count INTEGER NOT NULL,
+          max_count INTEGER,
+          penalty_per_occurrence INTEGER NOT NULL DEFAULT 0,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+      const penaltyCount = await query.get('SELECT COUNT(*) as count FROM late_penalty_rules');
+      if (penaltyCount.count === 0) {
+        await query.run('INSERT INTO late_penalty_rules (min_count, max_count, penalty_per_occurrence) VALUES (?, ?, ?)', [1, 3, 0]);
+        await query.run('INSERT INTO late_penalty_rules (min_count, max_count, penalty_per_occurrence) VALUES (?, ?, ?)', [4, 5, 25000]);
+        await query.run('INSERT INTO late_penalty_rules (min_count, max_count, penalty_per_occurrence) VALUES (?, ?, ?)', [6, null, 50000]);
+      }
+
+      // Employees table (separate from candidates — full HR employee records)
+      await query.run(`
+        CREATE TABLE IF NOT EXISTS employees (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          candidate_id INTEGER REFERENCES candidates(id),
+          name TEXT NOT NULL,
+          nik TEXT,
+          nik_bidx TEXT,
+          gender TEXT,
+          birth_place TEXT,
+          birth_date TEXT,
+          religion TEXT,
+          marital_status TEXT,
+          dependents INTEGER DEFAULT 0,
+          blood_type TEXT,
+          phone TEXT,
+          email TEXT,
+          address_ktp TEXT,
+          address_domicile TEXT,
+          emergency_contact_1 TEXT,
+          emergency_contact_2 TEXT,
+          father_name TEXT,
+          mother_name TEXT,
+          spouse_name TEXT,
+          children_data TEXT,
+          education_level TEXT,
+          education_institution TEXT,
+          education_major TEXT,
+          education_years TEXT,
+          education_grade TEXT,
+          work_experience TEXT,
+          npwp TEXT,
+          bank_name TEXT,
+          bank_account TEXT,
+          bpjs_health TEXT,
+          bpjs_employment TEXT,
+          bpjs_active TEXT DEFAULT 'Tidak Aktif',
+          uniform_size TEXT,
+          health_history TEXT,
+          allergies TEXT,
+          medications TEXT,
+          color_blind_test TEXT,
+          position TEXT,
+          employee_type TEXT DEFAULT 'Frontliner',
+          contract_type TEXT DEFAULT 'PKWT',
+          branch_id INTEGER REFERENCES branches(id),
+          hire_date TEXT,
+          salary REAL DEFAULT 0,
+          allowance REAL DEFAULT 0,
+          status TEXT DEFAULT 'Active',
+          resign_date TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+      await query.run('CREATE UNIQUE INDEX IF NOT EXISTS idx_employees_nik_bidx ON employees(nik_bidx)').catch(() => {});
+      await migrateEmployeeEncryption();
+
       // Migrate: add missing columns for onboarding and stage7_offering (robustness for older DBs)
       const onboardingCols = [
         "day_30_status TEXT DEFAULT 'Pending'", "day_30_score REAL DEFAULT 0", "day_30_notes TEXT",
@@ -509,6 +614,39 @@ async function migrateFieldEncryption() {
     }
   }
   if (migrated) console.log(`[db] Encrypted sensitive fields for ${migrated} existing candidate row(s).`);
+}
+
+async function migrateEmployeeEncryption() {
+  const fieldCrypto = require('./utils/fieldCrypto');
+  if (!fieldCrypto.isEnabled()) return;
+
+  const cols = fieldCrypto.ENCRYPTED_COLUMNS;
+  const rows = await query.all(`SELECT id, nik_bidx, ${cols.join(', ')} FROM employees`);
+  let migrated = 0;
+
+  for (const row of rows) {
+    const sets = [];
+    const params = [];
+    for (const col of cols) {
+      const current = row[col];
+      if (current == null || current === '') continue;
+      const desired = fieldCrypto.encrypt(fieldCrypto.decrypt(current));
+      if (desired !== current) { sets.push(`${col} = ?`); params.push(desired); }
+    }
+    if (row.nik && !row.nik_bidx) {
+      const bidx = fieldCrypto.blindIndex(fieldCrypto.decrypt(row.nik));
+      if (bidx) { sets.push('nik_bidx = ?'); params.push(bidx); }
+    }
+    if (!sets.length) continue;
+    params.push(row.id);
+    try {
+      await query.run(`UPDATE employees SET ${sets.join(', ')} WHERE id = ?`, params);
+      migrated++;
+    } catch (e) {
+      console.error(`[db] Encryption migration failed for employee ${row.id}:`, e.message);
+    }
+  }
+  if (migrated) console.log(`[db] Encrypted sensitive fields for ${migrated} existing employee row(s).`);
 }
 
 async function seedQuestions() {
@@ -788,5 +926,6 @@ module.exports = {
   initDb,
   db,
   dataDir,
-  uploadsDir
+  uploadsDir,
+  migrateEmployeeEncryption,
 };

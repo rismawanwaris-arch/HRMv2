@@ -9,6 +9,8 @@ import TrainingQuestionBank from './views/TrainingQuestionBank';
 import TrainingTestPortal from './views/TrainingTestPortal';
 import BranchManagement from './views/BranchManagement';
 import StageManagement from './views/StageManagement';
+import EmployeeManagement from './views/EmployeeManagement';
+import Settings from './views/Settings';
 import Login from './views/Login';
 import API_BASE from './config';
 
@@ -130,6 +132,8 @@ function App() {
           />
         );
       case 'employees':
+        return <EmployeeManagement />;
+      case 'employee-legacy':
         return (
           <EmployeeData
             onSelectCandidate={(id) => {
@@ -148,6 +152,8 @@ function App() {
         );
       case 'branches':
         return <BranchManagement setView={setView} />;
+      case 'settings':
+        return <Settings />;
       case 'pipeline-settings':
         return <StageManagement setView={setView} />;
       case 'questions':
@@ -216,6 +222,13 @@ function App() {
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px', color: '#f59e0b' }}><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></svg>
               Cabang Outlet
+            </li>
+            <li
+              className={`sidebar-item ${view === 'settings' ? 'active' : ''}`}
+              onClick={() => setView('settings')}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px', color: '#10b981' }}><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9z"></path></svg>
+              Pengaturan Sistem
             </li>
             <li
               className="sidebar-item"
