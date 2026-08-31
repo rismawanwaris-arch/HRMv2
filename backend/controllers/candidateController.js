@@ -1,6 +1,7 @@
 const { query, uploadsDir } = require('../db');
 const { generateAccessCode, getCandidateFolderName, upload } = require('../utils/helpers');
 const { CANDIDATE_FIELDS, buildInsert, buildUpdate } = require('../utils/candidateFields');
+const { decryptRow, blindIndex } = require('../utils/fieldCrypto');
 const fs = require('fs');
 const path = require('path');
 
@@ -27,12 +28,14 @@ exports.getCandidates = async (req, res) => {
       params.push(parseInt(String(stage), 10));
     }
     if (search) {
-      sql += ' AND (name LIKE ? OR nik LIKE ?)';
-      params.push(`%${search}%`, `%${search}%`);
+      // NIK may be encrypted at rest, so match it by exact blind index as well
+      // as the legacy plaintext LIKE.
+      sql += ' AND (name LIKE ? OR nik LIKE ? OR nik_bidx = ?)';
+      params.push(`%${search}%`, `%${search}%`, blindIndex(search));
     }
     sql += ' ORDER BY id DESC';
     const candidatesList = await query.all(sql, params);
-    res.json({ success: true, data: candidatesList });
+    res.json({ success: true, data: candidatesList.map(decryptRow) });
   } catch (error) {
     console.error('API Error (candidates list):', error);
     res.status(500).json({ success: false, message: 'Server error retrieving candidates' });
@@ -96,7 +99,7 @@ exports.addCandidate = async (req, res) => {
     });
   } catch (error) {
     console.error('API Error (add candidate):', error);
-    if (error instanceof Error && error.message.includes('UNIQUE constraint failed: candidates.nik')) {
+    if (error instanceof Error && /UNIQUE constraint failed.*(candidates\.nik|nik_bidx)/.test(error.message)) {
       return res.status(400).json({ success: false, message: 'NIK sudah terdaftar dalam sistem.' });
     }
     res.status(500).json({ success: false, message: 'Server error saving candidate' });
@@ -113,6 +116,8 @@ exports.getCandidateDetail = async (req, res) => {
     const candidateId = parseInt(String(req.params.id), 10);
     const candidate = await query.get('SELECT * FROM candidates WHERE id = ?', [candidateId]);
     if (!candidate) return res.status(404).json({ success: false, message: 'Kandidat tidak ditemukan' });
+    decryptRow(candidate);
+    delete candidate.nik_bidx;
 
     const s1 = await query.get('SELECT * FROM stage1_admin WHERE candidate_id = ?', [candidateId]);
     const s2 = await query.get('SELECT * FROM stage2_written_test WHERE candidate_id = ?', [candidateId]);

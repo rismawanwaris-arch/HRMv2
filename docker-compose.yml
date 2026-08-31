@@ -22,3 +22,5 @@ services:
       - TRUST_PROXY=${TRUST_PROXY:-}
       # Optional: password for the auto-seeded admin account on first run.
       - ADMIN_INITIAL_PASSWORD=${ADMIN_INITIAL_PASSWORD:-}
+      # Recommended: enables at-rest encryption of sensitive PII columns.
+      - DATA_ENCRYPTION_KEY=${DATA_ENCRYPTION_KEY:-}

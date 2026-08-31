@@ -6,12 +6,17 @@
  * value arrays) in five places; keep new fields in sync here instead.
  */
 
+const { encrypt, blindIndex } = require('./fieldCrypto');
+
 // Most string columns: treat empty/omitted as NULL (matches the old `x || null`).
 const orNull = (b, key) => b[key] || null;
+// Encrypted-at-rest columns go through encrypt() on the way in.
+const orNullEnc = (b, key) => encrypt(b[key] || null);
 
 const FIELD_GETTERS = {
   name: (b) => (typeof b.name === 'string' ? b.name.trim() : b.name),
-  nik: (b) => orNull(b, 'nik'),
+  nik: (b) => orNullEnc(b, 'nik'),
+  nik_bidx: (b) => blindIndex(b.nik),
   email: (b) => orNull(b, 'email'),
   phone: (b) => orNull(b, 'phone'),
   gender: (b) => orNull(b, 'gender'),
@@ -38,16 +43,16 @@ const FIELD_GETTERS = {
   education_years: (b) => orNull(b, 'education_years'),
   education_grade: (b) => orNull(b, 'education_grade'),
   work_experience: (b) => orNull(b, 'work_experience'),
-  npwp: (b) => orNull(b, 'npwp'),
-  bank_account: (b) => orNull(b, 'bank_account'),
+  npwp: (b) => orNullEnc(b, 'npwp'),
+  bank_account: (b) => orNullEnc(b, 'bank_account'),
   bank_name: (b) => orNull(b, 'bank_name'),
-  bpjs_health: (b) => orNull(b, 'bpjs_health'),
-  bpjs_employment: (b) => orNull(b, 'bpjs_employment'),
+  bpjs_health: (b) => orNullEnc(b, 'bpjs_health'),
+  bpjs_employment: (b) => orNullEnc(b, 'bpjs_employment'),
   bpjs_active: (b) => b.bpjs_active || 'Tidak Aktif',
   uniform_size: (b) => orNull(b, 'uniform_size'),
-  health_history: (b) => orNull(b, 'health_history'),
-  allergies: (b) => orNull(b, 'allergies'),
-  medications: (b) => orNull(b, 'medications'),
+  health_history: (b) => orNullEnc(b, 'health_history'),
+  allergies: (b) => orNullEnc(b, 'allergies'),
+  medications: (b) => orNullEnc(b, 'medications'),
   color_blind_test: (b) => orNull(b, 'color_blind_test'),
   branch_id: (b) => orNull(b, 'branch_id'),
   hire_date: (b) => orNull(b, 'hire_date'),
@@ -55,7 +60,7 @@ const FIELD_GETTERS = {
 
 // Order matters: these arrays drive both the SQL column list and the value list.
 const CANDIDATE_FIELDS = [
-  'name', 'nik', 'email', 'phone', 'gender', 'birth_place', 'birth_date', 'religion',
+  'name', 'nik', 'nik_bidx', 'email', 'phone', 'gender', 'birth_place', 'birth_date', 'religion',
   'marital_status', 'dependents', 'blood_type', 'height', 'weight', 'physical_condition',
   'address_ktp', 'address_domicile', 'emergency_contact_1', 'emergency_contact_2',
   'father_name', 'mother_name', 'spouse_name', 'children_data',
@@ -65,7 +70,7 @@ const CANDIDATE_FIELDS = [
 ];
 
 const EMPLOYEE_FIELDS = [
-  'name', 'nik', 'gender', 'birth_place', 'birth_date', 'religion',
+  'name', 'nik', 'nik_bidx', 'gender', 'birth_place', 'birth_date', 'religion',
   'marital_status', 'dependents', 'blood_type',
   'phone', 'email', 'address_ktp', 'address_domicile',
   'emergency_contact_1', 'emergency_contact_2',

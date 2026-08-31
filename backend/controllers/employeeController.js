@@ -3,6 +3,7 @@ const fs = require('fs');
 const { query } = require('../db');
 const { generateAccessCode } = require('../utils/helpers');
 const { EMPLOYEE_FIELDS, buildInsert, buildUpdate } = require('../utils/candidateFields');
+const { decryptRow, blindIndex } = require('../utils/fieldCrypto');
 
 /**
  * Get list of Hired Employees (Data Karyawan)
@@ -27,8 +28,8 @@ exports.getEmployees = async (req, res) => {
     const params = [];
 
     if (search) {
-      sql += ' AND (c.name LIKE ? OR c.nik LIKE ? OR c.phone LIKE ? OR b.name LIKE ?)';
-      params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
+      sql += ' AND (c.name LIKE ? OR c.nik LIKE ? OR c.nik_bidx = ? OR c.phone LIKE ? OR b.name LIKE ?)';
+      params.push(`%${search}%`, `%${search}%`, blindIndex(search), `%${search}%`, `%${search}%`);
     }
     if (contract_type) {
       sql += ' AND s7.contract_type = ?';
@@ -42,6 +43,7 @@ exports.getEmployees = async (req, res) => {
     sql += ' ORDER BY c.id DESC';
 
     const employees = await query.all(sql, params);
+    for (const e of employees) { decryptRow(e); delete e.nik_bidx; }
     res.json({ success: true, data: employees });
   } catch (error) {
     console.error('API Error (employees list):', error);
@@ -98,7 +100,7 @@ exports.addEmployeeManual = async (req, res) => {
       candidateId
     });
   } catch (error) {
-    if (error.message && error.message.includes('UNIQUE constraint failed: candidates.nik')) {
+    if (error.message && /UNIQUE constraint failed.*(candidates\.nik|nik_bidx)/.test(error.message)) {
       return res.status(400).json({ success: false, message: 'NIK sudah terdaftar di sistem.' });
     }
     console.error('API Error (manual employee):', error);
@@ -146,7 +148,7 @@ exports.updateEmployee = async (req, res) => {
 
     res.json({ success: true, message: 'Data karyawan berhasil diperbarui.' });
   } catch (error) {
-    if (error.message && error.message.includes('UNIQUE constraint failed: candidates.nik')) {
+    if (error.message && /UNIQUE constraint failed.*(candidates\.nik|nik_bidx)/.test(error.message)) {
       return res.status(400).json({ success: false, message: 'NIK sudah terdaftar di sistem.' });
     }
     console.error('API Error (update employee):', error);

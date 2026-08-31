@@ -388,6 +388,13 @@ async function initDb() {
       await query.run('ALTER TABLE candidates ADD COLUMN is_manual_entry INTEGER DEFAULT 0').catch(e => {
         if (!e.message.includes('duplicate column')) console.error('Migration error (is_manual_entry):', e.message);
       });
+      // Blind index for the (possibly encrypted) NIK: keeps uniqueness + exact lookup.
+      await query.run('ALTER TABLE candidates ADD COLUMN nik_bidx TEXT').catch(e => {
+        if (!e.message.includes('duplicate column')) console.error('Migration error (nik_bidx):', e.message);
+      });
+      await query.run('CREATE UNIQUE INDEX IF NOT EXISTS idx_candidates_nik_bidx ON candidates(nik_bidx)').catch(() => {});
+
+      await migrateFieldEncryption();
 
       // Migrate: add missing columns for onboarding and stage7_offering (robustness for older DBs)
       const onboardingCols = [
@@ -464,6 +471,44 @@ async function initDb() {
   } catch (error) {
     console.error('Database initialization error:', error);
   }
+}
+
+/**
+ * When DATA_ENCRYPTION_KEY is configured, encrypt any still-plaintext values in
+ * the sensitive candidate columns and backfill the NIK blind index. Idempotent:
+ * after the first run every value is already encrypted, so no rows are written.
+ */
+async function migrateFieldEncryption() {
+  const fieldCrypto = require('./utils/fieldCrypto');
+  if (!fieldCrypto.isEnabled()) return;
+
+  const cols = fieldCrypto.ENCRYPTED_COLUMNS;
+  const rows = await query.all(`SELECT id, nik_bidx, ${cols.join(', ')} FROM candidates`);
+  let migrated = 0;
+
+  for (const row of rows) {
+    const sets = [];
+    const params = [];
+    for (const col of cols) {
+      const current = row[col];
+      if (current == null || current === '') continue;
+      const desired = fieldCrypto.encrypt(fieldCrypto.decrypt(current));
+      if (desired !== current) { sets.push(`${col} = ?`); params.push(desired); }
+    }
+    if (row.nik && !row.nik_bidx) {
+      const bidx = fieldCrypto.blindIndex(fieldCrypto.decrypt(row.nik));
+      if (bidx) { sets.push('nik_bidx = ?'); params.push(bidx); }
+    }
+    if (!sets.length) continue;
+    params.push(row.id);
+    try {
+      await query.run(`UPDATE candidates SET ${sets.join(', ')} WHERE id = ?`, params);
+      migrated++;
+    } catch (e) {
+      console.error(`[db] Encryption migration failed for candidate ${row.id}:`, e.message);
+    }
+  }
+  if (migrated) console.log(`[db] Encrypted sensitive fields for ${migrated} existing candidate row(s).`);
 }
 
 async function seedQuestions() {
