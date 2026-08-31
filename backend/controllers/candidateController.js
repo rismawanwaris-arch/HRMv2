@@ -67,6 +67,9 @@ exports.addCandidate = async (req, res) => {
         retries++;
       }
     }
+    if (!isUnique) {
+      return res.status(500).json({ success: false, message: 'Gagal membuat kode akses unik. Coba lagi.' });
+    }
 
     const firstStage = await query.get('SELECT id FROM recruitment_stages WHERE is_active = 1 ORDER BY order_num ASC LIMIT 1');
     const initialStageId = firstStage ? firstStage.id : 1;

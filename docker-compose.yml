@@ -8,7 +8,17 @@ services:
     volumes:
       # Data & Berkas Upload Persisten - Terlihat & Mudah Di-backup dari Files ZimaOS
       - ./data:/app/data
+    # Compose automatically loads a sibling .env file for ${VAR} interpolation below.
     environment:
       - NODE_ENV=production
       - PORT=5000
       - DATA_DIR=/app/data
+      # JWT_SECRET is required in production — set it in .env (see .env.example).
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env}
+      # Optional: comma-separated list of allowed CORS origins. Leave unset when
+      # the frontend is served from this same server.
+      - CORS_ORIGIN=${CORS_ORIGIN:-}
+      # Optional: number of reverse-proxy hops (Tailscale / ZimaOS ingress).
+      - TRUST_PROXY=${TRUST_PROXY:-}
+      # Optional: password for the auto-seeded admin account on first run.
+      - ADMIN_INITIAL_PASSWORD=${ADMIN_INITIAL_PASSWORD:-}

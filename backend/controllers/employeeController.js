@@ -1,6 +1,7 @@
 const xlsx = require('xlsx');
 const fs = require('fs');
 const { query } = require('../db');
+const { generateAccessCode } = require('../utils/helpers');
 
 /**
  * Get list of Hired Employees (Data Karyawan)
@@ -73,9 +74,7 @@ exports.addEmployeeManual = async (req, res) => {
     let accessCode;
     let codeExists = true;
     while (codeExists) {
-      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-      accessCode = 'MAN-';
-      for (let i = 0; i < 6; i++) accessCode += chars.charAt(Math.floor(Math.random() * chars.length));
+      accessCode = generateAccessCode('MAN-');
       const existing = await query.get('SELECT id FROM candidates WHERE access_code = ?', [accessCode]);
       codeExists = !!existing;
     }
@@ -313,9 +312,7 @@ exports.importExcel = async (req, res) => {
         let accessCode;
         let codeExists = true;
         while (codeExists) {
-          const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-          accessCode = 'MAN-';
-          for (let j = 0; j < 6; j++) accessCode += chars.charAt(Math.floor(Math.random() * chars.length));
+          accessCode = generateAccessCode('MAN-');
           const existing = await query.get('SELECT id FROM candidates WHERE access_code = ?', [accessCode]);
           codeExists = !!existing;
         }

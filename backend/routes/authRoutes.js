@@ -1,8 +1,19 @@
 const express = require('express');
+const rateLimit = require('express-rate-limit');
 const router = express.Router();
 const authController = require('../controllers/authController');
+const { authenticateToken } = require('../middleware/auth');
 
-router.post('/login', authController.login);
-router.post('/change-password', authController.changePassword);
+// Throttle credential-guessing: 10 attempts per IP per 15 minutes.
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Terlalu banyak percobaan login. Coba lagi dalam 15 menit.' }
+});
+
+router.post('/login', loginLimiter, authController.login);
+router.post('/change-password', authenticateToken, authController.changePassword);
 
 module.exports = router;

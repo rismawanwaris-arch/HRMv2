@@ -122,13 +122,13 @@ function TrainingTestPortal({ onExit }) {
 
           <form onSubmit={handleValidateCode} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
             <div className="form-group">
-              <label>Kode Akses Kandidat (6 Karakter)</label>
+              <label>Kode Akses Kandidat</label>
               <input
                 type="text"
                 value={accessCode}
                 onChange={(e) => setAccessCode(e.target.value.toUpperCase())}
-                placeholder="Contoh: AZ8Y9P"
-                maxLength={6}
+                placeholder="Contoh: AZ8Y9P2K"
+                maxLength={12}
                 style={{ textAlign: 'center', letterSpacing: '4px', fontSize: '20px', fontWeight: 'bold', textTransform: 'uppercase' }}
                 required
               />
