@@ -68,6 +68,25 @@ async function initDb() {
       )
     `);
 
+    // 0a. Audit log (who changed what, via middleware/audit.js)
+    await query.run(`
+      CREATE TABLE IF NOT EXISTS audit_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        actor TEXT,
+        action TEXT NOT NULL,
+        entity_type TEXT,
+        entity_id INTEGER,
+        method TEXT,
+        path TEXT,
+        status_code INTEGER,
+        ip TEXT,
+        detail TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await query.run('CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at DESC)').catch(() => {});
+    await query.run('CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_log(entity_type, entity_id)').catch(() => {});
+
     // 0b. Recruitment Stages table
     await query.run(`
       CREATE TABLE IF NOT EXISTS recruitment_stages (

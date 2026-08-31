@@ -45,13 +45,15 @@ app.locals.dbReady = initDb()
 // --- API ENDPOINTS ---
 
 const { authenticateToken } = require('./middleware/auth');
+const { auditLog } = require('./middleware/audit');
 
 app.use('/api', require('./routes/authRoutes'));
 app.use('/api/dashboard', authenticateToken, require('./routes/dashboardRoutes'));
-app.use('/api/employees', authenticateToken, require('./routes/employeeRoutes'));
-app.use('/api/candidates', authenticateToken, require('./routes/candidateRoutes'));
-app.use('/api/stages', authenticateToken, require('./routes/stageRoutes'));
-app.use('/api/branches', authenticateToken, require('./routes/branchRoutes'));
+app.use('/api/audit-log', authenticateToken, require('./routes/auditRoutes'));
+app.use('/api/employees', authenticateToken, auditLog, require('./routes/employeeRoutes'));
+app.use('/api/candidates', authenticateToken, auditLog, require('./routes/candidateRoutes'));
+app.use('/api/stages', authenticateToken, auditLog, require('./routes/stageRoutes'));
+app.use('/api/branches', authenticateToken, auditLog, require('./routes/branchRoutes'));
 app.use('/api', require('./routes/testRoutes'));
 
 // --- SERVE FRONTEND STATIC FILES IN PRODUCTION ---

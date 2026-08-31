@@ -3,6 +3,7 @@ const rateLimit = require('express-rate-limit');
 const router = express.Router();
 const authController = require('../controllers/authController');
 const { authenticateToken } = require('../middleware/auth');
+const { auditLog } = require('../middleware/audit');
 
 // Throttle credential-guessing: 10 attempts per IP per 15 minutes.
 const loginLimiter = rateLimit({
@@ -18,6 +19,6 @@ const loginHandlers = process.env.NODE_ENV === 'test'
   : [loginLimiter, authController.login];
 
 router.post('/login', ...loginHandlers);
-router.post('/change-password', authenticateToken, authController.changePassword);
+router.post('/change-password', authenticateToken, auditLog, authController.changePassword);
 
 module.exports = router;
