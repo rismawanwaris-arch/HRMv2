@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+
+# Build output
+frontend/dist/
+dist/
+dist-ssr/
+
+# Runtime data (SQLite DB is created by initDb() on startup)
+*.db
+*.db-journal
+*.sqlite
+backend/uploads/
+data/
+
+# Environment
+.env
+.env.*
+*.local
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS / editor
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.suo
+*.sw?

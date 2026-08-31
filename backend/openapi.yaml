@@ -1,0 +1,452 @@
+openapi: 3.1.0
+info:
+  title: HRMv2 Recruitment & Employee Management API
+  description: API documentation for the Human Resource Management v2 portal, covering candidate tracking, pipeline configuration, outlet management, and testing portals.
+  version: 1.0.0
+servers:
+  - url: http://localhost:5001/api
+    description: Local development server
+security:
+  - BearerAuth: []
+paths:
+  /login:
+    post:
+      security: []
+      summary: Administrator login
+      description: Authenticate an administrator and return a JWT access token.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - username
+                - password
+              properties:
+                username:
+                  type: string
+                  example: admin
+                password:
+                  type: string
+                  example: admin123
+      responses:
+        '200':
+          description: Successful authentication
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  token:
+                    type: string
+                    example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        '401':
+          description: Invalid username or password
+
+  /change-password:
+    post:
+      summary: Change administrator password
+      description: Update the password of the currently authenticated administrator.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - oldPassword
+                - newPassword
+              properties:
+                oldPassword:
+                  type: string
+                  example: admin123
+                newPassword:
+                  type: string
+                  example: newadmin456
+      responses:
+        '200':
+          description: Password updated successfully
+        '400':
+          description: Incorrect current password
+
+  /dashboard/stats:
+    get:
+      summary: Get recruitment dashboard stats
+      description: Retrieve counts of candidates categorised by active status, hired status, and rejected status.
+      responses:
+        '200':
+          description: Statistics details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      total:
+                        type: integer
+                        example: 25
+                      active:
+                        type: integer
+                        example: 12
+                      hired:
+                        type: integer
+                        example: 5
+                      rejected:
+                        type: integer
+                        example: 8
+
+  /candidates:
+    get:
+      summary: Get candidate list
+      description: Retrieve and filter candidates currently in the recruitment pipeline.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [Active, Hired, Rejected]
+        - name: stage
+          in: query
+          required: false
+          schema:
+            type: integer
+            description: Filter by specific stage ID.
+        - name: search
+          in: query
+          required: false
+          schema:
+            type: string
+            description: Search filter matching candidate name or NIK.
+      responses:
+        '200':
+          description: Candidates retrieved successfully
+    post:
+      summary: Create new candidate profile
+      description: Registers a new candidate and assigns an automated exam access code.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+                  example: Wisnu Wardana
+                nik:
+                  type: string
+                  maxLength: 16
+                email:
+                  type: string
+                  format: email
+                phone:
+                  type: string
+      responses:
+        '201':
+          description: Candidate registered successfully
+
+  /candidates/{id}:
+    get:
+      summary: Retrieve candidate full profile details
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Profile, evaluations, and uploads returned
+        '404':
+          description: Candidate not found
+    put:
+      summary: Update candidate biodata fields
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Biodata updated successfully
+    delete:
+      summary: Delete candidate profile
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Candidate deleted
+
+  /candidates/{id}/documents:
+    get:
+      summary: List candidate documents
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Documents array
+    post:
+      summary: Upload new document attachment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+                - doc_type
+              properties:
+                file:
+                  type: string
+                  format: binary
+                doc_type:
+                  type: string
+                  enum: [cv, ktp, skck, ijazah, photo]
+      responses:
+        '200':
+          description: Document uploaded successfully
+
+  /candidates/{id}/stage/{stage_num}:
+    put:
+      summary: Save stage evaluation data and process pipeline progression
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: stage_num
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                passed:
+                  type: boolean
+                notes:
+                  type: string
+      responses:
+        '200':
+          description: Evaluation saved and transition processed
+
+  /employees:
+    get:
+      summary: List hired employees
+      parameters:
+        - name: search
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: branch_id
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Active employees list
+
+  /employees/manual:
+    post:
+      summary: Add pre-existing employee manually
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+                  example: Budi Utomo
+                contract_type:
+                  type: string
+                  enum: [PKWT, PKWTT]
+      responses:
+        '200':
+          description: Employee created successfully
+
+  /branches:
+    get:
+      summary: List registered outlet branches
+      responses:
+        '200':
+          description: Branches list
+    post:
+      summary: Add a new outlet branch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - code
+                - name
+              properties:
+                code:
+                  type: string
+                  example: JKT-01
+                name:
+                  type: string
+                  example: Sudirman Branch
+      responses:
+        '200':
+          description: Branch created
+
+  /branches/{id}:
+    put:
+      summary: Update branch details
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Branch details updated
+    delete:
+      summary: Delete branch
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Branch deleted
+
+  /stages:
+    get:
+      summary: List recruitment pipeline stages
+      responses:
+        '200':
+          description: Stages list
+    post:
+      summary: Create new custom recruitment stage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+                  example: Focus Group Discussion
+      responses:
+        '201':
+          description: Custom stage added
+
+  /stages/{id}:
+    put:
+      summary: Update recruitment stage configuration
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Stage updated
+    delete:
+      summary: Delete a custom recruitment stage
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Custom stage deleted
+
+  /stages/reorder:
+    post:
+      summary: Update sorting order of pipeline stages
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - stageIds
+              properties:
+                stageIds:
+                  type: array
+                  items:
+                    type: integer
+                  example: [1, 2, 4, 3, 5, 6, 7]
+      responses:
+        '200':
+          description: Reordering successful
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
