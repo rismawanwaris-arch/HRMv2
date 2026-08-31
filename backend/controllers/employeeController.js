@@ -2,6 +2,7 @@ const xlsx = require('xlsx');
 const fs = require('fs');
 const { query } = require('../db');
 const { generateAccessCode } = require('../utils/helpers');
+const { EMPLOYEE_FIELDS, buildInsert, buildUpdate } = require('../utils/candidateFields');
 
 /**
  * Get list of Hired Employees (Data Karyawan)
@@ -55,19 +56,9 @@ exports.getEmployees = async (req, res) => {
  */
 exports.addEmployeeManual = async (req, res) => {
   try {
-    const {
-      name, nik, gender, birth_place, birth_date, religion,
-      marital_status, dependents, blood_type,
-      phone, email, address_ktp, address_domicile,
-      emergency_contact_1, emergency_contact_2,
-      father_name, mother_name, spouse_name,
-      education_level, education_institution, education_major, education_years, education_grade,
-      height, weight, physical_condition, color_blind_test, health_history, allergies,
-      npwp, bank_name, bank_account, bpjs_health, bpjs_employment, uniform_size,
-      branch_id, hire_date, contract_type, salary_offered, allowance
-    } = req.body;
+    const { contract_type, salary_offered, allowance, hire_date } = req.body;
 
-    if (!name) {
+    if (!req.body.name) {
       return res.status(400).json({ success: false, message: 'Nama karyawan wajib diisi.' });
     }
 
@@ -79,41 +70,11 @@ exports.addEmployeeManual = async (req, res) => {
       codeExists = !!existing;
     }
 
+    const { columns, placeholders, values } = buildInsert(EMPLOYEE_FIELDS, req.body);
     const candidateResult = await query.run(
-      `INSERT INTO candidates (
-        access_code, name, nik, gender, birth_place, birth_date, religion,
-        marital_status, dependents, blood_type,
-        phone, email, address_ktp, address_domicile,
-        emergency_contact_1, emergency_contact_2,
-        father_name, mother_name, spouse_name,
-        education_level, education_institution, education_major, education_years, education_grade,
-        height, weight, physical_condition, color_blind_test, health_history, allergies,
-        npwp, bank_name, bank_account, bpjs_health, bpjs_employment, uniform_size,
-        branch_id, hire_date, is_manual_entry,
-        status, current_stage, created_at, updated_at
-      ) VALUES (
-        ?, ?, ?, ?, ?, ?, ?,
-        ?, ?, ?,
-        ?, ?, ?, ?,
-        ?, ?,
-        ?, ?, ?,
-        ?, ?, ?, ?, ?,
-        ?, ?, ?, ?, ?, ?,
-        ?, ?, ?, ?, ?, ?,
-        ?, ?, 1,
-        'Hired', 7, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-      )`,
-      [
-        accessCode, name.trim(), nik || null, gender || null, birth_place || null, birth_date || null, religion || null,
-        marital_status || null, dependents || 0, blood_type || null,
-        phone || null, email || null, address_ktp || null, address_domicile || null,
-        emergency_contact_1 || null, emergency_contact_2 || null,
-        father_name || null, mother_name || null, spouse_name || null,
-        education_level || null, education_institution || null, education_major || null, education_years || null, education_grade || null,
-        height || null, weight || null, physical_condition || null, color_blind_test || null, health_history || null, allergies || null,
-        npwp || null, bank_name || null, bank_account || null, bpjs_health || null, bpjs_employment || null, uniform_size || null,
-        branch_id || null, hire_date || null
-      ]
+      `INSERT INTO candidates (access_code, ${columns}, is_manual_entry, status, current_stage, created_at, updated_at)
+       VALUES (?, ${placeholders}, 1, 'Hired', 7, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+      [accessCode, ...values]
     );
 
     const candidateId = candidateResult.id;
@@ -133,7 +94,7 @@ exports.addEmployeeManual = async (req, res) => {
 
     res.json({
       success: true,
-      message: `Karyawan "${name}" berhasil ditambahkan ke Data Karyawan.`,
+      message: `Karyawan "${req.body.name.trim()}" berhasil ditambahkan ke Data Karyawan.`,
       candidateId
     });
   } catch (error) {
@@ -153,19 +114,9 @@ exports.addEmployeeManual = async (req, res) => {
 exports.updateEmployee = async (req, res) => {
   try {
     const employeeId = parseInt(String(req.params.id), 10);
-    const {
-      name, nik, gender, birth_place, birth_date, religion,
-      marital_status, dependents, blood_type,
-      phone, email, address_ktp, address_domicile,
-      emergency_contact_1, emergency_contact_2,
-      father_name, mother_name, spouse_name,
-      education_level, education_institution, education_major, education_years, education_grade,
-      height, weight, physical_condition, color_blind_test, health_history, allergies,
-      npwp, bank_name, bank_account, bpjs_health, bpjs_employment, uniform_size,
-      branch_id, hire_date, contract_type, salary_offered, allowance
-    } = req.body;
+    const { contract_type, salary_offered, allowance, hire_date } = req.body;
 
-    if (!name) {
+    if (!req.body.name) {
       return res.status(400).json({ success: false, message: 'Nama karyawan wajib diisi.' });
     }
 
@@ -174,29 +125,10 @@ exports.updateEmployee = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Karyawan tidak ditemukan' });
     }
 
+    const { assignments, values } = buildUpdate(EMPLOYEE_FIELDS, req.body);
     await query.run(
-      `UPDATE candidates SET 
-        name = ?, nik = ?, gender = ?, birth_place = ?, birth_date = ?, religion = ?,
-        marital_status = ?, dependents = ?, blood_type = ?,
-        phone = ?, email = ?, address_ktp = ?, address_domicile = ?,
-        emergency_contact_1 = ?, emergency_contact_2 = ?,
-        father_name = ?, mother_name = ?, spouse_name = ?,
-        education_level = ?, education_institution = ?, education_major = ?, education_years = ?, education_grade = ?,
-        height = ?, weight = ?, physical_condition = ?, color_blind_test = ?, health_history = ?, allergies = ?,
-        npwp = ?, bank_name = ?, bank_account = ?, bpjs_health = ?, bpjs_employment = ?, uniform_size = ?,
-        branch_id = ?, hire_date = ?, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?`,
-      [
-        name.trim(), nik || null, gender || null, birth_place || null, birth_date || null, religion || null,
-        marital_status || null, dependents || 0, blood_type || null,
-        phone || null, email || null, address_ktp || null, address_domicile || null,
-        emergency_contact_1 || null, emergency_contact_2 || null,
-        father_name || null, mother_name || null, spouse_name || null,
-        education_level || null, education_institution || null, education_major || null, education_years || null, education_grade || null,
-        height || null, weight || null, physical_condition || null, color_blind_test || null, health_history || null, allergies || null,
-        npwp || null, bank_name || null, bank_account || null, bpjs_health || null, bpjs_employment || null, uniform_size || null,
-        branch_id || null, hire_date || null, employeeId
-      ]
+      `UPDATE candidates SET ${assignments}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      [...values, employeeId]
     );
 
     await query.run(
@@ -317,70 +249,52 @@ exports.importExcel = async (req, res) => {
           codeExists = !!existing;
         }
 
+        const str = (key) => (row[key] || '').toString().trim();
+        const rowBody = {
+          name,
+          nik,
+          gender: str('Jenis Kelamin'),
+          birth_place,
+          birth_date,
+          religion: str('Agama'),
+          marital_status: str('Status Perkawinan'),
+          dependents: parseInt(row['Jumlah Tanggungan']) || 0,
+          blood_type: str('Golongan Darah'),
+          phone,
+          email: str('E-mail'),
+          address_ktp: str('Alamat KTP'),
+          address_domicile: str('Alamat Domisili'),
+          emergency_contact_1: str('Kontak Darurat 1 (Nama & No HP)'),
+          emergency_contact_2: str('Kontak Darurat 2 (Nama & No HP)'),
+          father_name: str('Nama Ayah'),
+          mother_name: str('Nama Ibu'),
+          spouse_name: str('Nama Pasangan (Jika ada)'),
+          education_level: str('Pendidikan Terakhir'),
+          education_institution: str('Nama Institusi Pendidikan'),
+          education_major: str('Jurusan'),
+          education_years: str('Tahun Lulus'),
+          education_grade: str('Nilai / IPK'),
+          height: parseInt(row['Tinggi Badan (cm)']) || null,
+          weight: parseInt(row['Berat Badan (kg)']) || null,
+          physical_condition: str('Kondisi Fisik'),
+          color_blind_test: str('Tes Buta Warna'),
+          health_history: str('Riwayat Penyakit'),
+          allergies: str('Alergi'),
+          npwp: str('Nomor NPWP'),
+          bank_name,
+          bank_account,
+          bpjs_health: str('Nomor BPJS Kesehatan'),
+          bpjs_employment: str('Nomor BPJS Ketenagakerjaan'),
+          uniform_size: str('Ukuran Seragam'),
+          branch_id,
+          hire_date: str('Tanggal Diterima'),
+        };
+
+        const { columns, placeholders, values } = buildInsert(EMPLOYEE_FIELDS, rowBody);
         const candidateResult = await query.run(
-          `INSERT INTO candidates (
-            access_code, name, nik, gender, birth_place, birth_date, religion,
-            marital_status, dependents, blood_type,
-            phone, email, address_ktp, address_domicile,
-            emergency_contact_1, emergency_contact_2,
-            father_name, mother_name, spouse_name,
-            education_level, education_institution, education_major, education_years, education_grade,
-            height, weight, physical_condition, color_blind_test, health_history, allergies,
-            npwp, bank_name, bank_account, bpjs_health, bpjs_employment, uniform_size,
-            branch_id, hire_date, is_manual_entry,
-            status, current_stage, created_at, updated_at
-          ) VALUES (
-            ?, ?, ?, ?, ?, ?, ?,
-            ?, ?, ?,
-            ?, ?, ?, ?,
-            ?, ?,
-            ?, ?, ?,
-            ?, ?, ?, ?, ?,
-            ?, ?, ?, ?, ?, ?,
-            ?, ?, ?, ?, ?, ?,
-            ?, ?, 1,
-            'Hired', 7, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-          )`,
-          [
-            accessCode, 
-            name, 
-            nik, 
-            (row['Jenis Kelamin'] || '').toString().trim(), 
-            birth_place, 
-            birth_date, 
-            (row['Agama'] || '').toString().trim(),
-            (row['Status Perkawinan'] || '').toString().trim(), 
-            parseInt(row['Jumlah Tanggungan']) || 0, 
-            (row['Golongan Darah'] || '').toString().trim(),
-            phone, 
-            (row['E-mail'] || '').toString().trim(), 
-            (row['Alamat KTP'] || '').toString().trim(), 
-            (row['Alamat Domisili'] || '').toString().trim(),
-            (row['Kontak Darurat 1 (Nama & No HP)'] || '').toString().trim(), 
-            (row['Kontak Darurat 2 (Nama & No HP)'] || '').toString().trim(),
-            (row['Nama Ayah'] || '').toString().trim(), 
-            (row['Nama Ibu'] || '').toString().trim(), 
-            (row['Nama Pasangan (Jika ada)'] || '').toString().trim(),
-            (row['Pendidikan Terakhir'] || '').toString().trim(), 
-            (row['Nama Institusi Pendidikan'] || '').toString().trim(), 
-            (row['Jurusan'] || '').toString().trim(), 
-            (row['Tahun Lulus'] || '').toString().trim(), 
-            (row['Nilai / IPK'] || '').toString().trim(),
-            parseInt(row['Tinggi Badan (cm)']) || null, 
-            parseInt(row['Berat Badan (kg)']) || null, 
-            (row['Kondisi Fisik'] || '').toString().trim(), 
-            (row['Tes Buta Warna'] || '').toString().trim(), 
-            (row['Riwayat Penyakit'] || '').toString().trim(), 
-            (row['Alergi'] || '').toString().trim(),
-            (row['Nomor NPWP'] || '').toString().trim(), 
-            bank_name, 
-            bank_account, 
-            (row['Nomor BPJS Kesehatan'] || '').toString().trim(), 
-            (row['Nomor BPJS Ketenagakerjaan'] || '').toString().trim(), 
-            (row['Ukuran Seragam'] || '').toString().trim(),
-            branch_id, 
-            (row['Tanggal Diterima'] || '').toString().trim()
-          ]
+          `INSERT INTO candidates (access_code, ${columns}, is_manual_entry, status, current_stage, created_at, updated_at)
+           VALUES (?, ${placeholders}, 1, 'Hired', 7, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+          [accessCode, ...values]
         );
 
         const candidateId = candidateResult.id;

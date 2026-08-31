@@ -1,5 +1,6 @@
 const { query, uploadsDir } = require('../db');
 const { generateAccessCode, getCandidateFolderName, upload } = require('../utils/helpers');
+const { CANDIDATE_FIELDS, buildInsert, buildUpdate } = require('../utils/candidateFields');
 const fs = require('fs');
 const path = require('path');
 
@@ -45,17 +46,7 @@ exports.getCandidates = async (req, res) => {
  */
 exports.addCandidate = async (req, res) => {
   try {
-    const { 
-      name, nik, email, phone, gender, birth_place, birth_date, religion,
-      marital_status, dependents, blood_type, height, weight, physical_condition,
-      address_ktp, address_domicile, emergency_contact_1, emergency_contact_2,
-      father_name, mother_name, spouse_name, children_data,
-      education_level, education_institution, education_major, education_years, education_grade,
-      work_experience, npwp, bank_account, bank_name, bpjs_health, bpjs_employment,
-      bpjs_active, uniform_size, health_history, allergies, medications, color_blind_test
-    } = req.body;
-
-    if (!name) {
+    if (!req.body.name) {
       return res.status(400).json({ success: false, message: 'Nama kandidat wajib diisi' });
     }
 
@@ -78,29 +69,13 @@ exports.addCandidate = async (req, res) => {
     const firstStage = await query.get('SELECT id FROM recruitment_stages WHERE is_active = 1 ORDER BY order_num ASC LIMIT 1');
     const initialStageId = firstStage ? firstStage.id : 1;
 
+    const { columns, placeholders, values } = buildInsert(CANDIDATE_FIELDS, req.body);
     const insertSql = `
-      INSERT INTO candidates (
-        access_code, name, nik, email, phone, gender, birth_place, birth_date, religion,
-        marital_status, dependents, blood_type, height, weight, physical_condition,
-        address_ktp, address_domicile, emergency_contact_1, emergency_contact_2,
-        father_name, mother_name, spouse_name, children_data,
-        education_level, education_institution, education_major, education_years, education_grade,
-        work_experience, npwp, bank_account, bank_name, bpjs_health, bpjs_employment,
-        bpjs_active, uniform_size, health_history, allergies, medications, color_blind_test,
-        status, current_stage
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active', ?)
+      INSERT INTO candidates (access_code, ${columns}, status, current_stage)
+      VALUES (?, ${placeholders}, 'Active', ?)
     `;
 
-    const result = await query.run(insertSql, [
-      accessCode, name, nik || null, email || null, phone || null, gender || null, birth_place || null, birth_date || null, religion || null,
-      marital_status || null, dependents || 0, blood_type || null, height || null, weight || null, physical_condition || null,
-      address_ktp || null, address_domicile || null, emergency_contact_1 || null, emergency_contact_2 || null,
-      father_name || null, mother_name || null, spouse_name || null, children_data || null,
-      education_level || null, education_institution || null, education_major || null, education_years || null, education_grade || null,
-      work_experience || null, npwp || null, bank_account || null, bank_name || null, bpjs_health || null, bpjs_employment || null,
-      bpjs_active || 'Tidak Aktif', uniform_size || null, health_history || null, allergies || null, medications || null, color_blind_test || null,
-      initialStageId
-    ]);
+    const result = await query.run(insertSql, [accessCode, ...values, initialStageId]);
 
     const candidateId = result.id;
 
@@ -173,44 +148,19 @@ exports.getCandidateDetail = async (req, res) => {
 exports.updateCandidate = async (req, res) => {
   try {
     const candidateId = parseInt(String(req.params.id));
-    const { 
-      name, nik, email, phone, gender, birth_place, birth_date, religion,
-      marital_status, dependents, blood_type, height, weight, physical_condition,
-      address_ktp, address_domicile, emergency_contact_1, emergency_contact_2,
-      father_name, mother_name, spouse_name, children_data,
-      education_level, education_institution, education_major, education_years, education_grade,
-      work_experience, npwp, bank_account, bank_name, bpjs_health, bpjs_employment,
-      bpjs_active, uniform_size, health_history, allergies, medications, color_blind_test,
-      status, current_stage
-    } = req.body;
+    const { status, current_stage } = req.body;
 
     const existing = await query.get('SELECT id FROM candidates WHERE id = ?', [candidateId]);
     if (!existing) return res.status(404).json({ success: false, message: 'Kandidat tidak ditemukan' });
 
+    const { assignments, values } = buildUpdate(CANDIDATE_FIELDS, req.body);
     const updateSql = `
-      UPDATE candidates 
-      SET 
-        name = ?, nik = ?, email = ?, phone = ?, gender = ?, birth_place = ?, birth_date = ?, religion = ?,
-        marital_status = ?, dependents = ?, blood_type = ?, height = ?, weight = ?, physical_condition = ?,
-        address_ktp = ?, address_domicile = ?, emergency_contact_1 = ?, emergency_contact_2 = ?,
-        father_name = ?, mother_name = ?, spouse_name = ?, children_data = ?,
-        education_level = ?, education_institution = ?, education_major = ?, education_years = ?, education_grade = ?,
-        work_experience = ?, npwp = ?, bank_account = ?, bank_name = ?, bpjs_health = ?, bpjs_employment = ?,
-        bpjs_active = ?, uniform_size = ?, health_history = ?, allergies = ?, medications = ?, color_blind_test = ?,
-        status = ?, current_stage = ?, updated_at = CURRENT_TIMESTAMP
+      UPDATE candidates
+      SET ${assignments}, status = ?, current_stage = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `;
 
-    await query.run(updateSql, [
-      name, nik || null, email || null, phone || null, gender || null, birth_place || null, birth_date || null, religion || null,
-      marital_status || null, dependents || 0, blood_type || null, height || null, weight || null, physical_condition || null,
-      address_ktp || null, address_domicile || null, emergency_contact_1 || null, emergency_contact_2 || null,
-      father_name || null, mother_name || null, spouse_name || null, children_data || null,
-      education_level || null, education_institution || null, education_major || null, education_years || null, education_grade || null,
-      work_experience || null, npwp || null, bank_account || null, bank_name || null, bpjs_health || null, bpjs_employment || null,
-      bpjs_active || 'Tidak Aktif', uniform_size || null, health_history || null, allergies || null, medications || null, color_blind_test || null,
-      status || 'Active', current_stage || 1, candidateId
-    ]);
+    await query.run(updateSql, [...values, status || 'Active', current_stage || 1, candidateId]);
     res.json({ success: true, message: 'Data kandidat berhasil diperbarui.' });
   } catch (error) {
     if (error instanceof Error && error.message.includes('UNIQUE constraint failed')) {
