@@ -3,6 +3,10 @@ const { generateAccessCode, getCandidateFolderName, upload } = require('../utils
 const fs = require('fs');
 const path = require('path');
 
+// Onboarding is tracked outside the configurable recruitment_stages pipeline
+// and is addressed by this sentinel stage number in the stage-update endpoint.
+const ONBOARDING_STAGE_NUM = 8;
+
 /**
  * Get list of candidates
  * @param {import('express').Request} req 
@@ -370,7 +374,7 @@ exports.updateCandidateStage = async (req, res) => {
     if (!candidate) return res.status(404).json({ success: false, message: 'Kandidat tidak ditemukan' });
 
     let stage = null;
-    if (stageNum !== 8) {
+    if (stageNum !== ONBOARDING_STAGE_NUM) {
       stage = await query.get('SELECT * FROM recruitment_stages WHERE id = ?', [stageNum]);
       if (!stage) return res.status(404).json({ success: false, message: 'Tahap seleksi tidak ditemukan' });
     }
@@ -421,7 +425,7 @@ exports.updateCandidateStage = async (req, res) => {
         `UPDATE stage7_offering SET contract_type = ?, salary_offered = ?, allowance = ?, bonus_scheme = ?, start_date = ?, offering_status = ?, passed = ?, updated_at = CURRENT_TIMESTAMP WHERE candidate_id = ?`,
         [contract_type, salary_offered, allowance, bonus_scheme, start_date, offering_status, passed ? 1 : 0, candidateId]
       );
-    } else if (stageNum === 8) {
+    } else if (stageNum === ONBOARDING_STAGE_NUM) {
       const { 
         day_30_status, day_30_score, day_30_notes,
         day_60_status, day_60_score, day_60_notes,

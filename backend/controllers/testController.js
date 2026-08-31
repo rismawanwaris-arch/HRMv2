@@ -6,12 +6,10 @@ exports.validateTestAccess = async (req, res) => {
   try {
     const code = req.params.code.trim().toUpperCase();
     const candidate = await query.get(
-      `SELECT c.id, c.name, c.current_stage, c.status, 
-              t2.passed as test_passed, t2.test_completed_at as t2_completed_at,
-              t6.passed as t6_passed, t6.test_completed_at as t6_completed_at
+      `SELECT c.id, c.name, c.current_stage, c.status,
+              t2.passed as test_passed, t2.test_completed_at as t2_completed_at
        FROM candidates c
        LEFT JOIN stage2_written_test t2 ON c.id = t2.candidate_id
-       LEFT JOIN stage6_mcu_ref t6 ON c.id = t6.candidate_id
        WHERE c.access_code = ?`,
       [code]
     );
@@ -19,12 +17,13 @@ exports.validateTestAccess = async (req, res) => {
     if (!candidate) return res.json({ isValid: false, message: 'Kode Akses salah atau tidak valid.' });
     if (candidate.status === 'Rejected') return res.json({ isValid: false, message: 'Kandidat ini sudah dinyatakan tidak lolos.' });
 
-    if (candidate.current_stage === 2) {
-      if (candidate.t2_completed_at) return res.json({ isValid: false, message: 'Anda sudah menyelesaikan tes tertulis sebelumnya.' });
-    } else if (candidate.current_stage === 6) {
-      if (candidate.t6_completed_at) return res.json({ isValid: false, message: 'Anda sudah menyelesaikan tes pasca training sebelumnya.' });
-    } else {
+    // The written test portal only serves stage 2. The post-training evaluation
+    // (stage 6) uses the dedicated training portal / training_questions bank.
+    if (candidate.current_stage !== 2) {
       return res.json({ isValid: false, message: 'Tahap Anda saat ini tidak memerlukan ujian online.' });
+    }
+    if (candidate.t2_completed_at) {
+      return res.json({ isValid: false, message: 'Anda sudah menyelesaikan tes tertulis sebelumnya.' });
     }
 
     res.json({
@@ -41,16 +40,15 @@ exports.getTestQuestions = async (req, res) => {
   try {
     const code = req.params.code.trim().toUpperCase();
     const candidate = await query.get('SELECT id, current_stage, status FROM candidates WHERE access_code = ?', [code]);
-    
-    if (!candidate || candidate.status === 'Rejected' || (candidate.current_stage !== 2 && candidate.current_stage !== 6)) {
+
+    if (!candidate || candidate.status === 'Rejected' || candidate.current_stage !== 2) {
       return res.status(403).json({ success: false, message: 'Akses ditolak.' });
     }
 
-    let sql = candidate.current_stage === 2 
-      ? `SELECT id, subtest, question_text, option_a, option_b, option_c, option_d, question_type, dimension, option_p, option_q FROM test_questions WHERE subtest != 'training' ORDER BY id ASC`
-      : `SELECT id, subtest, question_text, option_a, option_b, option_c, option_d, question_type, dimension, option_p, option_q FROM test_questions WHERE subtest = 'training' ORDER BY id ASC`;
-
-    const questions = await query.all(sql);
+    const questions = await query.all(
+      `SELECT id, subtest, question_text, option_a, option_b, option_c, option_d, question_type, dimension, option_p, option_q
+       FROM test_questions WHERE subtest != 'training' ORDER BY id ASC`
+    );
     res.json({ success: true, questions });
   } catch (error) {
     console.error('API Error (get test questions):', error);
@@ -64,38 +62,7 @@ exports.submitTest = async (req, res) => {
     const candidate = await query.get(`SELECT id, name, current_stage FROM candidates WHERE access_code = ? AND status = 'Active'`, [code.trim().toUpperCase()]);
     
     if (!candidate) return res.status(404).json({ success: false, message: 'Kandidat tidak aktif atau tidak ditemukan.' });
-    if (candidate.current_stage !== 2 && candidate.current_stage !== 6) return res.status(400).json({ success: false, message: 'Kandidat tidak sedang dalam tahap ujian.' });
-
-    if (candidate.current_stage === 6) {
-      const dbQuestions = await query.all("SELECT id, correct_option, question_type FROM test_questions WHERE subtest = 'training'");
-      if (dbQuestions.length === 0) {
-        await query.run(`UPDATE stage6_mcu_ref SET score_training = 100, passed = 1, test_completed_at = CURRENT_TIMESTAMP WHERE candidate_id = ?`, [candidate.id]);
-        await query.run('UPDATE candidates SET current_stage = 7, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [candidate.id]);
-        return res.json({ success: true, message: 'Ujian pasca training dikirimkan (tidak ada soal, otomatis lulus).', results: { scoreTraining: 100, passed: true } });
-      }
-
-      let correctCount = 0;
-      dbQuestions.forEach(q => {
-        const candidateAns = answers[q.id];
-        const isCorrect = q.question_type === 'essay'
-          ? String(candidateAns || '').trim().toLowerCase() === String(q.correct_option || '').trim().toLowerCase()
-          : candidateAns === q.correct_option;
-        if (isCorrect) correctCount++;
-      });
-
-      const scoreTraining = Math.round((correctCount / dbQuestions.length) * 100);
-      const passed = scoreTraining >= 65 ? 1 : 0;
-      await query.run(`UPDATE stage6_mcu_ref SET score_training = ?, passed = ?, test_completed_at = CURRENT_TIMESTAMP WHERE candidate_id = ?`, [scoreTraining, passed, candidate.id]);
-
-      let nextStage = 6;
-      let status = 'Active';
-      if (passed === 1) nextStage = 7;
-      else status = 'Rejected';
-      
-      await query.run('UPDATE candidates SET current_stage = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [nextStage, status, candidate.id]);
-      
-      return res.json({ success: true, message: 'Ujian pasca training berhasil dikirimkan.', results: { scoreTraining, passed: passed === 1 } });
-    }
+    if (candidate.current_stage !== 2) return res.status(400).json({ success: false, message: 'Kandidat tidak sedang dalam tahap ujian.' });
 
     const dbQuestions = await query.all("SELECT id, subtest, question_text, correct_option, question_type, dimension FROM test_questions WHERE subtest != 'training'");
     let numerikTotal = 0, numerikCorrect = 0, situasionalTotal = 0, situasionalCorrect = 0;

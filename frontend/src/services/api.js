@@ -207,9 +207,9 @@ export const employeeApi = {
    * @param {FormData} formData - Form data containing the excel file.
    * @returns {Promise<Object>} Resolves to import status.
    */
-  importExcel: (formData) => api.post('/employees/import', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' }
-  }),
+  // Do not set Content-Type manually: the browser must add the multipart
+  // boundary itself when the body is a FormData.
+  importExcel: (formData) => api.post('/employees/import', formData),
 };
 
 /**

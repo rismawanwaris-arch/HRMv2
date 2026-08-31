@@ -217,12 +217,10 @@ async function initDb() {
       )
     `);
 
-    // Migration helper for existing databases
+    // Migration helper for existing databases (stage2). Newer columns are
+    // already part of the CREATE TABLE above for fresh installs.
     await query.run('ALTER TABLE stage2_written_test ADD COLUMN score_nominal REAL DEFAULT 0').catch(() => {});
     await query.run('ALTER TABLE stage2_written_test ADD COLUMN cognitive_details TEXT').catch(() => {});
-    await query.run('ALTER TABLE stage6_mcu_ref ADD COLUMN score_training REAL DEFAULT 0').catch(() => {});
-    await query.run('ALTER TABLE stage6_mcu_ref ADD COLUMN test_completed_at DATETIME').catch(() => {});
-    await query.run('ALTER TABLE stage6_mcu_ref ADD COLUMN training_details TEXT').catch(() => {});
 
     // 4. Stage 3 Simulation
     await query.run(`
@@ -286,6 +284,11 @@ async function initDb() {
         FOREIGN KEY(candidate_id) REFERENCES candidates(id) ON DELETE CASCADE
       )
     `);
+
+    // Migration helper for existing databases (stage6). No-ops on fresh installs.
+    await query.run('ALTER TABLE stage6_mcu_ref ADD COLUMN score_training REAL DEFAULT 0').catch(() => {});
+    await query.run('ALTER TABLE stage6_mcu_ref ADD COLUMN test_completed_at DATETIME').catch(() => {});
+    await query.run('ALTER TABLE stage6_mcu_ref ADD COLUMN training_details TEXT').catch(() => {});
 
     // 8. Stage 7 Offering
     await query.run(`
