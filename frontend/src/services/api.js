@@ -406,6 +406,37 @@ export const staffApi = {
 };
 
 /**
+ * --- ATTENDANCE API ---
+ */
+export const attendanceApi = {
+  getByPeriod: (params) => {
+    const qs = new URLSearchParams(params || {}).toString();
+    return api.get(`/attendance${qs ? '?' + qs : ''}`);
+  },
+  upsert: (employeeId, period, data) => api.put(`/attendance/${employeeId}/${period}`, data),
+  summary: (params) => {
+    const qs = new URLSearchParams(params || {}).toString();
+    return api.get(`/attendance/summary${qs ? '?' + qs : ''}`);
+  },
+};
+
+/**
+ * --- PAYROLL API ---
+ */
+export const payrollApi = {
+  listPeriods: () => api.get('/payroll/periods'),
+  generateEntries: (period) => api.post(`/payroll/periods/${period}/generate`, {}),
+  getEntries: (period, params) => {
+    const qs = new URLSearchParams(params || {}).toString();
+    return api.get(`/payroll/periods/${period}/entries${qs ? '?' + qs : ''}`);
+  },
+  getSummary: (period) => api.get(`/payroll/periods/${period}/summary`),
+  submitPeriod: (period) => api.put(`/payroll/periods/${period}/submit`, {}),
+  updateEntry: (id, data) => api.put(`/payroll/entries/${id}`, data),
+  getSlip: (id) => api.get(`/payroll/entries/${id}/slip`),
+};
+
+/**
  * --- RECRUITMENT STAGES CONFIGURATION API ---
  * Services to configure recruitment pipeline workflow.
  */

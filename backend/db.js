@@ -499,7 +499,77 @@ async function initDb() {
         )
       `);
       await query.run('CREATE UNIQUE INDEX IF NOT EXISTS idx_employees_nik_bidx ON employees(nik_bidx)').catch(() => {});
+      // height/weight/physical_condition for employees table
+      await query.run('ALTER TABLE employees ADD COLUMN height REAL').catch(() => {});
+      await query.run('ALTER TABLE employees ADD COLUMN weight REAL').catch(() => {});
+      await query.run('ALTER TABLE employees ADD COLUMN physical_condition TEXT').catch(() => {});
       await migrateEmployeeEncryption();
+
+      // Attendance Records (per karyawan per periode penggajian)
+      await query.run(`
+        CREATE TABLE IF NOT EXISTS attendance_records (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          employee_id INTEGER NOT NULL REFERENCES employees(id),
+          period TEXT NOT NULL,
+          days_absent INTEGER DEFAULT 0,
+          late_count INTEGER DEFAULT 0,
+          cash_advance REAL DEFAULT 0,
+          fake_money REAL DEFAULT 0,
+          deduction_absent REAL DEFAULT 0,
+          deduction_late REAL DEFAULT 0,
+          asben_contribution REAL DEFAULT 0,
+          notes TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(employee_id, period)
+        )
+      `);
+      await query.run('CREATE INDEX IF NOT EXISTS idx_attendance_period ON attendance_records(period)').catch(() => {});
+      await query.run('CREATE INDEX IF NOT EXISTS idx_attendance_employee ON attendance_records(employee_id)').catch(() => {});
+
+      // Payroll Periods (satu period per YYYY-MM, mencakup semua tipe karyawan)
+      await query.run(`
+        CREATE TABLE IF NOT EXISTS payroll_periods (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          period TEXT NOT NULL UNIQUE,
+          status TEXT DEFAULT 'Draft',
+          submitted_at DATETIME,
+          submitted_by TEXT,
+          approved_at DATETIME,
+          owner_notes TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      // Payroll Entries (satu baris per karyawan per period)
+      await query.run(`
+        CREATE TABLE IF NOT EXISTS payroll_entries (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          payroll_period_id INTEGER NOT NULL REFERENCES payroll_periods(id),
+          period TEXT NOT NULL,
+          employee_id INTEGER NOT NULL REFERENCES employees(id),
+          branch_id INTEGER REFERENCES branches(id),
+          employee_type TEXT,
+          salary REAL DEFAULT 0,
+          allowance REAL DEFAULT 0,
+          bonus_penjualan REAL DEFAULT 0,
+          bonus_tartun REAL DEFAULT 0,
+          bonus_lain REAL DEFAULT 0,
+          bonus_lain_label TEXT,
+          bonus_ditahan REAL DEFAULT 0,
+          deduction_kasbon REAL DEFAULT 0,
+          deduction_absent REAL DEFAULT 0,
+          deduction_late REAL DEFAULT 0,
+          deduction_fake_money REAL DEFAULT 0,
+          take_home_pay REAL DEFAULT 0,
+          notes TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(payroll_period_id, employee_id)
+        )
+      `);
+      await query.run('CREATE INDEX IF NOT EXISTS idx_payroll_entries_period ON payroll_entries(period)').catch(() => {});
 
       // Migrate: add missing columns for onboarding and stage7_offering (robustness for older DBs)
       const onboardingCols = [
