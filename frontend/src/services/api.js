@@ -409,11 +409,29 @@ export const staffApi = {
  * --- ATTENDANCE API ---
  */
 export const attendanceApi = {
-  getByPeriod: (params) => {
+  // Daily input
+  getByDate: (params) => {
     const qs = new URLSearchParams(params || {}).toString();
-    return api.get(`/attendance${qs ? '?' + qs : ''}`);
+    return api.get(`/attendance/daily${qs ? '?' + qs : ''}`);
   },
-  upsert: (employeeId, period, data) => api.put(`/attendance/${employeeId}/${period}`, data),
+  upsertDaily: (employeeId, date, data) => api.put(`/attendance/daily/${employeeId}/${date}`, data),
+
+  // Monthly summary (aggregated from daily)
+  getMonthlySummary: (params) => {
+    const qs = new URLSearchParams(params || {}).toString();
+    return api.get(`/attendance/monthly${qs ? '?' + qs : ''}`);
+  },
+  getEmployeeDailyDetail: (employeeId, period) =>
+    api.get(`/attendance/daily-detail/${employeeId}?period=${period}`),
+
+  // Cash advance / fake money (monthly record)
+  upsertRecord: (employeeId, period, data) =>
+    api.put(`/attendance/record/${employeeId}/${period}`, data),
+
+  // Sync daily → attendance_records
+  syncPeriod: (period) => api.post(`/attendance/sync/${period}`, {}),
+
+  // Branch-level ASBEN summary
   summary: (params) => {
     const qs = new URLSearchParams(params || {}).toString();
     return api.get(`/attendance/summary${qs ? '?' + qs : ''}`);

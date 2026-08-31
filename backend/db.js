@@ -505,7 +505,26 @@ async function initDb() {
       await query.run('ALTER TABLE employees ADD COLUMN physical_condition TEXT').catch(() => {});
       await migrateEmployeeEncryption();
 
-      // Attendance Records (per karyawan per periode penggajian)
+      // Daily Attendance (per karyawan per tanggal — sumber data utama)
+      await query.run(`
+        CREATE TABLE IF NOT EXISTS daily_attendance (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          employee_id INTEGER NOT NULL REFERENCES employees(id),
+          date TEXT NOT NULL,
+          shift TEXT,
+          check_in_time TEXT,
+          status TEXT NOT NULL DEFAULT 'Belum Absen',
+          is_late INTEGER DEFAULT 0,
+          notes TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(employee_id, date)
+        )
+      `);
+      await query.run('CREATE INDEX IF NOT EXISTS idx_daily_att_date ON daily_attendance(date)').catch(() => {});
+      await query.run('CREATE INDEX IF NOT EXISTS idx_daily_att_emp ON daily_attendance(employee_id)').catch(() => {});
+
+      // Attendance Records (agregat bulanan — otomatis di-sync dari daily_attendance, digunakan payroll)
       await query.run(`
         CREATE TABLE IF NOT EXISTS attendance_records (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -526,6 +545,16 @@ async function initDb() {
       `);
       await query.run('CREATE INDEX IF NOT EXISTS idx_attendance_period ON attendance_records(period)').catch(() => {});
       await query.run('CREATE INDEX IF NOT EXISTS idx_attendance_employee ON attendance_records(employee_id)').catch(() => {});
+
+      // Seed shift cutoff times if not exists
+      const shiftSettings = [
+        ['shift_pagi_cutoff', '06:30'],
+        ['shift_siang_cutoff', '14:30'],
+      ];
+      for (const [key, value] of shiftSettings) {
+        const exists = await query.get('SELECT 1 FROM system_settings WHERE key = ?', [key]);
+        if (!exists) await query.run('INSERT INTO system_settings (key, value) VALUES (?, ?)', [key, value]);
+      }
 
       // Payroll Periods (satu period per YYYY-MM, mencakup semua tipe karyawan)
       await query.run(`
