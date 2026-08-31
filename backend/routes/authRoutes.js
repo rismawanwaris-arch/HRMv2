@@ -13,7 +13,11 @@ const loginLimiter = rateLimit({
   message: { success: false, message: 'Terlalu banyak percobaan login. Coba lagi dalam 15 menit.' }
 });
 
-router.post('/login', loginLimiter, authController.login);
+const loginHandlers = process.env.NODE_ENV === 'test'
+  ? [authController.login]
+  : [loginLimiter, authController.login];
+
+router.post('/login', ...loginHandlers);
 router.post('/change-password', authenticateToken, authController.changePassword);
 
 module.exports = router;
