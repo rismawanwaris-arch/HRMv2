@@ -109,10 +109,111 @@ function InputHarian({ branches }) {
     setSaving(p => ({ ...p, [emp.id]: false }));
   };
 
-  const hadir = rows.filter(r => saved[r.id] === 'Hadir' || (!saved[r.id] && r.status === 'Hadir')).length;
-  const telat = rows.filter(r => saved[r.id] === 'Telat' || (!saved[r.id] && r.status === 'Telat')).length;
-  const absen = rows.filter(r => saved[r.id] === 'Tidak Hadir' || (!saved[r.id] && r.status === 'Tidak Hadir')).length;
-  const belum = rows.filter(r => !r.record_id && !saved[r.id]).length;
+  // Split: belum diisi (no record) vs sudah diisi (has record)
+  const belumRows = rows.filter(r => !r.record_id && !saved[r.id]);
+  const sudahRows = rows.filter(r => r.record_id || saved[r.id]);
+
+  const hadir = sudahRows.filter(r => (saved[r.id] || r.status) === 'Hadir').length;
+  const telat = sudahRows.filter(r => (saved[r.id] || r.status) === 'Telat').length;
+  const absen = sudahRows.filter(r => (saved[r.id] || r.status) === 'Tidak Hadir').length;
+
+  const renderRow = (emp) => {
+    const e = edits[emp.id] || {};
+    const savedStatus = saved[emp.id];
+    const isSaving = saving[emp.id];
+    const isBelum = !emp.record_id && !savedStatus;
+
+    let previewStatus = e.status || 'Tidak Hadir';
+    if (e.check_in_time) {
+      const cutoff = e.shift === 'Siang' ? '14:30' : '06:30';
+      previewStatus = e.check_in_time > cutoff ? 'Telat' : 'Hadir';
+    }
+
+    return (
+      <tr key={emp.id} style={{
+        background: isBelum ? 'rgba(245,158,11,0.04)' : 'rgba(16,185,129,0.03)',
+        borderLeft: isBelum ? '3px solid rgba(245,158,11,0.4)' : '3px solid rgba(16,185,129,0.3)',
+      }}>
+        <td>
+          <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{emp.name}</div>
+          <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+            <span style={{ background: 'rgba(59,130,246,0.12)', color: '#3b82f6', padding: '1px 6px', borderRadius: '10px', fontSize: '10px', fontWeight: 600 }}>{emp.employee_type}</span>
+            {' '}{emp.position || ''}
+          </div>
+        </td>
+        <td style={{ fontSize: '13px', color: 'var(--text-muted)' }}>{emp.branch_name || '—'}</td>
+        <td>
+          <select
+            style={{ ...inputS, width: '90px', padding: '5px 8px' }}
+            value={e.shift || 'Pagi'}
+            onChange={ev => set(emp.id, 'shift', ev.target.value)}
+          >
+            <option value="Pagi">Pagi</option>
+            <option value="Siang">Siang</option>
+          </select>
+        </td>
+        <td>
+          <input
+            type="time"
+            style={{ ...inputS, width: '100px', padding: '5px 8px' }}
+            value={e.check_in_time || ''}
+            onChange={ev => set(emp.id, 'check_in_time', ev.target.value)}
+          />
+        </td>
+        <td>
+          {e.check_in_time ? (
+            <StatusBadge status={previewStatus} />
+          ) : (
+            <select
+              style={{ ...inputS, width: '120px', padding: '5px 8px' }}
+              value={e.status || 'Tidak Hadir'}
+              onChange={ev => set(emp.id, 'status', ev.target.value)}
+            >
+              <option value="Tidak Hadir">Tidak Hadir</option>
+              <option value="Izin">Izin</option>
+              <option value="Sakit">Sakit</option>
+            </select>
+          )}
+        </td>
+        <td>
+          <input
+            type="text"
+            placeholder="Catatan (opsional)"
+            style={{ ...inputS, width: '100%' }}
+            value={e.notes || ''}
+            onChange={ev => set(emp.id, 'notes', ev.target.value)}
+          />
+        </td>
+        <td style={{ textAlign: 'center' }}>
+          <button
+            disabled={isSaving}
+            onClick={() => handleSave(emp)}
+            style={{
+              background: savedStatus ? 'rgba(16,185,129,0.15)' : isBelum ? 'rgba(245,158,11,0.15)' : 'rgba(139,92,246,0.15)',
+              border: `1px solid ${savedStatus ? 'rgba(16,185,129,0.3)' : isBelum ? 'rgba(245,158,11,0.3)' : 'rgba(139,92,246,0.3)'}`,
+              color: savedStatus ? '#10b981' : isBelum ? '#f59e0b' : 'var(--color-primary)',
+              padding: '6px 14px', borderRadius: '8px',
+              cursor: isSaving ? 'not-allowed' : 'pointer',
+              fontSize: '12px', fontWeight: 600, whiteSpace: 'nowrap', fontFamily: 'inherit',
+            }}>
+            {isSaving ? '...' : savedStatus ? '✓ Tersimpan' : (emp.record_id ? 'Update' : 'Simpan')}
+          </button>
+        </td>
+      </tr>
+    );
+  };
+
+  const theadRow = (
+    <tr>
+      <th style={{ minWidth: '160px' }}>Karyawan</th>
+      <th>Cabang</th>
+      <th style={{ width: '100px' }}>Shift</th>
+      <th style={{ width: '110px' }}>Jam Masuk</th>
+      <th style={{ width: '130px' }}>Status</th>
+      <th style={{ width: '180px' }}>Keterangan</th>
+      <th style={{ textAlign: 'center', width: '100px' }}>Aksi</th>
+    </tr>
+  );
 
   return (
     <div>
@@ -129,126 +230,73 @@ function InputHarian({ branches }) {
             {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
         </div>
-        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', paddingBottom: '2px' }}>
-          {[['Hadir', '#10b981', hadir], ['Telat', '#f59e0b', telat], ['Absen', '#ef4444', absen], ['Belum diisi', '#6b7280', belum]].map(([lbl, clr, val]) => (
-            <span key={lbl} style={{ fontSize: '13px', color: clr, fontWeight: 600 }}>{val} {lbl}</span>
-          ))}
+        <div style={{ display: 'flex', gap: '14px', flexWrap: 'wrap', paddingBottom: '2px' }}>
+          <span style={{ fontSize: '13px', color: '#f59e0b', fontWeight: 700 }}>{belumRows.length} belum diisi</span>
+          <span style={{ fontSize: '13px', color: '#10b981', fontWeight: 600 }}>{hadir} Hadir</span>
+          <span style={{ fontSize: '13px', color: '#f59e0b', fontWeight: 600 }}>{telat} Telat</span>
+          <span style={{ fontSize: '13px', color: '#ef4444', fontWeight: 600 }}>{absen} Absen</span>
         </div>
       </div>
 
-      <div className="glass-panel">
-        {loading ? (
-          <div style={{ textAlign: 'center', padding: '60px', color: 'var(--text-muted)' }}>
-            <div className="loading-spinner" style={{ margin: '0 auto 12px' }} />Memuat data...
-          </div>
-        ) : rows.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '60px', color: 'var(--text-muted)' }}>
-            Tidak ada karyawan aktif. Tambah karyawan di menu Data Karyawan.
-          </div>
-        ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th style={{ minWidth: '160px' }}>Karyawan</th>
-                  <th>Cabang</th>
-                  <th style={{ width: '100px' }}>Shift</th>
-                  <th style={{ width: '110px' }}>Jam Masuk</th>
-                  <th style={{ width: '130px' }}>Status</th>
-                  <th style={{ width: '180px' }}>Keterangan</th>
-                  <th style={{ textAlign: 'center', width: '100px' }}>Aksi</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map(emp => {
-                  const e = edits[emp.id] || {};
-                  const savedStatus = saved[emp.id];
-                  const isSaving = saving[emp.id];
-                  const hasRecord = !!emp.record_id || !!savedStatus;
+      {loading ? (
+        <div className="glass-panel" style={{ textAlign: 'center', padding: '60px', color: 'var(--text-muted)' }}>
+          <div className="loading-spinner" style={{ margin: '0 auto 12px' }} />Memuat data...
+        </div>
+      ) : rows.length === 0 ? (
+        <div className="glass-panel" style={{ textAlign: 'center', padding: '60px', color: 'var(--text-muted)' }}>
+          Tidak ada karyawan aktif. Tambah karyawan di menu Data Karyawan.
+        </div>
+      ) : (
+        <>
+          {/* ── Belum Diisi ── */}
+          {belumRows.length > 0 && (
+            <div className="glass-panel" style={{ marginBottom: '16px', border: '1px solid rgba(245,158,11,0.25)' }}>
+              <div style={{
+                padding: '10px 20px', borderBottom: '1px solid rgba(245,158,11,0.2)',
+                display: 'flex', alignItems: 'center', gap: '8px',
+                background: 'rgba(245,158,11,0.06)', borderRadius: '12px 12px 0 0',
+              }}>
+                <span style={{ fontSize: '13px', fontWeight: 700, color: '#f59e0b' }}>
+                  ● Belum Diisi
+                </span>
+                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                  — {belumRows.length} karyawan perlu diisi absensinya
+                </span>
+              </div>
+              <div style={{ overflowX: 'auto' }}>
+                <table className="data-table">
+                  <thead>{theadRow}</thead>
+                  <tbody>{belumRows.map(renderRow)}</tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
-                  // Compute preview status
-                  let previewStatus = e.status || 'Tidak Hadir';
-                  if (e.check_in_time) {
-                    const cutoff = e.shift === 'Siang' ? '14:30' : '06:30';
-                    previewStatus = e.check_in_time > cutoff ? 'Telat' : 'Hadir';
-                  }
-                  const displayStatus = savedStatus || (hasRecord && !savedStatus ? emp.status : previewStatus);
-
-                  return (
-                    <tr key={emp.id} style={{ background: savedStatus ? 'rgba(16,185,129,0.03)' : undefined }}>
-                      <td>
-                        <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{emp.name}</div>
-                        <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                          <span style={{ background: 'rgba(59,130,246,0.12)', color: '#3b82f6', padding: '1px 6px', borderRadius: '10px', fontSize: '10px', fontWeight: 600 }}>{emp.employee_type}</span>
-                          {' '}{emp.position || ''}
-                        </div>
-                      </td>
-                      <td style={{ fontSize: '13px', color: 'var(--text-muted)' }}>{emp.branch_name || '—'}</td>
-                      <td>
-                        <select
-                          style={{ ...inputS, width: '90px', padding: '5px 8px' }}
-                          value={e.shift || 'Pagi'}
-                          onChange={ev => set(emp.id, 'shift', ev.target.value)}
-                        >
-                          <option value="Pagi">Pagi</option>
-                          <option value="Siang">Siang</option>
-                        </select>
-                      </td>
-                      <td>
-                        <input
-                          type="time"
-                          style={{ ...inputS, width: '100px', padding: '5px 8px' }}
-                          value={e.check_in_time || ''}
-                          onChange={ev => set(emp.id, 'check_in_time', ev.target.value)}
-                        />
-                      </td>
-                      <td>
-                        {e.check_in_time ? (
-                          <StatusBadge status={previewStatus} />
-                        ) : (
-                          <select
-                            style={{ ...inputS, width: '120px', padding: '5px 8px' }}
-                            value={e.status || 'Tidak Hadir'}
-                            onChange={ev => set(emp.id, 'status', ev.target.value)}
-                          >
-                            <option value="Tidak Hadir">Tidak Hadir</option>
-                            <option value="Izin">Izin</option>
-                            <option value="Sakit">Sakit</option>
-                          </select>
-                        )}
-                      </td>
-                      <td>
-                        <input
-                          type="text"
-                          placeholder="Catatan (opsional)"
-                          style={{ ...inputS, width: '100%' }}
-                          value={e.notes || ''}
-                          onChange={ev => set(emp.id, 'notes', ev.target.value)}
-                        />
-                      </td>
-                      <td style={{ textAlign: 'center' }}>
-                        <button
-                          disabled={isSaving}
-                          onClick={() => handleSave(emp)}
-                          style={{
-                            background: savedStatus ? 'rgba(16,185,129,0.15)' : 'rgba(139,92,246,0.15)',
-                            border: `1px solid ${savedStatus ? 'rgba(16,185,129,0.3)' : 'rgba(139,92,246,0.3)'}`,
-                            color: savedStatus ? '#10b981' : 'var(--color-primary)',
-                            padding: '6px 14px', borderRadius: '8px',
-                            cursor: isSaving ? 'not-allowed' : 'pointer',
-                            fontSize: '12px', fontWeight: 600, whiteSpace: 'nowrap', fontFamily: 'inherit',
-                          }}>
-                          {isSaving ? '...' : savedStatus ? '✓ Tersimpan' : (emp.record_id ? 'Update' : 'Simpan')}
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+          {/* ── Sudah Diisi ── */}
+          {sudahRows.length > 0 && (
+            <div className="glass-panel" style={{ border: '1px solid rgba(16,185,129,0.2)', opacity: belumRows.length > 0 ? 0.85 : 1 }}>
+              <div style={{
+                padding: '10px 20px', borderBottom: '1px solid rgba(16,185,129,0.15)',
+                display: 'flex', alignItems: 'center', gap: '8px',
+                background: 'rgba(16,185,129,0.05)', borderRadius: '12px 12px 0 0',
+              }}>
+                <span style={{ fontSize: '13px', fontWeight: 700, color: '#10b981' }}>
+                  ✓ Sudah Diisi
+                </span>
+                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                  — {sudahRows.length} karyawan
+                </span>
+              </div>
+              <div style={{ overflowX: 'auto' }}>
+                <table className="data-table">
+                  <thead>{theadRow}</thead>
+                  <tbody>{sudahRows.map(renderRow)}</tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </>
+      )}
 
       {/* Shift cutoff info */}
       <div style={{ marginTop: '12px', fontSize: '12px', color: 'var(--text-muted)' }}>
@@ -262,6 +310,13 @@ function InputHarian({ branches }) {
 // Tab 2: Rekap Bulanan
 // ──────────────────────────────────────────────────────────────────────────────
 
+const DAY_ID = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
+
+function formatDate(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  return `${DAY_ID[d.getDay()]}, ${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
 function DetailModal({ emp, period, onClose }) {
   const [details, setDetails] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -273,51 +328,108 @@ function DetailModal({ emp, period, onClose }) {
     });
   }, [emp.id, period]);
 
+  const ringkasan = {
+    hadir: details.filter(d => d.status === 'Hadir').length,
+    telat: details.filter(d => d.status === 'Telat').length,
+    absen: details.filter(d => d.status === 'Tidak Hadir').length,
+    izin: details.filter(d => d.status === 'Izin').length,
+    sakit: details.filter(d => d.status === 'Sakit').length,
+  };
+
   return (
     <div style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1000,
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 1000,
       display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px',
+      backdropFilter: 'blur(4px)',
     }} onClick={onClose}>
       <div style={{
-        background: 'var(--bg-card)', borderRadius: '16px', padding: '24px',
-        width: '100%', maxWidth: '640px', maxHeight: '80vh', overflowY: 'auto',
-        boxShadow: '0 20px 60px rgba(0,0,0,0.4)', border: '1px solid var(--border-color)',
+        background: 'var(--bg-card)', borderRadius: '16px',
+        width: '100%', maxWidth: '600px', maxHeight: '82vh',
+        display: 'flex', flexDirection: 'column',
+        boxShadow: '0 24px 80px rgba(0,0,0,0.5)', border: '1px solid var(--border-color)',
       }} onClick={e => e.stopPropagation()}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-          <div>
-            <h3 style={{ margin: 0, color: 'var(--text-primary)' }}>Detail Absensi — {emp.name}</h3>
-            <p style={{ margin: '2px 0 0', fontSize: '13px', color: 'var(--text-muted)' }}>Periode {period} · {emp.branch_name || '—'}</p>
+
+        {/* Header */}
+        <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid var(--border-color)', flexShrink: 0 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <div>
+              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>{emp.name}</h3>
+              <p style={{ margin: '3px 0 0', fontSize: '13px', color: 'var(--text-muted)' }}>
+                {emp.branch_name || 'Tanpa Cabang'} · Periode {period}
+              </p>
+            </div>
+            <button onClick={onClose} style={{
+              background: 'var(--bg-input)', border: '1px solid var(--border-color)',
+              color: 'var(--text-muted)', fontSize: '14px', cursor: 'pointer',
+              padding: '4px 10px', borderRadius: '8px', fontFamily: 'inherit', lineHeight: 1.5,
+            }}>✕</button>
           </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '20px', cursor: 'pointer', padding: '4px 8px' }}>✕</button>
-        </div>
-        {loading ? (
-          <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>Memuat...</div>
-        ) : details.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>Belum ada data absensi untuk periode ini.</div>
-        ) : (
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Tanggal</th>
-                <th>Shift</th>
-                <th>Jam Masuk</th>
-                <th>Status</th>
-                <th>Catatan</th>
-              </tr>
-            </thead>
-            <tbody>
-              {details.map(d => (
-                <tr key={d.id}>
-                  <td style={{ fontWeight: 600 }}>{d.date}</td>
-                  <td style={{ color: 'var(--text-muted)' }}>{d.shift || '—'}</td>
-                  <td style={{ fontFamily: 'monospace' }}>{d.check_in_time || '—'}</td>
-                  <td><StatusBadge status={d.status} /></td>
-                  <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{d.notes || '—'}</td>
-                </tr>
+
+          {/* Mini ringkasan */}
+          {!loading && details.length > 0 && (
+            <div style={{ display: 'flex', gap: '12px', marginTop: '14px', flexWrap: 'wrap' }}>
+              {[
+                ['Hadir', ringkasan.hadir, '#10b981'],
+                ['Telat', ringkasan.telat, '#f59e0b'],
+                ['Tdk Hadir', ringkasan.absen, '#ef4444'],
+                ['Izin', ringkasan.izin, '#6366f1'],
+                ['Sakit', ringkasan.sakit, '#3b82f6'],
+              ].map(([lbl, val, clr]) => (
+                <div key={lbl} style={{
+                  background: `${clr}18`, border: `1px solid ${clr}30`,
+                  borderRadius: '8px', padding: '6px 12px', textAlign: 'center', minWidth: '64px',
+                }}>
+                  <div style={{ fontSize: '18px', fontWeight: 700, color: clr }}>{val}</div>
+                  <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '1px' }}>{lbl}</div>
+                </div>
               ))}
-            </tbody>
-          </table>
-        )}
+            </div>
+          )}
+        </div>
+
+        {/* Body */}
+        <div style={{ overflowY: 'auto', flex: 1 }}>
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: '48px', color: 'var(--text-muted)' }}>
+              <div className="loading-spinner" style={{ margin: '0 auto 10px' }} />Memuat data...
+            </div>
+          ) : details.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '48px', color: 'var(--text-muted)' }}>
+              Belum ada catatan absensi untuk periode ini.
+            </div>
+          ) : (
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Tanggal</th>
+                  <th>Shift</th>
+                  <th style={{ textAlign: 'center' }}>Jam Masuk</th>
+                  <th style={{ textAlign: 'center' }}>Status</th>
+                  <th>Catatan</th>
+                </tr>
+              </thead>
+              <tbody>
+                {details.map(d => (
+                  <tr key={d.id}>
+                    <td style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>{formatDate(d.date)}</td>
+                    <td>
+                      <span style={{
+                        background: d.shift === 'Siang' ? 'rgba(245,158,11,0.12)' : 'rgba(99,102,241,0.12)',
+                        color: d.shift === 'Siang' ? '#f59e0b' : '#6366f1',
+                        padding: '2px 8px', borderRadius: '8px', fontSize: '11px', fontWeight: 600,
+                      }}>{d.shift || '—'}</span>
+                    </td>
+                    <td style={{ textAlign: 'center', fontWeight: 700, fontSize: '14px', letterSpacing: '0.5px', color: d.check_in_time ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                      {d.check_in_time || '—'}
+                    </td>
+                    <td style={{ textAlign: 'center' }}><StatusBadge status={d.status} /></td>
+                    <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{d.notes || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
       </div>
     </div>
   );
