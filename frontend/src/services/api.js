@@ -455,6 +455,14 @@ export const payrollApi = {
 };
 
 /**
+ * --- FINANCIAL API ---
+ */
+export const financialApi = {
+  getOutletReport: (period) => api.get(`/financial/outlet?period=${period}`),
+  upsertOutlet: (branchId, period, data) => api.put(`/financial/outlet/${branchId}/${period}`, data),
+};
+
+/**
  * --- RECRUITMENT STAGES CONFIGURATION API ---
  * Services to configure recruitment pipeline workflow.
  */

@@ -662,6 +662,22 @@ async function initDb() {
       }
     }
 
+    // Outlet Financials (laporan keuangan per cabang konter per bulan)
+    await query.run(`
+      CREATE TABLE IF NOT EXISTS outlet_financials (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        branch_id INTEGER NOT NULL REFERENCES branches(id),
+        period TEXT NOT NULL,
+        penjualan REAL DEFAULT 0,
+        operasional REAL DEFAULT 0,
+        notes TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(branch_id, period)
+      )
+    `);
+    await query.run('CREATE INDEX IF NOT EXISTS idx_outlet_fin_period ON outlet_financials(period)').catch(() => {});
+
     // Clean up cognitive test table from training questions if any exist
     await query.run("DELETE FROM test_questions WHERE subtest = 'training'").catch(() => {});
 
