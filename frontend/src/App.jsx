@@ -29,13 +29,10 @@ function App() {
     return 'dashboard';
   });
   const [selectedCandidateId, setSelectedCandidateId] = useState(null);
-  const [isPortalDropdownOpen, setIsPortalDropdownOpen] = useState(() => {
+  const recruitmentViews = ['candidates', 'questions', 'training-questions', 'pipeline-settings', 'test', 'training-portal'];
+  const [isRekrutmenOpen, setIsRekrutmenOpen] = useState(() => {
     const params = new URLSearchParams(window.location.search);
     return window.location.pathname === '/test' || window.location.pathname === '/training-portal' || params.has('code') || params.has('training_code');
-  });
-  const [isQuestionsDropdownOpen, setIsQuestionsDropdownOpen] = useState(() => {
-    const p = new URLSearchParams(window.location.search);
-    return p.get('view') === 'questions' || p.get('view') === 'training-questions';
   });
 
   // Auth state
@@ -211,13 +208,6 @@ function App() {
               Dashboard
             </li>
             <li
-              className={`sidebar-item ${view === 'candidates' ? 'active' : ''}`}
-              onClick={() => setView('candidates')}
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px' }}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
-              Pelamar Kerja
-            </li>
-            <li
               className={`sidebar-item ${view === 'employees' ? 'active' : ''}`}
               onClick={() => setView('employees')}
             >
@@ -260,71 +250,66 @@ function App() {
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px', color: '#f59e0b' }}><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 17a1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9z"></path></svg>
               Pengaturan Sistem
             </li>
+            {/* ── REKRUTMEN GROUP ── */}
             <li
-              className="sidebar-item"
-              onClick={() => setIsQuestionsDropdownOpen(!isQuestionsDropdownOpen)}
-              style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+              className={`sidebar-item${recruitmentViews.includes(view) ? ' active' : ''}`}
+              onClick={() => setIsRekrutmenOpen(p => !p)}
+              style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}
             >
               <div style={{ display: 'flex', alignItems: 'center' }}>
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px' }}><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
-                <span>Bank Soal</span>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px', color: '#a78bfa' }}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                <span>Rekrutmen</span>
               </div>
-              <span style={{ fontSize: '10px', transition: 'transform 0.2s', transform: isQuestionsDropdownOpen ? 'rotate(90deg)' : 'none', color: 'var(--text-muted)' }}>▶</span>
+              <span style={{ fontSize: '10px', transition: 'transform 0.2s', transform: isRekrutmenOpen ? 'rotate(90deg)' : 'none', color: 'var(--text-muted)', marginRight: '4px' }}>▶</span>
             </li>
-            {isQuestionsDropdownOpen && (
-              <ul style={{ listStyle: 'none', paddingLeft: '16px', margin: '4px 0 0', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            {isRekrutmenOpen && (
+              <ul style={{ listStyle: 'none', margin: '2px 0 4px', padding: '0', display: 'flex', flexDirection: 'column', gap: '2px', borderLeft: '2px solid rgba(167,139,250,0.3)', marginLeft: '12px', paddingLeft: '8px' }}>
+                <li
+                  className={`sidebar-item ${view === 'candidates' ? 'active' : ''}`}
+                  onClick={() => setView('candidates')}
+                  style={{ fontSize: '13px', padding: '8px 10px' }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px' }}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                  Pelamar Kerja
+                </li>
                 <li
                   className={`sidebar-item ${view === 'questions' ? 'active' : ''}`}
                   onClick={() => setView('questions')}
-                  style={{ fontSize: '13px', padding: '8px 12px' }}
+                  style={{ fontSize: '13px', padding: '8px 10px' }}
                 >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px' }}><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px' }}><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
                   Bank Soal Ujian
                 </li>
                 <li
                   className={`sidebar-item ${view === 'training-questions' ? 'active' : ''}`}
                   onClick={() => setView('training-questions')}
-                  style={{ fontSize: '13px', padding: '8px 12px' }}
+                  style={{ fontSize: '13px', padding: '8px 10px' }}
                 >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px' }}><path d="M12 2L2 7l10 5 10-5-10-5z"></path><path d="M2 17l10 5 10-5"></path><path d="M2 12l10 5 10-5"></path></svg>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px' }}><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
                   Bank Soal Training
                 </li>
-              </ul>
-            )}
-            <li
-              className={`sidebar-item ${view === 'pipeline-settings' ? 'active' : ''}`}
-              onClick={() => setView('pipeline-settings')}
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px', color: '#8b5cf6' }}><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
-              Pengaturan Pipeline
-            </li>
-            <li
-              className="sidebar-item"
-              onClick={() => setIsPortalDropdownOpen(!isPortalDropdownOpen)}
-              style={{ marginTop: '20px', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center' }}>
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px', color: 'var(--secondary)' }}><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
-                <span>Portal Ujian</span>
-              </div>
-              <span style={{ fontSize: '10px', transition: 'transform 0.2s', transform: isPortalDropdownOpen ? 'rotate(90deg)' : 'none', color: 'var(--text-muted)' }}>▶</span>
-            </li>
-            {isPortalDropdownOpen && (
-              <ul style={{ listStyle: 'none', paddingLeft: '16px', margin: '4px 0 0', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <li
+                  className={`sidebar-item ${view === 'pipeline-settings' ? 'active' : ''}`}
+                  onClick={() => setView('pipeline-settings')}
+                  style={{ fontSize: '13px', padding: '8px 10px' }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px', color: '#8b5cf6' }}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                  Pengaturan Pipeline
+                </li>
                 <li
                   className={`sidebar-item ${view === 'test' ? 'active' : ''}`}
                   onClick={() => setView('test')}
-                  style={{ fontSize: '13px', padding: '8px 12px' }}
+                  style={{ fontSize: '13px', padding: '8px 10px' }}
                 >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px' }}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle></svg>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px' }}><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                   Portal Ujian Kandidat
                 </li>
                 <li
                   className={`sidebar-item ${view === 'training-portal' ? 'active' : ''}`}
                   onClick={() => setView('training-portal')}
-                  style={{ fontSize: '13px', padding: '8px 12px' }}
+                  style={{ fontSize: '13px', padding: '8px 10px' }}
                 >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px' }}><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"></path><path d="M12 6v6l4 2"></path></svg>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px' }}><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="M12 6v6l4 2"/></svg>
                   Portal Ujian Training
                 </li>
               </ul>
