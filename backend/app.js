@@ -46,19 +46,24 @@ app.locals.dbReady = initDb()
 
 const { authenticateToken } = require('./middleware/auth');
 const { auditLog } = require('./middleware/audit');
+const { requireRole } = require('./middleware/roleCheck');
+
+const STAFF   = ['staff', 'finance', 'master'];
+const FINANCE = ['finance', 'master'];
+const MASTER  = ['master'];
 
 app.use('/api', require('./routes/authRoutes'));
-app.use('/api/dashboard', authenticateToken, require('./routes/dashboardRoutes'));
-app.use('/api/audit-log', authenticateToken, require('./routes/auditRoutes'));
-app.use('/api/employees', authenticateToken, auditLog, require('./routes/employeeRoutes'));
-app.use('/api/candidates', authenticateToken, auditLog, require('./routes/candidateRoutes'));
-app.use('/api/stages', authenticateToken, auditLog, require('./routes/stageRoutes'));
-app.use('/api/branches', authenticateToken, auditLog, require('./routes/branchRoutes'));
-app.use('/api/settings', authenticateToken, auditLog, require('./routes/settingsRoutes'));
-app.use('/api/staff', authenticateToken, auditLog, require('./routes/staffRoutes'));
-app.use('/api/attendance', authenticateToken, auditLog, require('./routes/attendanceRoutes'));
-app.use('/api/payroll', authenticateToken, auditLog, require('./routes/payrollRoutes'));
-app.use('/api/financial', authenticateToken, auditLog, require('./routes/financialRoutes'));
+app.use('/api/dashboard',  authenticateToken, requireRole(...STAFF),   require('./routes/dashboardRoutes'));
+app.use('/api/audit-log',  authenticateToken, requireRole(...MASTER),  require('./routes/auditRoutes'));
+app.use('/api/employees',  authenticateToken, auditLog, requireRole(...FINANCE), require('./routes/employeeRoutes'));
+app.use('/api/candidates', authenticateToken, auditLog, requireRole('staff', 'master'), require('./routes/candidateRoutes'));
+app.use('/api/stages',     authenticateToken, auditLog, requireRole('staff', 'master'), require('./routes/stageRoutes'));
+app.use('/api/branches',   authenticateToken, auditLog, requireRole(...FINANCE), require('./routes/branchRoutes'));
+app.use('/api/settings',   authenticateToken, auditLog, requireRole(...MASTER),  require('./routes/settingsRoutes'));
+app.use('/api/staff',      authenticateToken, auditLog, requireRole(...MASTER),  require('./routes/staffRoutes'));
+app.use('/api/attendance', authenticateToken, auditLog, requireRole(...STAFF),   require('./routes/attendanceRoutes'));
+app.use('/api/payroll',    authenticateToken, auditLog, requireRole(...FINANCE), require('./routes/payrollRoutes'));
+app.use('/api/financial',  authenticateToken, auditLog, requireRole(...FINANCE), require('./routes/financialRoutes'));
 app.use('/api', require('./routes/testRoutes'));
 
 // --- SERVE FRONTEND STATIC FILES IN PRODUCTION ---

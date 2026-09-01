@@ -52,6 +52,12 @@ async function fetchApi(endpoint, options = {}) {
 
   const data = await response.json();
   if (!response.ok) {
+    if ((response.status === 401 || response.status === 403) && token) {
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('auth_username');
+      localStorage.removeItem('auth_role');
+      window.dispatchEvent(new CustomEvent('auth:expired'));
+    }
     throw new Error(data.message || 'API request failed');
   }
   return data;
@@ -226,6 +232,11 @@ export const dashboardApi = {
    * @returns {Promise<Object>} Resolves to metrics: total, active, hired, rejected.
    */
   getStats: () => api.get('/dashboard/stats'),
+  /**
+   * Retrieve master operational & configuration summary (Employees, Branches, Settings, Rules).
+   * @returns {Promise<Object>} Resolves to master summary object.
+   */
+  getMasterSummary: () => api.get('/dashboard/master-summary'),
 };
 
 /**
@@ -455,11 +466,24 @@ export const payrollApi = {
 };
 
 /**
+ * --- ADMIN MANAGEMENT API (master only) ---
+ */
+export const adminApi = {
+  list: () => api.get('/admins'),
+  create: (data) => api.post('/admins', data),
+  updateRole: (id, role) => api.put(`/admins/${id}/role`, { role }),
+  delete: (id) => api.delete(`/admins/${id}`),
+};
+
+/**
  * --- FINANCIAL API ---
  */
 export const financialApi = {
   getOutletReport: (period) => api.get(`/financial/outlet?period=${period}`),
   upsertOutlet: (branchId, period, data) => api.put(`/financial/outlet/${branchId}/${period}`, data),
+  getWarehouseReport: (period) => api.get(`/financial/warehouse?period=${period}`),
+  upsertWarehouse: (branchId, period, data) => api.put(`/financial/warehouse/${branchId}/${period}`, data),
+  getConsolidatedReport: (period) => api.get(`/financial/consolidation?period=${period}`),
 };
 
 /**

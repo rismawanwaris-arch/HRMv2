@@ -64,9 +64,12 @@ async function initDb() {
       CREATE TABLE IF NOT EXISTS admins (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT UNIQUE NOT NULL,
-        password TEXT NOT NULL
+        password TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'master'
       )
     `);
+    // Migration: add role column for existing databases
+    await query.run("ALTER TABLE admins ADD COLUMN role TEXT NOT NULL DEFAULT 'master'").catch(() => {});
 
     // 0a. Audit log (who changed what, via middleware/audit.js)
     await query.run(`
@@ -677,6 +680,30 @@ async function initDb() {
       )
     `);
     await query.run('CREATE INDEX IF NOT EXISTS idx_outlet_fin_period ON outlet_financials(period)').catch(() => {});
+
+    // Warehouse Financials (laporan keuangan gudang per bulan)
+    await query.run(`
+      CREATE TABLE IF NOT EXISTS warehouse_reports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        branch_id INTEGER NOT NULL REFERENCES branches(id),
+        period TEXT NOT NULL,
+        penj_gudang REAL DEFAULT 0,
+        pendapatan_lain REAL DEFAULT 0,
+        retur_penjualan REAL DEFAULT 0,
+        pend_konter_all REAL DEFAULT 0,
+        hpp_gudang REAL DEFAULT 0,
+        potongan_laba_petshop REAL DEFAULT 0,
+        biaya_operasional REAL DEFAULT 0,
+        biaya_bonus_penjualan REAL DEFAULT 0,
+        bagi_hasil_petshop REAL DEFAULT 0,
+        penyusutan REAL DEFAULT 0,
+        notes TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(branch_id, period)
+      )
+    `);
+    await query.run('CREATE INDEX IF NOT EXISTS idx_warehouse_fin_period ON warehouse_reports(period)').catch(() => {});
 
     // Clean up cognitive test table from training questions if any exist
     await query.run("DELETE FROM test_questions WHERE subtest = 'training'").catch(() => {});

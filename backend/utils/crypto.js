@@ -96,8 +96,8 @@ function needsRehash(storedPassword) {
  * @param {string} username - Admin username.
  * @returns {string} The signed session token.
  */
-function generateToken(username) {
-  const payload = JSON.stringify({ username, exp: Date.now() + 24 * 60 * 60 * 1000 });
+function generateToken(username, extra = {}) {
+  const payload = JSON.stringify({ username, ...extra, exp: Date.now() + 24 * 60 * 60 * 1000 });
   const signature = crypto.createHmac('sha256', SECRET).update(payload).digest('hex');
   return Buffer.from(payload).toString('base64') + '.' + signature;
 }

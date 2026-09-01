@@ -1,9 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { settingsApi } from '../services/api';
+import { settingsApi, adminApi } from '../services/api';
 
 const fmt = (n) => new Intl.NumberFormat('id-ID').format(n || 0);
 
-export default function Settings() {
+const ROLE_LABELS = { master: 'Master', finance: 'Admin Finance', staff: 'Admin Staff' };
+const ROLE_COLORS = {
+  master:  { bg: '#7c3aed22', color: '#a78bfa', border: '#7c3aed44' },
+  finance: { bg: '#10b98122', color: '#34d399',  border: '#10b98144' },
+  staff:   { bg: '#3b82f622', color: '#60a5fa',  border: '#3b82f644' },
+};
+
+export default function Settings({ currentRole = 'master' }) {
   const [settings, setSettings] = useState({ payroll_period_start_day: 29, payroll_period_end_day: 28, working_days_per_month: 25, shift_pagi_cutoff: '06:30', shift_siang_cutoff: '14:30' });
   const [rules, setRules] = useState([]);
   const [loadingSettings, setLoadingSettings] = useState(true);
@@ -18,6 +25,15 @@ export default function Settings() {
   const [ruleMsg, setRuleMsg] = useState(null);
   const [savingRule, setSavingRule] = useState(false);
 
+  // Admin management state (master only)
+  const [admins, setAdmins] = useState([]);
+  const [showAdminForm, setShowAdminForm] = useState(false);
+  const [adminForm, setAdminForm] = useState({ username: '', password: '', role: 'staff' });
+  const [adminMsg, setAdminMsg] = useState(null);
+  const [savingAdmin, setSavingAdmin] = useState(false);
+
+  const loadAdmins = () => adminApi.list().then(r => { if (r.success) setAdmins(r.data); }).catch(() => {});
+
   useEffect(() => {
     Promise.all([settingsApi.getSettings(), settingsApi.getPenaltyRules()])
       .then(([s, r]) => {
@@ -25,7 +41,48 @@ export default function Settings() {
         if (r.success) setRules(r.data);
       })
       .finally(() => setLoadingSettings(false));
-  }, []);
+    if (currentRole === 'master') loadAdmins();
+  }, [currentRole]);
+
+  const handleCreateAdmin = async (e) => {
+    e.preventDefault();
+    setSavingAdmin(true); setAdminMsg(null);
+    try {
+      const res = await adminApi.create(adminForm);
+      if (res.success) {
+        setAdminMsg({ type: 'ok', text: res.message });
+        setAdminForm({ username: '', password: '', role: 'staff' });
+        setShowAdminForm(false);
+        loadAdmins();
+      } else {
+        setAdminMsg({ type: 'err', text: res.message });
+      }
+    } catch (err) {
+      setAdminMsg({ type: 'err', text: err.message || 'Gagal.' });
+    } finally {
+      setSavingAdmin(false);
+    }
+  };
+
+  const handleDeleteAdmin = async (id, username) => {
+    if (!window.confirm(`Hapus akun "${username}"?`)) return;
+    try {
+      const res = await adminApi.delete(id);
+      if (res.success) loadAdmins();
+      else alert(res.message);
+    } catch (err) {
+      alert(err.message || 'Gagal menghapus.');
+    }
+  };
+
+  const handleChangeAdminRole = async (id, role) => {
+    try {
+      await adminApi.updateRole(id, role);
+      loadAdmins();
+    } catch (err) {
+      alert(err.message || 'Gagal mengubah role.');
+    }
+  };
 
   const handleSaveSettings = async (e) => {
     e.preventDefault();
@@ -419,6 +476,91 @@ export default function Settings() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── MANAJEMEN ADMIN (master only) ── */}
+      {currentRole === 'master' && (
+        <div className="card" style={{ marginTop: '24px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+            <div>
+              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>Manajemen Admin</h3>
+              <p style={{ margin: '2px 0 0', fontSize: '12px', color: 'var(--text-muted)' }}>Kelola akun dan peran pengguna admin sistem</p>
+            </div>
+            <button
+              onClick={() => { setShowAdminForm(p => !p); setAdminMsg(null); }}
+              style={{ padding: '8px 16px', background: 'linear-gradient(135deg, #7c3aed, #6d28d9)', border: 'none', borderRadius: '8px', color: '#fff', fontWeight: 600, fontSize: '13px', cursor: 'pointer' }}
+            >
+              {showAdminForm ? 'Batal' : '+ Tambah Admin'}
+            </button>
+          </div>
+
+          {/* Form tambah admin */}
+          {showAdminForm && (
+            <form onSubmit={handleCreateAdmin} style={{ background: 'var(--bg-hover)', borderRadius: '10px', padding: '16px', marginBottom: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 160px auto', gap: '10px', alignItems: 'end' }}>
+                <div>
+                  <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>Username</label>
+                  <input required value={adminForm.username} onChange={e => setAdminForm(p => ({ ...p, username: e.target.value }))}
+                    placeholder="username baru"
+                    style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-surface)', color: 'var(--text-primary)', fontSize: '13px', boxSizing: 'border-box' }} />
+                </div>
+                <div>
+                  <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>Password</label>
+                  <input required type="password" minLength={8} value={adminForm.password} onChange={e => setAdminForm(p => ({ ...p, password: e.target.value }))}
+                    placeholder="min. 8 karakter"
+                    style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-surface)', color: 'var(--text-primary)', fontSize: '13px', boxSizing: 'border-box' }} />
+                </div>
+                <div>
+                  <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>Peran</label>
+                  <select value={adminForm.role} onChange={e => setAdminForm(p => ({ ...p, role: e.target.value }))}
+                    style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-surface)', color: 'var(--text-primary)', fontSize: '13px', boxSizing: 'border-box' }}>
+                    <option value="staff">Admin Staff</option>
+                    <option value="finance">Admin Finance</option>
+                    <option value="master">Master</option>
+                  </select>
+                </div>
+                <button type="submit" disabled={savingAdmin}
+                  style={{ padding: '8px 16px', background: savingAdmin ? '#666' : '#10b981', border: 'none', borderRadius: '8px', color: '#fff', fontWeight: 700, fontSize: '13px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                  {savingAdmin ? 'Menyimpan...' : 'Simpan'}
+                </button>
+              </div>
+              {adminMsg && <div style={{ fontSize: '13px', color: adminMsg.type === 'ok' ? '#10b981' : '#ef4444' }}>{adminMsg.text}</div>}
+            </form>
+          )}
+
+          {/* Daftar admin */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {admins.map(adm => {
+              const rc = ROLE_COLORS[adm.role] || ROLE_COLORS.staff;
+              return (
+                <div key={adm.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: 'var(--bg-hover)', borderRadius: '10px', border: '1px solid var(--border-color)', gap: '12px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
+                    <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, color: '#fff', flexShrink: 0 }}>
+                      {adm.username.charAt(0).toUpperCase()}
+                    </div>
+                    <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{adm.username}</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
+                    <select
+                      value={adm.role}
+                      onChange={e => handleChangeAdminRole(adm.id, e.target.value)}
+                      style={{ padding: '4px 8px', borderRadius: '6px', border: `1px solid ${rc.border}`, background: rc.bg, color: rc.color, fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}
+                    >
+                      <option value="staff">Admin Staff</option>
+                      <option value="finance">Admin Finance</option>
+                      <option value="master">Master</option>
+                    </select>
+                    <button onClick={() => handleDeleteAdmin(adm.id, adm.username)}
+                      style={{ padding: '5px 10px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '6px', color: '#ef4444', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>
+                      Hapus
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+            {admins.length === 0 && <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px', padding: '16px' }}>Memuat...</div>}
           </div>
         </div>
       )}

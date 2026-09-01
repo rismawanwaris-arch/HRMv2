@@ -26,7 +26,7 @@ function Login({ onLogin, setView }) {
       const data = await res.json();
 
       if (data.success) {
-        onLogin(data.token, data.username);
+        onLogin(data.token, data.username, data.role || 'master');
       } else {
         setError(data.message || 'Login gagal.');
       }

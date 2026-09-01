@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import MasterDashboard from './views/MasterDashboard';
 import HRDashboard from './views/HRDashboard';
 import CandidateList from './views/CandidateList';
 import EmployeeData from './views/EmployeeData';
@@ -13,6 +14,8 @@ import EmployeeManagement from './views/EmployeeManagement';
 import AttendanceManagement from './views/AttendanceManagement';
 import PayrollManagement from './views/PayrollManagement';
 import LaporanKeuanganKonter from './views/LaporanKeuanganKonter';
+import LaporanKeuanganGudang from './views/LaporanKeuanganGudang';
+import LaporanKonsolidasi from './views/LaporanKonsolidasi';
 import Settings from './views/Settings';
 import Login from './views/Login';
 import API_BASE from './config';
@@ -29,15 +32,20 @@ function App() {
     return 'dashboard';
   });
   const [selectedCandidateId, setSelectedCandidateId] = useState(null);
-  const recruitmentViews = ['candidates', 'questions', 'training-questions', 'pipeline-settings', 'test', 'training-portal'];
+  const recruitmentViews = ['recruitment-dashboard', 'candidates', 'questions', 'training-questions', 'pipeline-settings', 'test', 'training-portal'];
   const [isRekrutmenOpen, setIsRekrutmenOpen] = useState(() => {
     const params = new URLSearchParams(window.location.search);
     return window.location.pathname === '/test' || window.location.pathname === '/training-portal' || params.has('code') || params.has('training_code');
+  });
+  const laporanViews = ['laporan-konter', 'laporan-gudang', 'laporan-konsolidasi'];
+  const [isLaporanOpen, setIsLaporanOpen] = useState(() => {
+    return window.location.pathname.includes('laporan');
   });
 
   // Auth state
   const [isAuthenticated, setIsAuthenticated] = useState(() => !!localStorage.getItem('auth_token'));
   const [currentUsername, setCurrentUsername] = useState(() => localStorage.getItem('auth_username') || '');
+  const [currentRole, setCurrentRole] = useState(() => localStorage.getItem('auth_role') || 'master');
 
   // Change Password state
   const [showProfileModal, setShowProfileModal] = useState(false);
@@ -55,24 +63,47 @@ function App() {
     localStorage.setItem('app_theme', theme);
   }, [theme]);
 
+  useEffect(() => {
+    const handleAuthExpired = () => {
+      handleLogout();
+    };
+    window.addEventListener('auth:expired', handleAuthExpired);
+    return () => window.removeEventListener('auth:expired', handleAuthExpired);
+  }, []);
+
   const toggleTheme = () => {
     setTheme(prev => prev === 'dark' ? 'light' : 'dark');
   };
 
-  const handleLogin = (token, username) => {
+  const handleLogin = (token, username, role = 'master') => {
     localStorage.setItem('auth_token', token);
     localStorage.setItem('auth_username', username);
+    localStorage.setItem('auth_role', role);
     setIsAuthenticated(true);
     setCurrentUsername(username);
+    setCurrentRole(role);
     setView('dashboard');
   };
 
   const handleLogout = () => {
     localStorage.removeItem('auth_token');
     localStorage.removeItem('auth_username');
+    localStorage.removeItem('auth_role');
     setIsAuthenticated(false);
     setCurrentUsername('');
-    setView('dashboard'); // Will fall back to login due to auth check
+    setCurrentRole('master');
+    setView('dashboard');
+  };
+
+  // Access control helpers
+  const canAccess = {
+    rekrutmen:  ['staff', 'master'].includes(currentRole),
+    karyawan:   ['finance', 'master'].includes(currentRole),
+    cabang:     ['finance', 'master'].includes(currentRole),
+    absensi:    true,
+    payroll:    ['finance', 'master'].includes(currentRole),
+    laporan:    ['finance', 'master'].includes(currentRole),
+    settings:   currentRole === 'master',
   };
 
   const handleChangePassword = async (e) => {
@@ -109,10 +140,20 @@ function App() {
     }
   };
 
+  const Denied = () => (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '60vh', gap: '12px', color: 'var(--text-secondary)' }}>
+      <div style={{ fontSize: '48px' }}>🔒</div>
+      <div style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)' }}>Akses Ditolak</div>
+      <div style={{ fontSize: '14px' }}>Peran Anda tidak memiliki izin untuk halaman ini.</div>
+    </div>
+  );
+
   // Router logic
   const renderView = () => {
     switch (view) {
       case 'dashboard':
+        return <MasterDashboard setView={setView} />;
+      case 'recruitment-dashboard':
         return (
           <HRDashboard
             onSelectCandidate={(id) => {
@@ -123,18 +164,18 @@ function App() {
           />
         );
       case 'candidates':
-        return (
+        return canAccess.rekrutmen ? (
           <CandidateList
             onSelectCandidate={(id) => {
               setSelectedCandidateId(id);
               setView('detail');
             }}
           />
-        );
+        ) : <Denied />;
       case 'employees':
-        return <EmployeeManagement />;
+        return canAccess.karyawan ? <EmployeeManagement /> : <Denied />;
       case 'employee-legacy':
-        return (
+        return canAccess.karyawan ? (
           <EmployeeData
             onSelectCandidate={(id) => {
               setSelectedCandidateId(id);
@@ -142,35 +183,44 @@ function App() {
             }}
             setView={setView}
           />
-        );
+        ) : <Denied />;
       case 'detail':
-        return (
+        return canAccess.rekrutmen ? (
           <CandidateDetail
             candidateId={selectedCandidateId}
             onBack={() => setView('candidates')}
           />
-        );
+        ) : <Denied />;
       case 'branches':
-        return <BranchManagement setView={setView} />;
+        return canAccess.cabang ? <BranchManagement setView={setView} /> : <Denied />;
       case 'settings':
-        return <Settings />;
+        return canAccess.settings ? <Settings currentRole={currentRole} /> : <Denied />;
       case 'attendance':
         return <AttendanceManagement />;
       case 'payroll':
-        return <PayrollManagement />;
+        return canAccess.payroll ? <PayrollManagement /> : <Denied />;
       case 'laporan-konter':
-        return <LaporanKeuanganKonter />;
+        return canAccess.laporan ? <LaporanKeuanganKonter /> : <Denied />;
+      case 'laporan-gudang':
+        return canAccess.laporan ? <LaporanKeuanganGudang /> : <Denied />;
+      case 'laporan-konsolidasi':
+        return canAccess.laporan ? <LaporanKonsolidasi setView={setView} /> : <Denied />;
       case 'pipeline-settings':
-        return <StageManagement setView={setView} />;
+        return canAccess.rekrutmen ? <StageManagement setView={setView} /> : <Denied />;
       case 'questions':
-        return <QuestionBank />;
+        return canAccess.rekrutmen ? <QuestionBank /> : <Denied />;
       case 'training-questions':
-        return <TrainingQuestionBank />;
+        return canAccess.rekrutmen ? <TrainingQuestionBank /> : <Denied />;
       default:
-        return <HRDashboard onSelectCandidate={(id) => {
-          setSelectedCandidateId(id);
-          setView('detail');
-        }} />;
+        return (
+          <HRDashboard
+            onSelectCandidate={(id) => {
+              setSelectedCandidateId(id);
+              setView('detail');
+            }}
+            setView={setView}
+          />
+        );
     }
   };
 
@@ -207,21 +257,21 @@ function App() {
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px' }}><rect x="3" y="3" width="7" height="9"></rect><rect x="14" y="3" width="7" height="5"></rect><rect x="14" y="12" width="7" height="9"></rect><rect x="3" y="16" width="7" height="5"></rect></svg>
               Dashboard
             </li>
-            <li
+            {canAccess.karyawan && <li
               className={`sidebar-item ${view === 'employees' ? 'active' : ''}`}
               onClick={() => setView('employees')}
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px', color: 'var(--color-success)' }}><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><polyline points="16 11 18 13 22 9"></polyline></svg>
               Data Karyawan
-            </li>
+            </li>}
 
-            <li
+            {canAccess.cabang && <li
               className={`sidebar-item ${view === 'branches' ? 'active' : ''}`}
               onClick={() => setView('branches')}
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px', color: '#f59e0b' }}><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></svg>
               Cabang Outlet
-            </li>
+            </li>}
             <li
               className={`sidebar-item ${view === 'attendance' ? 'active' : ''}`}
               onClick={() => setView('attendance')}
@@ -229,28 +279,64 @@ function App() {
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px', color: '#3b82f6' }}><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><polyline points="9 16 11 18 15 14"/></svg>
               Absensi
             </li>
-            <li
+            {canAccess.payroll && <li
               className={`sidebar-item ${view === 'payroll' ? 'active' : ''}`}
               onClick={() => setView('payroll')}
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px', color: '#10b981' }}><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
               Payroll & Slip Gaji
-            </li>
+            </li>}
+            {/* ── LAPORAN KEUANGAN GROUP ── */}
+            {canAccess.laporan && <>
             <li
-              className={`sidebar-item ${view === 'laporan-konter' ? 'active' : ''}`}
-              onClick={() => setView('laporan-konter')}
+              className={`sidebar-item${laporanViews.includes(view) ? ' active' : ''}`}
+              onClick={() => setIsLaporanOpen(p => !p)}
+              style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
             >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px', color: '#06b6d4' }}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-              Laporan Keuangan
+              <div style={{ display: 'flex', alignItems: 'center' }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px', color: '#06b6d4' }}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                <span>Laporan Keuangan</span>
+              </div>
+              <span style={{ fontSize: '10px', transition: 'transform 0.2s', transform: isLaporanOpen ? 'rotate(90deg)' : 'none', color: 'var(--text-muted)', marginRight: '4px' }}>▶</span>
             </li>
-            <li
+            {isLaporanOpen && (
+              <ul style={{ listStyle: 'none', margin: '2px 0 4px', padding: '0', display: 'flex', flexDirection: 'column', gap: '2px', borderLeft: '2px solid rgba(6,182,212,0.3)', marginLeft: '12px', paddingLeft: '8px' }}>
+                <li
+                  className={`sidebar-item ${view === 'laporan-konter' ? 'active' : ''}`}
+                  onClick={() => setView('laporan-konter')}
+                  style={{ fontSize: '13px', padding: '8px 10px' }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px' }}><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></svg>
+                  Laporan Konter
+                </li>
+                <li
+                  className={`sidebar-item ${view === 'laporan-gudang' ? 'active' : ''}`}
+                  onClick={() => setView('laporan-gudang')}
+                  style={{ fontSize: '13px', padding: '8px 10px' }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px' }}><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
+                  Laporan Gudang
+                </li>
+                <li
+                  className={`sidebar-item ${view === 'laporan-konsolidasi' ? 'active' : ''}`}
+                  onClick={() => setView('laporan-konsolidasi')}
+                  style={{ fontSize: '13px', padding: '8px 10px' }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px' }}><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                  Konsolidasi Semua Lokasi
+                </li>
+              </ul>
+            )}
+            </>}
+            {canAccess.settings && <li
               className={`sidebar-item ${view === 'settings' ? 'active' : ''}`}
               onClick={() => setView('settings')}
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px', color: '#f59e0b' }}><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 17a1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9z"></path></svg>
               Pengaturan Sistem
-            </li>
+            </li>}
             {/* ── REKRUTMEN GROUP ── */}
+            {canAccess.rekrutmen && <>
             <li
               className={`sidebar-item${recruitmentViews.includes(view) ? ' active' : ''}`}
               onClick={() => setIsRekrutmenOpen(p => !p)}
@@ -264,6 +350,14 @@ function App() {
             </li>
             {isRekrutmenOpen && (
               <ul style={{ listStyle: 'none', margin: '2px 0 4px', padding: '0', display: 'flex', flexDirection: 'column', gap: '2px', borderLeft: '2px solid rgba(167,139,250,0.3)', marginLeft: '12px', paddingLeft: '8px' }}>
+                <li
+                  className={`sidebar-item ${view === 'recruitment-dashboard' ? 'active' : ''}`}
+                  onClick={() => setView('recruitment-dashboard')}
+                  style={{ fontSize: '13px', padding: '8px 10px' }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px' }}><rect x="3" y="3" width="7" height="9"></rect><rect x="14" y="3" width="7" height="5"></rect><rect x="14" y="12" width="7" height="9"></rect><rect x="3" y="16" width="7" height="5"></rect></svg>
+                  Pipeline Rekrutmen
+                </li>
                 <li
                   className={`sidebar-item ${view === 'candidates' ? 'active' : ''}`}
                   onClick={() => setView('candidates')}
@@ -314,6 +408,7 @@ function App() {
                 </li>
               </ul>
             )}
+            </>}
           </ul>
         </nav>
 
@@ -326,7 +421,15 @@ function App() {
               </div>
               <div>
                 <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{currentUsername}</div>
-                <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Administrator</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                  <span style={{
+                    fontSize: '9px', fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase',
+                    padding: '1px 6px', borderRadius: '4px',
+                    background: currentRole === 'master' ? '#7c3aed22' : currentRole === 'finance' ? '#10b98122' : '#3b82f622',
+                    color:      currentRole === 'master' ? '#a78bfa'  : currentRole === 'finance' ? '#34d399'  : '#60a5fa',
+                    border: `1px solid ${currentRole === 'master' ? '#7c3aed44' : currentRole === 'finance' ? '#10b98144' : '#3b82f644'}`,
+                  }}>{currentRole}</span>
+                </div>
               </div>
             </div>
 
