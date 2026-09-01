@@ -335,3 +335,37 @@ exports.importExcel = async (req, res) => {
     res.status(500).json({ success: false, message: 'Server error mengimport data excel' });
   }
 };
+
+exports.downloadTemplate = (req, res) => {
+  const headers = [
+    'Nama Lengkap', 'NIK', 'Jenis Kelamin', 'Tempat Lahir', 'Tanggal Lahir',
+    'Agama', 'Status Perkawinan', 'Jumlah Tanggungan', 'Golongan Darah',
+    'No. Handphone', 'E-mail', 'Alamat KTP', 'Alamat Domisili',
+    'Kontak Darurat 1 (Nama & No HP)', 'Kontak Darurat 2 (Nama & No HP)',
+    'Nama Ayah', 'Nama Ibu', 'Nama Pasangan (Jika ada)',
+    'Pendidikan Terakhir', 'Nama Institusi Pendidikan', 'Jurusan', 'Tahun Lulus', 'Nilai / IPK',
+    'Tinggi Badan (cm)', 'Berat Badan (kg)', 'Kondisi Fisik', 'Tes Buta Warna',
+    'Riwayat Penyakit', 'Alergi', 'Nomor NPWP',
+    'Nama Bank & Nomor Rekening', 'Nomor BPJS Kesehatan', 'Nomor BPJS Ketenagakerjaan',
+    'Ukuran Seragam', 'Cabang Penempatan', 'Tipe Kontrak', 'Tanggal Diterima'
+  ];
+  const example = [
+    'Budi Santoso', '3174012345678901', 'Laki-laki', 'Jakarta', '1990-05-15',
+    'Islam', 'Menikah', '2', 'O',
+    '081234567890', 'budi@email.com', 'Jl. Merdeka No.1 Jakarta', 'Jl. Sudirman No.2 Jakarta',
+    'Siti - 081111222333', 'Ahmad - 082222333444',
+    'Slamet Santoso', 'Dewi Rahayu', 'Ani Santoso',
+    'S1', 'Universitas Indonesia', 'Teknik Informatika', '2013', '3.50',
+    '170', '65', 'Normal', 'Tidak', '', '', '12.345.678.9-012.000',
+    'BCA - 1234567890', '0001234567890', '10001234567890',
+    'M', 'Cabang Jakarta Pusat', 'PKWTT', '2024-01-15'
+  ];
+  const wb = xlsx.utils.book_new();
+  const ws = xlsx.utils.aoa_to_sheet([headers, example]);
+  ws['!cols'] = headers.map(() => ({ wch: 22 }));
+  xlsx.utils.book_append_sheet(wb, ws, 'Template Karyawan');
+  const buf = xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  res.setHeader('Content-Disposition', 'attachment; filename="template_import_karyawan.xlsx"');
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.send(buf);
+};

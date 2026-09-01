@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { branchApi } from '../services/api';
 
 const iStyle = { background: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '10px 14px', color: 'var(--text-primary)', fontSize: '14px', width: '100%', boxSizing: 'border-box', display: 'block', outline: 'none', fontFamily: 'inherit', transition: 'border-color 0.2s' };
@@ -111,6 +111,9 @@ function BranchManagement({ setView }) {
   const [form, setForm] = useState(EMPTY_FORM);
   const [editForm, setEditForm] = useState({ ...EMPTY_FORM, id: null, status: 'Active' });
   const [error, setError] = useState('');
+  const importRef = useRef(null);
+  const [importing, setImporting] = useState(false);
+  const [importMessage, setImportMessage] = useState(null);
 
   useEffect(() => { fetchBranches(); }, []);
 
@@ -187,6 +190,29 @@ function BranchManagement({ setView }) {
     }
   };
 
+  const handleImportExcel = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const formData = new FormData();
+    formData.append('file', file);
+    setImporting(true);
+    setImportMessage(null);
+    try {
+      const data = await branchApi.importExcel(formData);
+      if (data.success) {
+        setImportMessage({ type: 'success', text: data.message });
+        fetchBranches();
+      } else {
+        setImportMessage({ type: 'error', text: data.message });
+      }
+    } catch {
+      setImportMessage({ type: 'error', text: 'Terjadi kesalahan saat import data.' });
+    } finally {
+      setImporting(false);
+      if (importRef.current) importRef.current.value = '';
+    }
+  };
+
   const openEdit = (branch) => {
     setEditForm({
       id: branch.id,
@@ -216,11 +242,43 @@ function BranchManagement({ setView }) {
           <h1 className="page-title">Manajemen Cabang Outlet</h1>
           <p className="page-subtitle">Kelola daftar cabang, konter, dan gudang perusahaan.</p>
         </div>
-        <button className="btn btn-primary" onClick={() => { setShowAddModal(true); setError(''); setForm(EMPTY_FORM); }}>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '6px' }}><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          Tambah Cabang
-        </button>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <input type="file" accept=".xlsx,.xls" style={{ display: 'none' }} ref={importRef} onChange={handleImportExcel} />
+          <button
+            className="btn btn-secondary"
+            onClick={async () => {
+              try {
+                const resp = await branchApi.downloadTemplate();
+                const blob = await resp.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url; a.download = 'template_import_cabang.xlsx'; a.click();
+                URL.revokeObjectURL(url);
+              } catch { alert('Gagal mengunduh template.'); }
+            }}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '6px' }}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><line x1="12" y1="15" x2="12" y2="3"/><polyline points="7 10 12 15 17 10"/></svg>
+            Template
+          </button>
+          <button className="btn btn-secondary" onClick={() => importRef.current && importRef.current.click()} disabled={importing}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '6px' }}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            {importing ? 'Mengimpor...' : 'Import Excel'}
+          </button>
+          <button className="btn btn-primary" onClick={() => { setShowAddModal(true); setError(''); setForm(EMPTY_FORM); }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '6px' }}><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Tambah Cabang
+          </button>
+        </div>
       </div>
+
+      {importMessage && (
+        <div style={{ padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', backgroundColor: importMessage.type === 'success' ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)', color: importMessage.type === 'success' ? '#047857' : '#b91c1c', border: `1px solid ${importMessage.type === 'success' ? '#10b981' : '#ef4444'}` }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <span>{importMessage.text}</span>
+            <button onClick={() => setImportMessage(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit' }}>&times;</button>
+          </div>
+        </div>
+      )}
 
       <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)', marginBottom: '24px' }}>
         {[

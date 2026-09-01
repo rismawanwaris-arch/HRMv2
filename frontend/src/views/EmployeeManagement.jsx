@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { staffApi, branchApi } from '../services/api';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { staffApi, branchApi, employeeApi } from '../services/api';
 
 const fmt = (n) => n ? new Intl.NumberFormat('id-ID').format(n) : '0';
 
@@ -74,6 +74,10 @@ export default function EmployeeManagement() {
   const [showPromoteModal, setShowPromoteModal] = useState(false);
   const [hiredCandidates, setHiredCandidates] = useState([]);
   const [promoteForm, setPromoteForm] = useState({ candidateId: null, employee_type: 'Frontliner', position: '' });
+
+  const importRef = useRef(null);
+  const [importing, setImporting] = useState(false);
+  const [importMessage, setImportMessage] = useState(null);
 
   const fetchEmployees = useCallback(async () => {
     setLoading(true);
@@ -177,6 +181,29 @@ export default function EmployeeManagement() {
     { id: 'keuangan', label: 'Keuangan & Admin' },
   ];
 
+  const handleImportExcel = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const formData = new FormData();
+    formData.append('file', file);
+    setImporting(true);
+    setImportMessage(null);
+    try {
+      const data = await employeeApi.importExcel(formData);
+      if (data.success) {
+        setImportMessage({ type: 'success', text: data.message });
+        fetchEmployees();
+      } else {
+        setImportMessage({ type: 'error', text: data.message });
+      }
+    } catch {
+      setImportMessage({ type: 'error', text: 'Terjadi kesalahan saat import data.' });
+    } finally {
+      setImporting(false);
+      if (importRef.current) importRef.current.value = '';
+    }
+  };
+
   const activeBranches = branches.filter(b => b.status === 'Active');
   const activeCount = employees.filter(e => e.status === 'Active').length;
   const frontlinerCount = employees.filter(e => e.employee_type === 'Frontliner' && e.status === 'Active').length;
@@ -189,7 +216,28 @@ export default function EmployeeManagement() {
           <h1 className="page-title">Manajemen Karyawan</h1>
           <p className="page-subtitle">Kelola data karyawan aktif, promosi, dan status karyawan.</p>
         </div>
-        <div style={{ display: 'flex', gap: '10px' }}>
+        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+          <input type="file" accept=".xlsx,.xls" style={{ display: 'none' }} ref={importRef} onChange={handleImportExcel} />
+          <button
+            className="btn btn-secondary"
+            onClick={async () => {
+              try {
+                const resp = await employeeApi.downloadTemplate();
+                const blob = await resp.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url; a.download = 'template_import_karyawan.xlsx'; a.click();
+                URL.revokeObjectURL(url);
+              } catch { alert('Gagal mengunduh template.'); }
+            }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '5px' }}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><line x1="12" y1="15" x2="12" y2="3"/><polyline points="7 10 12 15 17 10"/></svg>
+            Template
+          </button>
+          <button className="btn btn-secondary" onClick={() => importRef.current && importRef.current.click()} disabled={importing}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '5px' }}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            {importing ? 'Mengimpor...' : 'Import Excel'}
+          </button>
           <button className="btn" style={{ background: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.3)', color: '#10b981', padding: '10px 16px', borderRadius: '10px', cursor: 'pointer', fontSize: '13px', fontWeight: 600, fontFamily: 'inherit' }} onClick={openPromote}>
             Promosikan dari Rekrutmen
           </button>
@@ -198,6 +246,15 @@ export default function EmployeeManagement() {
           </button>
         </div>
       </div>
+
+      {importMessage && (
+        <div style={{ padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', backgroundColor: importMessage.type === 'success' ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)', color: importMessage.type === 'success' ? '#047857' : '#b91c1c', border: `1px solid ${importMessage.type === 'success' ? '#10b981' : '#ef4444'}` }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>{importMessage.text}</span>
+            <button onClick={() => setImportMessage(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontSize: '16px' }}>&times;</button>
+          </div>
+        </div>
+      )}
 
       {/* Stats */}
       <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)', marginBottom: '24px' }}>

@@ -17,6 +17,7 @@ import LaporanKeuanganKonter from './views/LaporanKeuanganKonter';
 import LaporanKeuanganGudang from './views/LaporanKeuanganGudang';
 import LaporanKonsolidasi from './views/LaporanKonsolidasi';
 import Settings from './views/Settings';
+import Discipline from './views/Discipline';
 import Login from './views/Login';
 import API_BASE from './config';
 
@@ -104,6 +105,7 @@ function App() {
     payroll:    ['finance', 'master'].includes(currentRole),
     laporan:    ['finance', 'master'].includes(currentRole),
     settings:   currentRole === 'master',
+    disiplin:   ['finance', 'master'].includes(currentRole),
   };
 
   const handleChangePassword = async (e) => {
@@ -211,6 +213,8 @@ function App() {
         return canAccess.rekrutmen ? <QuestionBank /> : <Denied />;
       case 'training-questions':
         return canAccess.rekrutmen ? <TrainingQuestionBank /> : <Denied />;
+      case 'discipline':
+        return canAccess.disiplin ? <Discipline /> : <Denied />;
       default:
         return (
           <HRDashboard
@@ -285,6 +289,13 @@ function App() {
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px', color: '#10b981' }}><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
               Payroll & Slip Gaji
+            </li>}
+            {canAccess.disiplin && <li
+              className={`sidebar-item ${view === 'discipline' ? 'active' : ''}`}
+              onClick={() => setView('discipline')}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px', color: '#ef4444' }}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+              Disiplin & Pelanggaran
             </li>}
             {/* ── LAPORAN KEUANGAN GROUP ── */}
             {canAccess.laporan && <>
@@ -412,11 +423,11 @@ function App() {
           </ul>
         </nav>
 
-        <div className="sidebar-footer" style={{ borderTop: '1px solid var(--border-color)', paddingTop: '16px' }}>
+        <div className="sidebar-footer" style={{ borderTop: '1px solid var(--border-color)', paddingTop: '10px' }}>
           {/* Profile / Logout Menu */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', color: 'white' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+              <div style={{ width: '26px', height: '26px', borderRadius: '50%', background: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', color: 'white', fontSize: '11px', flexShrink: 0 }}>
                 {currentUsername.charAt(0).toUpperCase()}
               </div>
               <div>
@@ -435,41 +446,40 @@ function App() {
 
             <button
               onClick={() => { setShowProfileModal(true); setPwError(''); setPwSuccess(''); setOldPassword(''); setNewPassword(''); }}
-              style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '8px', borderRadius: '8px', transition: 'all 0.2s', width: '100%', textAlign: 'left', fontSize: '12px' }}
+              style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '6px 8px', borderRadius: '7px', transition: 'all 0.2s', width: '100%', textAlign: 'left', fontSize: '11px' }}
               onMouseOver={e => e.currentTarget.style.background = 'var(--bg-hover)'}
               onMouseOut={e => e.currentTarget.style.background = 'transparent'}
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"></path></svg>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"></path></svg>
               Ganti Password
             </button>
 
             <button
               onClick={toggleTheme}
-              style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '8px', borderRadius: '8px', transition: 'all 0.2s', width: '100%', textAlign: 'left', fontSize: '12px' }}
+              style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '6px 8px', borderRadius: '7px', transition: 'all 0.2s', width: '100%', textAlign: 'left', fontSize: '11px' }}
               onMouseOver={e => e.currentTarget.style.background = 'var(--bg-hover)'}
               onMouseOut={e => e.currentTarget.style.background = 'transparent'}
             >
               {theme === 'dark' ? (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
               ) : (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
               )}
               {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
             </button>
 
             <button
               onClick={handleLogout}
-              style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '8px', borderRadius: '8px', transition: 'all 0.2s', width: '100%', textAlign: 'left', fontSize: '12px' }}
+              style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '6px 8px', borderRadius: '7px', transition: 'all 0.2s', width: '100%', textAlign: 'left', fontSize: '11px' }}
               onMouseOver={e => e.currentTarget.style.background = 'rgba(239,68,68,0.1)'}
               onMouseOut={e => e.currentTarget.style.background = 'transparent'}
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
               Logout
             </button>
           </div>
 
-          <p>© 2026 Konter Pulsa HR</p>
-          <p style={{ fontSize: '10px', marginTop: '4px' }}>v1.0.0</p>
+          <p>© 2026 Konter Pulsa HR · v1.0.0</p>
         </div>
       </aside>
 

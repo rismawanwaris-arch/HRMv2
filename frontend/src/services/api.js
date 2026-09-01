@@ -220,6 +220,7 @@ export const employeeApi = {
   // Do not set Content-Type manually: the browser must add the multipart
   // boundary itself when the body is a FormData.
   importExcel: (formData) => api.post('/employees/import', formData),
+  downloadTemplate: () => api.get('/employees/template'),
 };
 
 /**
@@ -271,6 +272,19 @@ export const branchApi = {
    * @returns {Promise<Object>} Resolves to deletion status.
    */
   delete: (id) => api.delete(`/branches/${id}`),
+  importExcel: (formData) => api.post('/branches/import', formData),
+  downloadTemplate: () => api.get('/branches/template'),
+};
+
+export const disciplineApi = {
+  getAll: (params) => {
+    const qs = new URLSearchParams(params || {}).toString();
+    return api.get(`/discipline${qs ? '?' + qs : ''}`);
+  },
+  getStats: () => api.get('/discipline/stats'),
+  create: (data) => api.post('/discipline', data),
+  resolve: (id, data) => api.put(`/discipline/${id}/resolve`, data),
+  remove: (id) => api.delete(`/discipline/${id}`),
 };
 
 /**

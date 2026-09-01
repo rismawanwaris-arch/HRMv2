@@ -16,6 +16,7 @@ const upload = multer({
   }
 });
 
+router.get('/template', employeeController.downloadTemplate);
 router.get('/', employeeController.getEmployees);
 router.post('/manual', employeeController.addEmployeeManual);
 router.post('/import', upload.single('file'), employeeController.importExcel);

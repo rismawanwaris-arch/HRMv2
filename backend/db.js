@@ -705,6 +705,24 @@ async function initDb() {
     `);
     await query.run('CREATE INDEX IF NOT EXISTS idx_warehouse_fin_period ON warehouse_reports(period)').catch(() => {});
 
+    // Discipline & Violations
+    await query.run(`
+      CREATE TABLE IF NOT EXISTS discipline_records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        employee_id INTEGER NOT NULL REFERENCES employees(id),
+        type TEXT NOT NULL,
+        date TEXT NOT NULL,
+        description TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'Aktif',
+        resolution_note TEXT,
+        resolved_at TEXT,
+        issued_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await query.run('CREATE INDEX IF NOT EXISTS idx_discipline_emp ON discipline_records(employee_id)').catch(() => {});
+
     // Clean up cognitive test table from training questions if any exist
     await query.run("DELETE FROM test_questions WHERE subtest = 'training'").catch(() => {});
 
