@@ -4,11 +4,13 @@ import { settingsApi } from '../services/api';
 const fmt = (n) => new Intl.NumberFormat('id-ID').format(n || 0);
 
 export default function Settings() {
-  const [settings, setSettings] = useState({ payroll_period_start_day: 29, payroll_period_end_day: 28, working_days_per_month: 25 });
+  const [settings, setSettings] = useState({ payroll_period_start_day: 29, payroll_period_end_day: 28, working_days_per_month: 25, shift_pagi_cutoff: '06:30', shift_siang_cutoff: '14:30' });
   const [rules, setRules] = useState([]);
   const [loadingSettings, setLoadingSettings] = useState(true);
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsMsg, setSettingsMsg] = useState(null);
+  const [savingShift, setSavingShift] = useState(false);
+  const [shiftMsg, setShiftMsg] = useState(null);
 
   const [showRuleModal, setShowRuleModal] = useState(false);
   const [editingRule, setEditingRule] = useState(null);
@@ -36,6 +38,23 @@ export default function Settings() {
       setSettingsMsg({ type: 'error', text: 'Gagal menyimpan pengaturan.' });
     } finally {
       setSavingSettings(false);
+    }
+  };
+
+  const handleSaveShift = async (e) => {
+    e.preventDefault();
+    setSavingShift(true);
+    setShiftMsg(null);
+    try {
+      const res = await settingsApi.updateSettings({
+        shift_pagi_cutoff: settings.shift_pagi_cutoff,
+        shift_siang_cutoff: settings.shift_siang_cutoff,
+      });
+      setShiftMsg({ type: res.success ? 'success' : 'error', text: res.message });
+    } catch {
+      setShiftMsg({ type: 'error', text: 'Gagal menyimpan pengaturan.' });
+    } finally {
+      setSavingShift(false);
     }
   };
 
@@ -181,6 +200,89 @@ export default function Settings() {
             }}
           >
             {savingSettings ? 'Menyimpan...' : 'Simpan Pengaturan'}
+          </button>
+        </form>
+      </div>
+
+      {/* Attendance Shift Settings */}
+      <div className="glass-panel" style={{ marginBottom: '24px' }}>
+        <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border-color)' }}>
+          <h2 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>Pengaturan Batas Jam Masuk Shift</h2>
+          <p style={{ margin: '4px 0 0', fontSize: '13px', color: 'var(--text-muted)' }}>
+            Karyawan yang masuk setelah batas waktu ini dihitung <strong>Telat</strong> dan dikenakan ASBEN.
+          </p>
+        </div>
+        <form onSubmit={handleSaveShift} style={{ padding: '24px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '20px', maxWidth: '480px' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
+                Batas Shift Pagi
+              </label>
+              <input
+                type="time"
+                style={inputStyle}
+                value={settings.shift_pagi_cutoff || '06:30'}
+                onChange={e => setSettings(p => ({ ...p, shift_pagi_cutoff: e.target.value }))}
+              />
+              <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                Masuk setelah jam ini → Telat
+              </p>
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
+                Batas Shift Siang
+              </label>
+              <input
+                type="time"
+                style={inputStyle}
+                value={settings.shift_siang_cutoff || '14:30'}
+                onChange={e => setSettings(p => ({ ...p, shift_siang_cutoff: e.target.value }))}
+              />
+              <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                Masuk setelah jam ini → Telat
+              </p>
+            </div>
+          </div>
+
+          {/* Contoh perhitungan */}
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '20px' }}>
+            {[
+              { label: 'Shift Pagi tepat waktu', time: `≤ ${settings.shift_pagi_cutoff || '06:30'}`, color: '#10b981' },
+              { label: 'Shift Pagi telat', time: `> ${settings.shift_pagi_cutoff || '06:30'}`, color: '#f59e0b' },
+              { label: 'Shift Siang tepat waktu', time: `≤ ${settings.shift_siang_cutoff || '14:30'}`, color: '#10b981' },
+              { label: 'Shift Siang telat', time: `> ${settings.shift_siang_cutoff || '14:30'}`, color: '#f59e0b' },
+            ].map(c => (
+              <div key={c.label} style={{
+                padding: '8px 14px', borderRadius: '10px',
+                background: `${c.color}12`, border: `1px solid ${c.color}30`,
+                fontSize: '12px',
+              }}>
+                <span style={{ color: 'var(--text-muted)' }}>{c.label}: </span>
+                <span style={{ color: c.color, fontWeight: 700 }}>{c.time}</span>
+              </div>
+            ))}
+          </div>
+
+          {shiftMsg && (
+            <div style={{
+              padding: '10px 14px', borderRadius: '8px', marginBottom: '16px', fontSize: '13px',
+              background: shiftMsg.type === 'success' ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)',
+              color: shiftMsg.type === 'success' ? '#34d399' : '#f87171',
+              border: `1px solid ${shiftMsg.type === 'success' ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'}`,
+            }}>
+              {shiftMsg.text}
+            </div>
+          )}
+
+          <button
+            type="submit" disabled={savingShift}
+            style={{
+              padding: '10px 24px', background: savingShift ? 'rgba(139,92,246,0.4)' : 'linear-gradient(135deg, #7c3aed, #6d28d9)',
+              border: 'none', borderRadius: '10px', color: 'white', cursor: savingShift ? 'not-allowed' : 'pointer',
+              fontSize: '14px', fontWeight: 600, fontFamily: 'inherit',
+            }}
+          >
+            {savingShift ? 'Menyimpan...' : 'Simpan Batas Shift'}
           </button>
         </form>
       </div>

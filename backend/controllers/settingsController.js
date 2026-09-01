@@ -14,10 +14,24 @@ exports.getSettings = async (req, res) => {
 
 exports.updateSettings = async (req, res) => {
   try {
-    const allowed = ['payroll_period_start_day', 'payroll_period_end_day', 'working_days_per_month'];
-    for (const key of allowed) {
+    const intKeys = ['payroll_period_start_day', 'payroll_period_end_day', 'working_days_per_month'];
+    const timeKeys = ['shift_pagi_cutoff', 'shift_siang_cutoff'];
+
+    for (const key of intKeys) {
       if (req.body[key] !== undefined) {
         const val = String(parseInt(req.body[key], 10) || 0);
+        await query.run(
+          'INSERT INTO system_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at',
+          [key, val]
+        );
+      }
+    }
+
+    for (const key of timeKeys) {
+      if (req.body[key] !== undefined) {
+        // Validate HH:MM format
+        const val = String(req.body[key]).trim();
+        if (!/^\d{2}:\d{2}$/.test(val)) continue;
         await query.run(
           'INSERT INTO system_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at',
           [key, val]
