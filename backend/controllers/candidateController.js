@@ -2,10 +2,10 @@ const { query, uploadsDir } = require('../db');
 const { generateAccessCode, getCandidateFolderName, upload } = require('../utils/helpers');
 const { CANDIDATE_FIELDS, buildInsert, buildUpdate } = require('../utils/candidateFields');
 const { decryptRow, blindIndex } = require('../utils/fieldCrypto');
-const { parseCvWithGemini } = require('../utils/geminiCvParser');
 const fs = require('fs');
 const path = require('path');
 const xlsx = require('xlsx');
+const { parseCvWithGemini } = require('../utils/geminiCvParser');
 
 // Onboarding is tracked outside the configurable recruitment_stages pipeline
 // and is addressed by this sentinel stage number in the stage-update endpoint.
@@ -620,30 +620,49 @@ exports.importCandidatesExcel = async (req, res) => {
     const errors = [];
     const insertedCandidates = [];
 
+    // Helper to extract values from Google Form responses or standard Excel
+    const getVal = (row, ...keys) => {
+      for (const k of keys) {
+        if (row[k] !== undefined && row[k] !== null && String(row[k]).trim() !== '') {
+          return String(row[k]).trim();
+        }
+      }
+      const lowerKeys = keys.map(k => k.toLowerCase());
+      for (const [colName, val] of Object.entries(row)) {
+        if (val !== undefined && val !== null && String(val).trim() !== '') {
+          const lowerCol = colName.toLowerCase();
+          if (lowerKeys.some(lk => lowerCol.includes(lk))) {
+            return String(val).trim();
+          }
+        }
+      }
+      return '';
+    };
+
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
       const rowNum = i + 2; // header is row 1
 
-      const name = (row['Nama Lengkap'] || row['Nama'] || row['name'] || '').toString().trim();
+      const name = getVal(row, 'Nama Lengkap', 'Nama', 'name');
       if (!name) {
         skippedCount++;
         continue;
       }
 
-      const nik = (row['NIK'] || row['Nomor KTP'] || row['nik'] || '').toString().trim() || null;
-      const email = (row['Email'] || row['email'] || '').toString().trim() || null;
-      const phone = (row['No. WhatsApp'] || row['No HP'] || row['Telepon'] || row['phone'] || '').toString().trim() || null;
-      const gender = (row['Jenis Kelamin'] || row['gender'] || 'Laki-laki').toString().trim();
-      const birth_place = (row['Tempat Lahir'] || row['birth_place'] || '').toString().trim();
-      const birth_date = (row['Tanggal Lahir'] || row['birth_date'] || '').toString().trim();
-      const religion = (row['Agama'] || row['religion'] || '').toString().trim();
-      const marital_status = (row['Status Nikah'] || row['marital_status'] || 'Belum Kawin').toString().trim();
-      const education_level = (row['Pendidikan Terakhir'] || row['education_level'] || 'SMA / SMK').toString().trim();
-      const education_institution = (row['Asal Sekolah / Kampus'] || row['education_institution'] || '').toString().trim();
-      const education_major = (row['Jurusan'] || row['education_major'] || '').toString().trim();
-      const address_ktp = (row['Alamat KTP'] || row['address_ktp'] || '').toString().trim();
-      const address_domicile = (row['Alamat Domisili'] || row['address_domicile'] || '').toString().trim();
-      const work_experience = (row['Pengalaman Kerja'] || row['work_experience'] || '').toString().trim();
+      const nik = getVal(row, 'NIK', 'Nomor KTP', 'No. KTP', 'nik') || null;
+      const email = getVal(row, 'Email', 'email', 'Alamat Email') || null;
+      const phone = getVal(row, 'No. WhatsApp', 'WhatsApp', 'No HP', 'Nomor HP', 'Telepon', 'phone') || null;
+      const gender = getVal(row, 'Jenis Kelamin', 'gender', 'Kelamin') || 'Laki-laki';
+      const birth_place = getVal(row, 'Tempat Lahir', 'birth_place', 'Kota Lahir');
+      const birth_date = getVal(row, 'Tanggal Lahir', 'birth_date', 'Tgl Lahir');
+      const religion = getVal(row, 'Agama', 'religion');
+      const marital_status = getVal(row, 'Status Nikah', 'Status Perkawinan', 'marital_status') || 'Belum Kawin';
+      const education_level = getVal(row, 'Pendidikan Terakhir', 'Pendidikan', 'education_level') || 'SMA / SMK';
+      const education_institution = getVal(row, 'Asal Sekolah', 'Nama Sekolah', 'Asal Kampus', 'Universitas', 'education_institution');
+      const education_major = getVal(row, 'Jurusan', 'education_major', 'Program Studi');
+      const address_ktp = getVal(row, 'Alamat KTP', 'address_ktp');
+      const address_domicile = getVal(row, 'Alamat Domisili', 'Alamat Tinggal', 'Domisili', 'address_domicile');
+      const work_experience = getVal(row, 'Pengalaman Kerja', 'Pengalaman', 'work_experience');
 
       // Check NIK duplication if provided
       if (nik) {
@@ -720,11 +739,6 @@ exports.importCandidatesExcel = async (req, res) => {
   }
 };
 
-/**
- * Generate and download template Excel for bulk candidate import.
- * @param {import('express').Request} req 
- * @param {import('express').Response} res 
- */
 exports.downloadCandidateTemplateExcel = (req, res) => {
   try {
     const templateData = [
@@ -738,12 +752,28 @@ exports.downloadCandidateTemplateExcel = (req, res) => {
         'Tanggal Lahir': '2001-05-15',
         'Agama': 'Islam',
         'Status Nikah': 'Belum Kawin',
+        'Jumlah Tanggungan': 0,
+        'Golongan Darah': 'O',
+        'Tinggi Badan (cm)': 170,
+        'Berat Badan (kg)': 65,
+        'Kondisi Fisik': 'Sehat',
+        'Alamat KTP': 'Jl. Sukajadi No. 123, Bandung',
+        'Alamat Domisili': 'Jl. Sukajadi No. 123, Bandung',
+        'Kontak Darurat 1': '081298765432 (Bpk. Joko - Ayah)',
+        'Kontak Darurat 2': '',
+        'Nama Ayah': 'Joko Santoso',
+        'Nama Ibu': 'Sri Wahyuni',
         'Pendidikan Terakhir': 'SMA / SMK',
         'Asal Sekolah / Kampus': 'SMKN 1 Bandung',
         'Jurusan': 'Teknik Komputer',
-        'Alamat KTP': 'Jl. Sukajadi No. 123, Bandung',
-        'Alamat Domisili': 'Jl. Sukajadi No. 123, Bandung',
-        'Pengalaman Kerja': 'Pernah bekerja sebagai kasir minimarket 1 tahun'
+        'Tahun Kelulusan': '2019-2022',
+        'Nilai Akhir / IPK': '85.5',
+        'Pengalaman Kerja': 'Kasir Minimarket 1 tahun (2022-2023)',
+        'NPWP': '',
+        'Nama Bank': 'BCA',
+        'Nomor Rekening': '1234567890',
+        'Riwayat Kesehatan': 'Tidak ada',
+        'Alergi': 'Tidak ada'
       },
       {
         'Nama Lengkap': 'Siti Rahmawati',
@@ -755,18 +785,34 @@ exports.downloadCandidateTemplateExcel = (req, res) => {
         'Tanggal Lahir': '2002-08-20',
         'Agama': 'Islam',
         'Status Nikah': 'Belum Kawin',
-        'Pendidikan Terakhir': 'D3 / S1',
-        'Asal Sekolah / Kampus': 'Universitas Padjadjaran',
-        'Jurusan': 'Manajemen',
+        'Jumlah Tanggungan': 0,
+        'Golongan Darah': 'A',
+        'Tinggi Badan (cm)': 158,
+        'Berat Badan (kg)': 50,
+        'Kondisi Fisik': 'Sehat',
         'Alamat KTP': 'Jl. Cimahi Raya No. 45',
         'Alamat Domisili': 'Jl. Cimahi Raya No. 45',
-        'Pengalaman Kerja': 'Customer Service 1 tahun'
+        'Kontak Darurat 1': '081312345678 (Ibu Dewi - Ibu)',
+        'Kontak Darurat 2': '',
+        'Nama Ayah': 'Rahmat Hidayat',
+        'Nama Ibu': 'Dewi Sartika',
+        'Pendidikan Terakhir': 'D4 / S1',
+        'Asal Sekolah / Kampus': 'Universitas Padjadjaran',
+        'Jurusan': 'Manajemen',
+        'Tahun Kelulusan': '2020-2024',
+        'Nilai Akhir / IPK': '3.65',
+        'Pengalaman Kerja': 'Customer Service Retail 1 tahun',
+        'NPWP': '',
+        'Nama Bank': 'Mandiri',
+        'Nomor Rekening': '9876543210',
+        'Riwayat Kesehatan': 'Tidak ada',
+        'Alergi': 'Tidak ada'
       }
     ];
 
     const worksheet = xlsx.utils.json_to_sheet(templateData);
     const workbook = xlsx.utils.book_new();
-    xlsx.utils.book_append_sheet(workbook, worksheet, 'Data Pelamar');
+    xlsx.utils.book_append_sheet(workbook, worksheet, 'Data Pelamar Google Form');
 
     const buffer = xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' });
 
@@ -780,37 +826,40 @@ exports.downloadCandidateTemplateExcel = (req, res) => {
 };
 
 /**
- * Parse uploaded CV file and evaluate against HRD criteria using Google Gemini API.
- * @param {import('express').Request} req 
- * @param {import('express').Response} res 
- */
+  * Parse CV document using Gemini AI to extract candidate data & HRD assessment.
+  * @param {import('express').Request} req 
+  * @param {import('express').Response} res 
+  */
 exports.parseCv = async (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).json({ success: false, message: 'File CV (PDF / Gambar / Scan) wajib diunggah.' });
+      return res.status(400).json({ success: false, message: 'File CV wajib diunggah untuk di-scan.' });
     }
 
     const fileBuffer = fs.readFileSync(req.file.path);
     const mimeType = req.file.mimetype;
-    const originalName = req.file.originalname;
+    const originalFilename = req.file.originalname;
 
-    // Clean up temporary upload file
+    const parsedResult = await parseCvWithGemini(fileBuffer, mimeType, originalFilename);
+
+    // Remove temp file
     if (fs.existsSync(req.file.path)) {
       try { fs.unlinkSync(req.file.path); } catch (e) {}
     }
 
-    const parsedData = await parseCvWithGemini(fileBuffer, mimeType, originalName);
-
     res.json({
       success: true,
-      message: 'CV berhasil dibaca dan dinilai oleh Google Gemini AI.',
-      data: parsedData
+      message: 'CV berhasil diproses dengan Google Gemini AI.',
+      data: parsedResult
     });
   } catch (error) {
     console.error('API Error (parseCv):', error);
+    if (req.file && fs.existsSync(req.file.path)) {
+      try { fs.unlinkSync(req.file.path); } catch (e) {}
+    }
     res.status(500).json({
       success: false,
-      message: error.message || 'Gagal memproses CV dengan AI.'
+      message: error.message || 'Gagal memproses CV dengan Gemini AI.'
     });
   }
 };
