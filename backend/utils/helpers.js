@@ -60,6 +60,50 @@ const upload = multer({
   }
 });
 
+const tempUploadStorage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const tempDir = path.join(uploadsDir, 'temp_uploads');
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir, { recursive: true });
+    }
+    cb(null, tempDir);
+  },
+  filename: function (req, file, cb) {
+    const field = sanitizeFilenameFragment(file.fieldname || 'doc');
+    const ext = path.extname(file.originalname).toLowerCase().replace(/[^a-z0-9.]/g, '');
+    const uniqueSuffix = Date.now() + '-' + crypto.randomInt(0, 1e9);
+    cb(null, `${field}-${uniqueSuffix}${ext}`);
+  }
+});
+
+const candidateCreationUpload = multer({
+  storage: tempUploadStorage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB per file
+  fileFilter: function (req, file, cb) {
+    const allowedTypes = ['.pdf', '.jpg', '.jpeg', '.png', '.doc', '.docx'];
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (allowedTypes.includes(ext)) {
+      cb(null, true);
+    } else {
+      cb(new Error(`Format file ${file.originalname} tidak didukung. Gunakan PDF, JPG, PNG, atau DOCX.`));
+    }
+  }
+});
+
+const excelUpload = multer({
+  storage: tempUploadStorage,
+  limits: { fileSize: 15 * 1024 * 1024 },
+  fileFilter: function (req, file, cb) {
+    const allowedTypes = ['.xlsx', '.xls', '.csv'];
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (allowedTypes.includes(ext)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Format file harus .xlsx, .xls, atau .csv'));
+    }
+  }
+});
+
 /**
  * Generate a random access code using a CSPRNG.
  * @param {string} [prefix] - Optional prefix (e.g. 'MAN-' for manual entries).
@@ -78,5 +122,7 @@ module.exports = {
   getCandidateFolderName,
   sanitizeFilenameFragment,
   upload,
+  candidateCreationUpload,
+  excelUpload,
   generateAccessCode
 };

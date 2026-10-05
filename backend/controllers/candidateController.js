@@ -2,8 +2,10 @@ const { query, uploadsDir } = require('../db');
 const { generateAccessCode, getCandidateFolderName, upload } = require('../utils/helpers');
 const { CANDIDATE_FIELDS, buildInsert, buildUpdate } = require('../utils/candidateFields');
 const { decryptRow, blindIndex } = require('../utils/fieldCrypto');
+const { parseCvWithGemini } = require('../utils/geminiCvParser');
 const fs = require('fs');
 const path = require('path');
+const xlsx = require('xlsx');
 
 // Onboarding is tracked outside the configurable recruitment_stages pipeline
 // and is addressed by this sentinel stage number in the stage-update endpoint.
@@ -433,5 +435,382 @@ exports.updateCandidateStage = async (req, res) => {
   } catch (error) {
     console.error('API Error (stage update):', error);
     res.status(500).json({ success: false, message: 'Server error updating stage details' });
+  }
+};
+
+/**
+ * Add a new candidate with multiple uploaded documents stored in ZimaOS storage.
+ * @param {import('express').Request} req 
+ * @param {import('express').Response} res 
+ */
+exports.addCandidateWithDocuments = async (req, res) => {
+  try {
+    const { name } = req.body;
+    if (!name || !name.trim()) {
+      // Clean up uploaded temp files
+      if (req.files) {
+        const allFiles = Array.isArray(req.files) ? req.files : Object.values(req.files).flat();
+        allFiles.forEach(f => {
+          if (fs.existsSync(f.path)) {
+            try { fs.unlinkSync(f.path); } catch (e) {}
+          }
+        });
+      }
+      return res.status(400).json({ success: false, message: 'Nama lengkap pelamar wajib diisi.' });
+    }
+
+    // Generate unique access code
+    let accessCode = generateAccessCode();
+    let isUnique = false;
+    let retries = 0;
+    while (!isUnique && retries < 10) {
+      const existing = await query.get('SELECT id FROM candidates WHERE access_code = ?', [accessCode]);
+      if (!existing) isUnique = true;
+      else {
+        accessCode = generateAccessCode();
+        retries++;
+      }
+    }
+    if (!isUnique) {
+      return res.status(500).json({ success: false, message: 'Gagal membuat kode akses unik. Silakan coba lagi.' });
+    }
+
+    const firstStage = await query.get('SELECT id FROM recruitment_stages WHERE is_active = 1 ORDER BY order_num ASC LIMIT 1');
+    const initialStageId = firstStage ? firstStage.id : 1;
+
+    const { columns, placeholders, values } = buildInsert(CANDIDATE_FIELDS, req.body);
+    const insertSql = `
+      INSERT INTO candidates (access_code, ${columns}, status, current_stage)
+      VALUES (?, ${placeholders}, 'Active', ?)
+    `;
+
+    const result = await query.run(insertSql, [accessCode, ...values, initialStageId]);
+    const candidateId = result.id;
+
+    // Initialize all stage records
+    await query.run('INSERT INTO stage1_admin (candidate_id) VALUES (?)', [candidateId]);
+    await query.run('INSERT INTO stage2_written_test (candidate_id) VALUES (?)', [candidateId]);
+    await query.run('INSERT INTO stage3_simulation (candidate_id) VALUES (?)', [candidateId]);
+    await query.run('INSERT INTO stage4_interview_hrd (candidate_id) VALUES (?)', [candidateId]);
+    await query.run('INSERT INTO stage5_interview_user (candidate_id) VALUES (?)', [candidateId]);
+    await query.run('INSERT INTO stage6_mcu_ref (candidate_id) VALUES (?)', [candidateId]);
+    await query.run('INSERT INTO stage7_offering (candidate_id) VALUES (?)', [candidateId]);
+    await query.run('INSERT INTO onboarding (candidate_id) VALUES (?)', [candidateId]);
+
+    // Handle files saved to ZimaOS persistent storage directory (uploadsDir)
+    const uploadedDocs = [];
+    if (req.files) {
+      const sanitizedName = name.trim().replace(/[^a-zA-Z0-9_\-]/g, '_');
+      const candidateFolder = path.join(uploadsDir, `${candidateId}_${sanitizedName}`);
+      if (!fs.existsSync(candidateFolder)) {
+        fs.mkdirSync(candidateFolder, { recursive: true });
+      }
+
+      const docTypeMapping = {
+        cv: 'CV / Resume',
+        ktp: 'KTP / Identitas',
+        foto: 'Pas Foto',
+        ijazah: 'Ijazah / Transkrip',
+        surat_lamaran: 'Surat Lamaran',
+        skck: 'SKCK',
+        other: 'Berkas Tambahan'
+      };
+
+      const allFiles = Array.isArray(req.files) ? req.files : Object.values(req.files).flat();
+
+      for (const file of allFiles) {
+        const docType = docTypeMapping[file.fieldname] || file.fieldname || 'Dokumen Pelamar';
+        const targetPath = path.join(candidateFolder, file.filename);
+        
+        // Move from temp to candidate directory in ZimaOS storage
+        fs.renameSync(file.path, targetPath);
+
+        await query.run(
+          `INSERT INTO candidate_documents (candidate_id, doc_type, file_name, original_name, file_path, file_type, file_size)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [candidateId, docType, file.filename, file.originalname, targetPath, file.mimetype, file.size]
+        );
+
+        uploadedDocs.push({
+          doc_type: docType,
+          original_name: file.originalname,
+          file_size: file.size
+        });
+      }
+
+      // Auto mark berkas_lengkap = 1 in stage 1 if CV or KTP is present
+      if (allFiles.some(f => f.fieldname === 'cv' || f.fieldname === 'ktp')) {
+        await query.run('UPDATE stage1_admin SET berkas_lengkap = 1 WHERE candidate_id = ?', [candidateId]);
+      }
+    }
+
+    // Save AI screening assessment if provided from frontend
+    if (req.body.ai_assessment) {
+      try {
+        const ai = typeof req.body.ai_assessment === 'string' ? JSON.parse(req.body.ai_assessment) : req.body.ai_assessment;
+        await query.run(
+          `UPDATE stage1_admin 
+           SET ai_screening_score = ?, ai_recommendation = ?, ai_summary = ?, ai_strengths = ?, ai_notes = ?,
+               usia_sesuai = ?, pendidikan_sesuai = ?, domisili_sesuai = ?
+           WHERE candidate_id = ?`,
+          [
+            ai.match_score || 0,
+            ai.recommendation || null,
+            ai.summary || null,
+            JSON.stringify(ai.strengths || []),
+            JSON.stringify(ai.interview_notes || []),
+            ai.usia_sesuai ? 1 : 0,
+            ai.pendidikan_sesuai ? 1 : 0,
+            ai.domisili_sesuai ? 1 : 0,
+            candidateId
+          ]
+        );
+      } catch (e) {
+        console.warn('Failed to parse ai_assessment:', e.message);
+      }
+    }
+
+    res.status(201).json({
+      success: true,
+      message: 'Pelamar baru dan berkas dokumen berhasil disimpan di penyimpanan ZimaOS.',
+      candidateId,
+      accessCode,
+      uploadedDocuments: uploadedDocs
+    });
+  } catch (error) {
+    console.error('API Error (addCandidateWithDocuments):', error);
+    if (error instanceof Error && /UNIQUE constraint failed.*(candidates\.nik|nik_bidx)/.test(error.message)) {
+      return res.status(400).json({ success: false, message: 'NIK pelamar sudah terdaftar di sistem.' });
+    }
+    res.status(500).json({ success: false, message: 'Gagal menyimpan data pelamar dan berkas.' });
+  }
+};
+
+/**
+ * Bulk import candidates from Excel (.xlsx, .xls, .csv)
+ * @param {import('express').Request} req 
+ * @param {import('express').Response} res 
+ */
+exports.importCandidatesExcel = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'File Excel wajib diunggah.' });
+    }
+
+    const filePath = req.file.path;
+    const workbook = xlsx.readFile(filePath);
+    const sheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
+    const rows = xlsx.utils.sheet_to_json(worksheet, { defval: '' });
+
+    // Clean up temporary excel file
+    if (fs.existsSync(filePath)) {
+      try { fs.unlinkSync(filePath); } catch (e) {}
+    }
+
+    if (!rows || rows.length === 0) {
+      return res.status(400).json({ success: false, message: 'File Excel kosong atau format tidak sesuai.' });
+    }
+
+    const firstStage = await query.get('SELECT id FROM recruitment_stages WHERE is_active = 1 ORDER BY order_num ASC LIMIT 1');
+    const initialStageId = firstStage ? firstStage.id : 1;
+
+    let successCount = 0;
+    let skippedCount = 0;
+    const errors = [];
+    const insertedCandidates = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const rowNum = i + 2; // header is row 1
+
+      const name = (row['Nama Lengkap'] || row['Nama'] || row['name'] || '').toString().trim();
+      if (!name) {
+        skippedCount++;
+        continue;
+      }
+
+      const nik = (row['NIK'] || row['Nomor KTP'] || row['nik'] || '').toString().trim() || null;
+      const email = (row['Email'] || row['email'] || '').toString().trim() || null;
+      const phone = (row['No. WhatsApp'] || row['No HP'] || row['Telepon'] || row['phone'] || '').toString().trim() || null;
+      const gender = (row['Jenis Kelamin'] || row['gender'] || 'Laki-laki').toString().trim();
+      const birth_place = (row['Tempat Lahir'] || row['birth_place'] || '').toString().trim();
+      const birth_date = (row['Tanggal Lahir'] || row['birth_date'] || '').toString().trim();
+      const religion = (row['Agama'] || row['religion'] || '').toString().trim();
+      const marital_status = (row['Status Nikah'] || row['marital_status'] || 'Belum Kawin').toString().trim();
+      const education_level = (row['Pendidikan Terakhir'] || row['education_level'] || 'SMA / SMK').toString().trim();
+      const education_institution = (row['Asal Sekolah / Kampus'] || row['education_institution'] || '').toString().trim();
+      const education_major = (row['Jurusan'] || row['education_major'] || '').toString().trim();
+      const address_ktp = (row['Alamat KTP'] || row['address_ktp'] || '').toString().trim();
+      const address_domicile = (row['Alamat Domisili'] || row['address_domicile'] || '').toString().trim();
+      const work_experience = (row['Pengalaman Kerja'] || row['work_experience'] || '').toString().trim();
+
+      // Check NIK duplication if provided
+      if (nik) {
+        const existing = await query.get('SELECT id FROM candidates WHERE nik = ? OR nik_bidx = ?', [nik, blindIndex(nik)]);
+        if (existing) {
+          errors.push(`Baris ${rowNum}: NIK "${nik}" (${name}) sudah ada di sistem.`);
+          skippedCount++;
+          continue;
+        }
+      }
+
+      // Generate access code
+      let accessCode = generateAccessCode();
+      let isUnique = false;
+      let retries = 0;
+      while (!isUnique && retries < 10) {
+        const existingCode = await query.get('SELECT id FROM candidates WHERE access_code = ?', [accessCode]);
+        if (!existingCode) isUnique = true;
+        else {
+          accessCode = generateAccessCode();
+          retries++;
+        }
+      }
+
+      const candidateData = {
+        name, nik, email, phone, gender, birth_place, birth_date,
+        religion, marital_status, education_level, education_institution,
+        education_major, address_ktp, address_domicile, work_experience,
+        status: 'Active', current_stage: initialStageId
+      };
+
+      const { columns, placeholders, values } = buildInsert(CANDIDATE_FIELDS, candidateData);
+      const insertSql = `
+        INSERT INTO candidates (access_code, ${columns}, status, current_stage)
+        VALUES (?, ${placeholders}, 'Active', ?)
+      `;
+
+      try {
+        const resInsert = await query.run(insertSql, [accessCode, ...values, initialStageId]);
+        const candidateId = resInsert.id;
+
+        // Initialize stages
+        await query.run('INSERT INTO stage1_admin (candidate_id) VALUES (?)', [candidateId]);
+        await query.run('INSERT INTO stage2_written_test (candidate_id) VALUES (?)', [candidateId]);
+        await query.run('INSERT INTO stage3_simulation (candidate_id) VALUES (?)', [candidateId]);
+        await query.run('INSERT INTO stage4_interview_hrd (candidate_id) VALUES (?)', [candidateId]);
+        await query.run('INSERT INTO stage5_interview_user (candidate_id) VALUES (?)', [candidateId]);
+        await query.run('INSERT INTO stage6_mcu_ref (candidate_id) VALUES (?)', [candidateId]);
+        await query.run('INSERT INTO stage7_offering (candidate_id) VALUES (?)', [candidateId]);
+        await query.run('INSERT INTO onboarding (candidate_id) VALUES (?)', [candidateId]);
+
+        successCount++;
+        insertedCandidates.push({ id: candidateId, name, access_code: accessCode });
+      } catch (err) {
+        errors.push(`Baris ${rowNum} (${name}): ${err.message}`);
+        skippedCount++;
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Import selesai. Berhasil: ${successCount} pelamar, Dilewati: ${skippedCount} baris.`,
+      stats: {
+        total_rows: rows.length,
+        success_count: successCount,
+        skipped_count: skippedCount,
+        errors
+      },
+      candidates: insertedCandidates
+    });
+  } catch (error) {
+    console.error('API Error (importCandidatesExcel):', error);
+    res.status(500).json({ success: false, message: 'Server error saat import Excel pelamar.' });
+  }
+};
+
+/**
+ * Generate and download template Excel for bulk candidate import.
+ * @param {import('express').Request} req 
+ * @param {import('express').Response} res 
+ */
+exports.downloadCandidateTemplateExcel = (req, res) => {
+  try {
+    const templateData = [
+      {
+        'Nama Lengkap': 'Budi Santoso',
+        'NIK': '3201234567890001',
+        'No. WhatsApp': '081234567890',
+        'Email': 'budi@example.com',
+        'Jenis Kelamin': 'Laki-laki',
+        'Tempat Lahir': 'Bandung',
+        'Tanggal Lahir': '2001-05-15',
+        'Agama': 'Islam',
+        'Status Nikah': 'Belum Kawin',
+        'Pendidikan Terakhir': 'SMA / SMK',
+        'Asal Sekolah / Kampus': 'SMKN 1 Bandung',
+        'Jurusan': 'Teknik Komputer',
+        'Alamat KTP': 'Jl. Sukajadi No. 123, Bandung',
+        'Alamat Domisili': 'Jl. Sukajadi No. 123, Bandung',
+        'Pengalaman Kerja': 'Pernah bekerja sebagai kasir minimarket 1 tahun'
+      },
+      {
+        'Nama Lengkap': 'Siti Rahmawati',
+        'NIK': '3201234567890002',
+        'No. WhatsApp': '081987654321',
+        'Email': 'siti@example.com',
+        'Jenis Kelamin': 'Perempuan',
+        'Tempat Lahir': 'Cimahi',
+        'Tanggal Lahir': '2002-08-20',
+        'Agama': 'Islam',
+        'Status Nikah': 'Belum Kawin',
+        'Pendidikan Terakhir': 'D3 / S1',
+        'Asal Sekolah / Kampus': 'Universitas Padjadjaran',
+        'Jurusan': 'Manajemen',
+        'Alamat KTP': 'Jl. Cimahi Raya No. 45',
+        'Alamat Domisili': 'Jl. Cimahi Raya No. 45',
+        'Pengalaman Kerja': 'Customer Service 1 tahun'
+      }
+    ];
+
+    const worksheet = xlsx.utils.json_to_sheet(templateData);
+    const workbook = xlsx.utils.book_new();
+    xlsx.utils.book_append_sheet(workbook, worksheet, 'Data Pelamar');
+
+    const buffer = xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+
+    res.setHeader('Content-Disposition', 'attachment; filename="Template_Import_Pelamar_HRMv2.xlsx"');
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.send(buffer);
+  } catch (error) {
+    console.error('API Error (downloadCandidateTemplateExcel):', error);
+    res.status(500).json({ success: false, message: 'Gagal membuat template Excel.' });
+  }
+};
+
+/**
+ * Parse uploaded CV file and evaluate against HRD criteria using Google Gemini API.
+ * @param {import('express').Request} req 
+ * @param {import('express').Response} res 
+ */
+exports.parseCv = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'File CV (PDF / Gambar / Scan) wajib diunggah.' });
+    }
+
+    const fileBuffer = fs.readFileSync(req.file.path);
+    const mimeType = req.file.mimetype;
+    const originalName = req.file.originalname;
+
+    // Clean up temporary upload file
+    if (fs.existsSync(req.file.path)) {
+      try { fs.unlinkSync(req.file.path); } catch (e) {}
+    }
+
+    const parsedData = await parseCvWithGemini(fileBuffer, mimeType, originalName);
+
+    res.json({
+      success: true,
+      message: 'CV berhasil dibaca dan dinilai oleh Google Gemini AI.',
+      data: parsedData
+    });
+  } catch (error) {
+    console.error('API Error (parseCv):', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Gagal memproses CV dengan AI.'
+    });
   }
 };

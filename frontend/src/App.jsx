@@ -18,6 +18,7 @@ import LaporanKeuanganGudang from './views/LaporanKeuanganGudang';
 import LaporanKonsolidasi from './views/LaporanKonsolidasi';
 import Settings from './views/Settings';
 import Discipline from './views/Discipline';
+import UploadPelamar from './views/UploadPelamar';
 import Login from './views/Login';
 import API_BASE from './config';
 
@@ -33,7 +34,7 @@ function App() {
     return 'dashboard';
   });
   const [selectedCandidateId, setSelectedCandidateId] = useState(null);
-  const recruitmentViews = ['recruitment-dashboard', 'candidates', 'questions', 'training-questions', 'pipeline-settings', 'test', 'training-portal'];
+  const recruitmentViews = ['recruitment-dashboard', 'upload-pelamar', 'candidates', 'questions', 'training-questions', 'pipeline-settings', 'test', 'training-portal'];
   const [isRekrutmenOpen, setIsRekrutmenOpen] = useState(() => {
     const params = new URLSearchParams(window.location.search);
     return window.location.pathname === '/test' || window.location.pathname === '/training-portal' || params.has('code') || params.has('training_code');
@@ -165,6 +166,16 @@ function App() {
             setView={setView}
           />
         );
+      case 'upload-pelamar':
+        return canAccess.rekrutmen ? (
+          <UploadPelamar
+            setView={setView}
+            onSelectCandidate={(id) => {
+              setSelectedCandidateId(id);
+              setView('detail');
+            }}
+          />
+        ) : <Denied />;
       case 'candidates':
         return canAccess.rekrutmen ? (
           <CandidateList
@@ -172,6 +183,7 @@ function App() {
               setSelectedCandidateId(id);
               setView('detail');
             }}
+            setView={setView}
           />
         ) : <Denied />;
       case 'employees':
@@ -368,6 +380,14 @@ function App() {
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px' }}><rect x="3" y="3" width="7" height="9"></rect><rect x="14" y="3" width="7" height="5"></rect><rect x="14" y="12" width="7" height="9"></rect><rect x="3" y="16" width="7" height="5"></rect></svg>
                   Pipeline Rekrutmen
+                </li>
+                <li
+                  className={`sidebar-item ${view === 'upload-pelamar' ? 'active' : ''}`}
+                  onClick={() => setView('upload-pelamar')}
+                  style={{ fontSize: '13px', padding: '8px 10px' }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px', color: '#10b981' }}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                  Upload Pelamar Baru
                 </li>
                 <li
                   className={`sidebar-item ${view === 'candidates' ? 'active' : ''}`}

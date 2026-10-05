@@ -1,0 +1,12 @@
+{
+  "name": "hrmv2",
+  "version": "1.0.0",
+  "description": "HRM System - Cv. Asya Bisnis Indonesia",
+  "private": true,
+  "scripts": {
+    "start": "node run.js",
+    "dev": "node run.js",
+    "backend": "npm --prefix backend run dev",
+    "frontend": "npm --prefix frontend run dev"
+  }
+}

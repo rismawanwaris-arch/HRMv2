@@ -24,3 +24,5 @@ services:
       - ADMIN_INITIAL_PASSWORD=${ADMIN_INITIAL_PASSWORD:-}
       # Recommended: enables at-rest encryption of sensitive PII columns.
       - DATA_ENCRYPTION_KEY=${DATA_ENCRYPTION_KEY:-}
+      # Optional: Google Gemini API Key for AI CV Parsing
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}

@@ -216,10 +216,22 @@ async function initDb() {
         domisili_sesuai INTEGER DEFAULT 0,
         phone_screen_notes TEXT,
         passed INTEGER DEFAULT 0,
+        ai_screening_score REAL DEFAULT 0,
+        ai_recommendation TEXT,
+        ai_summary TEXT,
+        ai_strengths TEXT, -- JSON string
+        ai_notes TEXT, -- JSON string
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY(candidate_id) REFERENCES candidates(id) ON DELETE CASCADE
       )
     `);
+
+    // Migration helper for stage1_admin AI columns
+    await query.run('ALTER TABLE stage1_admin ADD COLUMN ai_screening_score REAL DEFAULT 0').catch(() => {});
+    await query.run('ALTER TABLE stage1_admin ADD COLUMN ai_recommendation TEXT').catch(() => {});
+    await query.run('ALTER TABLE stage1_admin ADD COLUMN ai_summary TEXT').catch(() => {});
+    await query.run('ALTER TABLE stage1_admin ADD COLUMN ai_strengths TEXT').catch(() => {});
+    await query.run('ALTER TABLE stage1_admin ADD COLUMN ai_notes TEXT').catch(() => {});
 
     // 3. Stage 2 Written Test
     await query.run(`

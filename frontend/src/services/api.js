@@ -140,6 +140,33 @@ export const candidateApi = {
    * @returns {Promise<Object>} Resolves to deletion status.
    */
   delete: (id) => api.delete(`/candidates/${id}`),
+
+  /**
+   * Add a new candidate with multiple uploaded documents (CV, KTP, Foto, Ijazah, Surat Lamaran) saved to ZimaOS storage.
+   * @param {FormData} formData - Multipart form containing candidate fields and files.
+   * @returns {Promise<Object>} Resolves to creation status, accessCode, and saved documents.
+   */
+  uploadWithDocuments: (formData) => api.post('/candidates/upload-with-docs', formData),
+
+  /**
+   * Bulk import candidates from Excel spreadsheet.
+   * @param {FormData} formData - Multipart form containing the Excel file under 'file'.
+   * @returns {Promise<Object>} Resolves to import stats.
+   */
+  importExcel: (formData) => api.post('/candidates/import-excel', formData),
+
+  /**
+   * Parse CV document using Google Gemini AI to auto-fill candidate profile and score against HRD standards.
+   * @param {FormData} formData - Multipart form containing CV file under 'cv' or 'file'.
+   * @returns {Promise<Object>} Resolves to parsed candidate biodata and AI HRD assessment.
+   */
+  parseCv: (formData) => api.post('/candidates/parse-cv', formData),
+
+  /**
+   * Download the sample template Excel for bulk candidate import.
+   * @returns {string} URL for direct download.
+   */
+  getTemplateExcelUrl: () => `${API_BASE}/candidates/template-excel`,
   
   /**
    * Retrieve documents uploaded for a candidate.
