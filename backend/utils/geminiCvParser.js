@@ -5,7 +5,19 @@ const path = require('path');
  * Service to parse CV documents and screen candidates against HRD standards using Google Gemini API.
  */
 
-const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+const GEMINI_MODELS = [
+  process.env.GEMINI_MODEL,
+  'gemini-flash-latest',
+  'gemini-3.8-flash',
+  'gemini-3.5-flash',
+  'gemini-pro-latest',
+  'gemini-flash-lite-latest',
+  'gemini-3.1-flash-lite',
+  'gemini-2.5-flash',
+  'gemini-2.0-flash',
+  'gemini-1.5-flash-latest',
+  'gemini-1.5-flash'
+].filter(Boolean);
 
 /**
  * Call Gemini API with multimodal input (PDF/Image/Text) and get structured candidate JSON.
