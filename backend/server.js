@@ -1,3 +1,4 @@
+require('./utils/envLoader');
 const app = require('./app');
 
 const PORT = parseInt(process.env.PORT || '5001', 10);
