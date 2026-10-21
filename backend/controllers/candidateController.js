@@ -5,7 +5,6 @@ const { decryptRow, blindIndex } = require('../utils/fieldCrypto');
 const fs = require('fs');
 const path = require('path');
 const xlsx = require('xlsx');
-const { parseCvWithGemini } = require('../utils/geminiCvParser');
 
 // Onboarding is tracked outside the configurable recruitment_stages pipeline
 // and is addressed by this sentinel stage number in the stage-update endpoint.
@@ -687,10 +686,31 @@ exports.importCandidatesExcel = async (req, res) => {
         }
       }
 
+      const dependents = parseInt(getVal(row, 'Jumlah Tanggungan', 'Tanggungan', 'dependents') || '0', 10) || 0;
+      const blood_type = getVal(row, 'Golongan Darah', 'Gol. Darah', 'blood_type');
+      const height = getVal(row, 'Tinggi Badan', 'Tinggi', 'height');
+      const weight = getVal(row, 'Berat Badan', 'Berat', 'weight');
+      const physical_condition = getVal(row, 'Kondisi Fisik', 'physical_condition') || 'Sehat';
+      const emergency_contact_1 = getVal(row, 'Kontak Darurat 1', 'Kontak Darurat', 'emergency_contact_1');
+      const emergency_contact_2 = getVal(row, 'Kontak Darurat 2', 'emergency_contact_2');
+      const father_name = getVal(row, 'Nama Ayah', 'father_name');
+      const mother_name = getVal(row, 'Nama Ibu', 'mother_name');
+      const spouse_name = getVal(row, 'Nama Pasangan', 'spouse_name');
+      const education_years = getVal(row, 'Tahun Kelulusan', 'Tahun Lulus', 'education_years');
+      const education_grade = getVal(row, 'Nilai Akhir', 'IPK', 'Nilai', 'education_grade');
+      const npwp = getVal(row, 'NPWP', 'npwp');
+      const bank_name = getVal(row, 'Nama Bank', 'Bank', 'bank_name');
+      const bank_account = getVal(row, 'Nomor Rekening', 'No. Rekening', 'No Rekening', 'bank_account');
+      const health_history = getVal(row, 'Riwayat Kesehatan', 'Riwayat Penyakit', 'health_history');
+      const allergies = getVal(row, 'Alergi', 'allergies');
+
       const candidateData = {
         name, nik, email, phone, gender, birth_place, birth_date,
-        religion, marital_status, education_level, education_institution,
-        education_major, address_ktp, address_domicile, work_experience,
+        religion, marital_status, dependents, blood_type, height, weight, physical_condition,
+        address_ktp, address_domicile, emergency_contact_1, emergency_contact_2,
+        father_name, mother_name, spouse_name,
+        education_level, education_institution, education_major, education_years, education_grade,
+        work_experience, npwp, bank_name, bank_account, health_history, allergies,
         status: 'Active', current_stage: initialStageId
       };
 

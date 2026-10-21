@@ -156,13 +156,6 @@ export const candidateApi = {
   importExcel: (formData) => api.post('/candidates/import-excel', formData),
 
   /**
-   * Parse CV document using Google Gemini AI to auto-fill candidate profile and score against HRD standards.
-   * @param {FormData} formData - Multipart form containing CV file under 'cv' or 'file'.
-   * @returns {Promise<Object>} Resolves to parsed candidate biodata and AI HRD assessment.
-   */
-  parseCv: (formData) => api.post('/candidates/parse-cv', formData),
-
-  /**
    * Download the sample template Excel for bulk candidate import.
    * @returns {string} URL for direct download.
    */
@@ -567,4 +560,42 @@ export const stageApi = {
    * @returns {Promise<Object>} Resolves to status.
    */
   reorder: (stageIds) => api.post('/stages/reorder', { stageIds }),
+};
+
+/**
+ * --- OUTLET ACTIVITY & GA INSPECTION API ---
+ * Services for branch visits, incident logs, action items, and WhatsApp executive summary.
+ */
+export const outletActivityApi = {
+  getSummary: (date) => api.get(`/outlet-activity/summary${date ? `?date=${date}` : ''}`),
+  getVisits: (params) => {
+    const qs = buildQueryString(params);
+    return api.get(`/outlet-activity/visits${qs ? `?${qs}` : ''}`);
+  },
+  getVisitById: (id) => api.get(`/outlet-activity/visits/${id}`),
+  createVisit: (formDataOrJson) => api.post('/outlet-activity/visits', formDataOrJson),
+  updateVisit: (id, formDataOrJson) => api.put(`/outlet-activity/visits/${id}`, formDataOrJson),
+  deleteVisit: (id) => api.delete(`/outlet-activity/visits/${id}`),
+
+  getIncidents: (params) => {
+    const qs = buildQueryString(params);
+    return api.get(`/outlet-activity/incidents${qs ? `?${qs}` : ''}`);
+  },
+  createIncident: (formDataOrJson) => api.post('/outlet-activity/incidents', formDataOrJson),
+  updateIncident: (id, data) => api.put(`/outlet-activity/incidents/${id}`, data),
+  deleteIncident: (id) => api.delete(`/outlet-activity/incidents/${id}`),
+
+  getActionItems: (params) => {
+    const qs = buildQueryString(params);
+    return api.get(`/outlet-activity/action-items${qs ? `?${qs}` : ''}`);
+  },
+  createActionItem: (data) => api.post('/outlet-activity/action-items', data),
+  updateActionItem: (id, data) => api.put(`/outlet-activity/action-items/${id}`, data),
+  deleteActionItem: (id) => api.delete(`/outlet-activity/action-items/${id}`),
+
+  getBranchHistory: (branchId) => api.get(`/outlet-activity/branches/${branchId}/history`),
+  getPhotoUrl: (filename) => {
+    const token = localStorage.getItem('auth_token') || '';
+    return `${API_BASE}/outlet-activity/photos/${filename}?token=${token}`;
+  }
 };

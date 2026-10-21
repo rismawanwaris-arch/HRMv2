@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { candidateApi } from '../services/api';
 
 export default function UploadPelamar({ setView, onSelectCandidate }) {
-  const [activeTab, setActiveTab] = useState('single'); // 'single' | 'bulk'
+  const [activeTab, setActiveTab] = useState('bulk'); // 'bulk' (default) | 'single'
 
   // Single Candidate Form Data
   const [formData, setFormData] = useState({
@@ -32,12 +32,6 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
     surat_lamaran: null,
     skck: null,
   });
-
-  // AI CV Scanner State (Google Gemini)
-  const [aiScanning, setAiScanning] = useState(false);
-  const [aiResult, setAiResult] = useState(null);
-  const [aiError, setAiError] = useState(null);
-  const [aiSuccessMsg, setAiSuccessMsg] = useState(null);
 
   const [submitting, setSubmitting] = useState(false);
   const [submitResult, setSubmitResult] = useState(null);
@@ -69,61 +63,6 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
     setFiles((prev) => ({ ...prev, [field]: null }));
   };
 
-  // AI CV Scan & Auto-Fill Handler
-  const handleScanCvWithAI = async (file) => {
-    if (!file) return;
-
-    // Attach as CV document
-    setFiles((prev) => ({ ...prev, cv: file }));
-
-    setAiScanning(true);
-    setAiError(null);
-    setAiSuccessMsg(null);
-    setAiResult(null);
-
-    try {
-      const data = new FormData();
-      data.append('cv', file);
-
-      const res = await candidateApi.parseCv(data);
-      if (res.success && res.data) {
-        const parsed = res.data;
-
-        // Auto-fill form fields with parsed data
-        setFormData((prev) => ({
-          ...prev,
-          name: parsed.name || prev.name,
-          nik: parsed.nik || prev.nik,
-          phone: parsed.phone || prev.phone,
-          email: parsed.email || prev.email,
-          gender: parsed.gender || prev.gender,
-          birth_place: parsed.birth_place || prev.birth_place,
-          birth_date: parsed.birth_date || prev.birth_date,
-          religion: parsed.religion || prev.religion,
-          marital_status: parsed.marital_status || prev.marital_status,
-          education_level: parsed.education_level || prev.education_level,
-          education_institution: parsed.education_institution || prev.education_institution,
-          education_major: parsed.education_major || prev.education_major,
-          address_ktp: parsed.address_ktp || prev.address_ktp,
-          address_domicile: parsed.address_domicile || prev.address_domicile,
-          work_experience: parsed.work_experience || prev.work_experience,
-        }));
-
-        if (parsed.assessment) {
-          setAiResult(parsed.assessment);
-        }
-
-        setAiSuccessMsg('✨ CV berhasil dianalisis oleh Google Gemini AI! Kolom formulir telah terisi otomatis.');
-      } else {
-        setAiError(res.message || 'Gagal membaca isi CV dengan AI.');
-      }
-    } catch (err) {
-      setAiError(err.message || 'Terjadi kesalahan saat memproses CV dengan AI Gemini.');
-    } finally {
-      setAiScanning(false);
-    }
-  };
-
   const handleSubmitSingle = async (e) => {
     e.preventDefault();
     if (!formData.name.trim()) {
@@ -149,11 +88,6 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
           data.append(field, file);
         }
       });
-
-      // Append AI Assessment if available
-      if (aiResult) {
-        data.append('ai_assessment', JSON.stringify(aiResult));
-      }
 
       const res = await candidateApi.uploadWithDocuments(data);
       if (res.success) {
@@ -184,8 +118,6 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
           surat_lamaran: null,
           skck: null,
         });
-        setAiResult(null);
-        setAiSuccessMsg(null);
       } else {
         setErrorMsg(res.message || 'Gagal mengunggah data pelamar.');
       }
@@ -239,10 +171,10 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
       <div className="view-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px', marginBottom: '20px' }}>
         <div>
           <h1 className="view-title" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <span>📤 Upload Pelamar Baru & AI CV Parser</span>
+            <span>📤 Upload Pelamar & Import Google Form</span>
           </h1>
           <p className="view-subtitle">
-            Scan & ekstrak CV otomatis dengan Google Gemini AI, evaluasi standar HRD, dan simpan dokumen ke penyimpanan ZimaOS (<code style={{ background: 'rgba(255,255,255,0.06)', padding: '2px 6px', borderRadius: '4px' }}>/app/data/uploads</code>).
+            Import respon Google Form pelamar via Excel (<code style={{ background: 'rgba(255,255,255,0.06)', padding: '2px 6px', borderRadius: '4px' }}>.xlsx</code> / <code style={{ background: 'rgba(255,255,255,0.06)', padding: '2px 6px', borderRadius: '4px' }}>.csv</code>) atau daftarkan pelamar manual dan simpan berkas ke penyimpanan server.
           </p>
         </div>
 
@@ -280,24 +212,6 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
       }}>
         <button
           type="button"
-          onClick={() => setActiveTab('single')}
-          style={{
-            flex: 1,
-            padding: '10px 18px',
-            borderRadius: '8px',
-            border: 'none',
-            background: activeTab === 'single' ? 'var(--primary)' : 'transparent',
-            color: activeTab === 'single' ? '#fff' : 'var(--text-secondary)',
-            fontWeight: 700,
-            fontSize: '13px',
-            cursor: 'pointer',
-            transition: 'all 0.15s'
-          }}
-        >
-          🤖 Auto-Fill CV (AI Gemini) & Upload Berkas
-        </button>
-        <button
-          type="button"
           onClick={() => setActiveTab('bulk')}
           style={{
             flex: 1,
@@ -312,218 +226,217 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
             transition: 'all 0.15s'
           }}
         >
-          📊 Import Massal Spreadsheet Excel (.xlsx / .csv)
+          📊 Import Excel Respon Google Form (.xlsx / .csv)
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('single')}
+          style={{
+            flex: 1,
+            padding: '10px 18px',
+            borderRadius: '8px',
+            border: 'none',
+            background: activeTab === 'single' ? 'var(--primary)' : 'transparent',
+            color: activeTab === 'single' ? '#fff' : 'var(--text-secondary)',
+            fontWeight: 700,
+            fontSize: '13px',
+            cursor: 'pointer',
+            transition: 'all 0.15s'
+          }}
+        >
+          📝 Input Pelamar Manual & Upload Berkas
         </button>
       </div>
 
-      {/* TAB 1: FORM PELAMAR + AI CV SCANNER */}
-      {activeTab === 'single' && (
-        <div>
-          {/* AI SCANNER DROPZONE HERO */}
-          <div style={{
-            background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.12), rgba(59, 130, 246, 0.08))',
-            border: '2px dashed rgba(139, 92, 246, 0.4)',
-            borderRadius: '14px',
-            padding: '24px',
-            marginBottom: '24px',
-            textAlign: 'center',
-            position: 'relative'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', marginBottom: '8px' }}>
-              <span style={{ fontSize: '24px' }}>✨</span>
-              <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 800, color: '#a78bfa' }}>
-                Auto-Fill Data Pelamar & Screening dengan Google Gemini AI
-              </h3>
-            </div>
-            <p style={{ margin: '0 auto 16px', maxWidth: '640px', fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-              Unggah file CV pelamar (<strong>PDF</strong>, <strong>DOCX</strong>, atau <strong>Foto/Scan HP</strong>). AI akan otomatis membaca biodata, mengisi formulir di bawah, dan menilai kesesuaian profil dengan standar HRD.
+      {/* TAB 1: IMPORT MASSAL EXCEL DARI GOOGLE FORM */}
+      {activeTab === 'bulk' && (
+        <div className="card" style={{ padding: '30px' }}>
+          <div style={{ maxWidth: '720px', margin: '0 auto', textAlign: 'center' }}>
+            <div style={{ fontSize: '48px', marginBottom: '16px' }}>📊</div>
+            <h2 style={{ fontSize: '20px', fontWeight: 800, color: 'var(--text-primary)', margin: '0 0 8px' }}>
+              Import Respon Google Form ke Database Pelamar
+            </h2>
+            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '24px', lineHeight: 1.6 }}>
+              Bagikan link Google Form ke calon karyawan. Setelah terisi, unduh spreadsheet respon dari Google Sheets/Excel lalu upload file (<code style={{ background: 'rgba(255,255,255,0.06)', padding: '2px 6px', borderRadius: '4px' }}>.xlsx</code> / <code style={{ background: 'rgba(255,255,255,0.06)', padding: '2px 6px', borderRadius: '4px' }}>.csv</code>) di sini. Sistem akan otomatis memasukkan semua pelamar dan men-generate kode unik akses ujian online.
             </p>
 
-            <input
-              type="file"
-              id="ai_cv_input"
-              accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp"
-              onChange={(e) => {
-                if (e.target.files && e.target.files[0]) {
-                  handleScanCvWithAI(e.target.files[0]);
-                }
-              }}
-              style={{ display: 'none' }}
-            />
+            {/* Workflow Info Box */}
+            <div style={{
+              background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.08), rgba(16, 185, 129, 0.08))',
+              border: '1px solid rgba(59, 130, 246, 0.25)',
+              borderRadius: '12px',
+              padding: '16px 20px',
+              marginBottom: '24px',
+              textAlign: 'left'
+            }}>
+              <div style={{ fontWeight: 700, fontSize: '13px', color: '#3b82f6', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span>💡</span> Alur Kerja Rekrutmen Google Form:
+              </div>
+              <ol style={{ margin: 0, paddingLeft: '20px', fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.7 }}>
+                <li>Kirim link Google Form ke calon karyawan untuk mengisi biodata.</li>
+                <li>Di Google Form, buka tab <strong>"Responses"</strong> ➔ Klik <strong>"Download responses (.csv)"</strong> atau <strong>"Open in Sheets" ➔ File ➔ Download ➔ Microsoft Excel (.xlsx)</strong>.</li>
+                <li>Unggah file tersebut pada formulir di bawah. Nama kolom Google Form akan otomatis dicocokkan dengan database sistem HRM.</li>
+                <li>Pelamar langsung terdaftar di sistem dengan kode akses ujian tertulis masing-masing!</li>
+              </ol>
+            </div>
 
-            <div style={{ display: 'flex', justifyContent: 'center', gap: '12px', flexWrap: 'wrap' }}>
-              <label
-                htmlFor="ai_cv_input"
+            {/* Template Download Card */}
+            <div style={{
+              background: 'var(--bg-secondary)',
+              border: '1px solid var(--border-color)',
+              borderRadius: '12px',
+              padding: '16px 20px',
+              marginBottom: '24px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              textAlign: 'left'
+            }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: '13px', color: 'var(--text-primary)' }}>
+                  Template Excel / Format Kolom Google Form
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                  Unduh template contoh untuk panduan membuat pertanyaan di Google Form atau import langsung.
+                </div>
+              </div>
+              <a
+                href={candidateApi.getTemplateExcelUrl()}
+                download
                 style={{
-                  padding: '12px 24px',
-                  borderRadius: '10px',
-                  background: 'linear-gradient(135deg, #8b5cf6, #3b82f6)',
-                  color: '#fff',
+                  padding: '8px 14px',
+                  borderRadius: '8px',
+                  background: 'rgba(59, 130, 246, 0.15)',
+                  color: '#3b82f6',
                   fontWeight: 700,
-                  fontSize: '13px',
-                  cursor: aiScanning ? 'not-allowed' : 'pointer',
-                  display: 'inline-flex',
+                  fontSize: '12px',
+                  textDecoration: 'none',
+                  display: 'flex',
                   alignItems: 'center',
-                  gap: '8px',
-                  boxShadow: '0 4px 14px rgba(139, 92, 246, 0.4)',
-                  opacity: aiScanning ? 0.7 : 1
+                  gap: '6px'
                 }}
               >
-                {aiScanning ? '🤖 AI Sedang Membaca & Menilai CV...' : '⚡ Pilih File CV untuk Auto-Fill (PDF / Gambar)'}
-              </label>
+                📥 Unduh Template (.xlsx)
+              </a>
             </div>
 
-            {aiScanning && (
-              <div style={{ marginTop: '16px', fontSize: '13px', color: '#a78bfa', fontWeight: 600 }}>
-                ⏳ Sedang mengekstrak teks, membaca foto/scan, dan menghitung skor standar HRD...
-              </div>
-            )}
-
-            {aiError && (
+            {/* Error Message */}
+            {excelError && (
               <div style={{
-                marginTop: '16px',
                 background: 'rgba(239, 68, 68, 0.15)',
                 border: '1px solid rgba(239, 68, 68, 0.4)',
-                borderRadius: '8px',
-                padding: '10px 16px',
+                borderRadius: '10px',
+                padding: '12px 18px',
+                marginBottom: '20px',
                 color: '#ef4444',
-                fontSize: '12px',
+                fontSize: '13px',
                 textAlign: 'left'
               }}>
-                ⚠️ {aiError}
+                ⚠️ {excelError}
               </div>
             )}
 
-            {aiSuccessMsg && (
+            {/* Success Result */}
+            {excelResult && (
               <div style={{
-                marginTop: '16px',
-                background: 'rgba(16, 185, 129, 0.15)',
+                background: 'rgba(16, 185, 129, 0.12)',
                 border: '1px solid rgba(16, 185, 129, 0.4)',
-                borderRadius: '8px',
-                padding: '10px 16px',
-                color: '#10b981',
-                fontSize: '13px',
-                fontWeight: 600
+                borderRadius: '12px',
+                padding: '20px',
+                marginBottom: '24px',
+                textAlign: 'left'
               }}>
-                {aiSuccessMsg}
+                <div style={{ fontWeight: 800, fontSize: '15px', color: '#10b981', marginBottom: '8px' }}>
+                  🎉 {excelResult.message}
+                </div>
+                {excelResult.stats && (
+                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '12px' }}>
+                    Total Baris: <strong>{excelResult.stats.total_rows}</strong> • Berhasil: <strong>{excelResult.stats.success_count}</strong> • Dilewati: <strong>{excelResult.stats.skipped_count}</strong>
+                  </div>
+                )}
+                {excelResult.stats?.errors?.length > 0 && (
+                  <div style={{ marginBottom: '12px', padding: '10px', background: 'rgba(239, 68, 68, 0.1)', borderRadius: '8px', fontSize: '11px', color: '#ef4444' }}>
+                    <strong>Catatan Baris Dilewati:</strong>
+                    <ul style={{ margin: '4px 0 0 0', paddingLeft: '16px' }}>
+                      {excelResult.stats.errors.slice(0, 5).map((err, idx) => (
+                        <li key={idx}>{err}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {excelResult.candidates && excelResult.candidates.length > 0 && (
+                  <div style={{ maxHeight: '180px', overflowY: 'auto', background: 'rgba(0,0,0,0.3)', padding: '10px', borderRadius: '8px' }}>
+                    <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '6px' }}>KANDIDAT BARU DITAMBAHKAN:</div>
+                    {excelResult.candidates.map(c => (
+                      <div key={c.id} style={{ fontSize: '12px', color: 'var(--text-primary)', display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                        <span>{c.name}</span>
+                        <code style={{ color: '#f59e0b', fontWeight: 700 }}>{c.access_code}</code>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
+
+            {/* Dropzone & Upload Button */}
+            <form onSubmit={handleUploadExcel}>
+              <div style={{
+                border: '2px dashed var(--border-color)',
+                borderRadius: '14px',
+                padding: '30px 20px',
+                marginBottom: '20px',
+                background: 'var(--bg-secondary)',
+                cursor: 'pointer'
+              }}>
+                <input
+                  type="file"
+                  id="excel_input"
+                  accept=".xlsx,.xls,.csv"
+                  onChange={(e) => setExcelFile(e.target.files ? e.target.files[0] : null)}
+                  style={{ display: 'none' }}
+                />
+                <label htmlFor="excel_input" style={{ cursor: 'pointer', display: 'block' }}>
+                  <div style={{ fontSize: '36px', marginBottom: '8px' }}>📁</div>
+                  {excelFile ? (
+                    <div>
+                      <div style={{ fontSize: '14px', fontWeight: 700, color: '#10b981' }}>{excelFile.name}</div>
+                      <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>{formatBytes(excelFile.size)} • Klik untuk ganti file</div>
+                    </div>
+                  ) : (
+                    <div>
+                      <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>Pilih File Excel / CSV Google Form</div>
+                      <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>Seret file ke sini atau klik untuk browse file dari komputer</div>
+                    </div>
+                  )}
+                </label>
+              </div>
+
+              <button
+                type="submit"
+                disabled={!excelFile || uploadingExcel}
+                style={{
+                  width: '100%',
+                  padding: '12px 20px',
+                  borderRadius: '10px',
+                  border: 'none',
+                  background: 'var(--primary)',
+                  color: '#fff',
+                  fontWeight: 700,
+                  fontSize: '14px',
+                  cursor: !excelFile || uploadingExcel ? 'not-allowed' : 'pointer',
+                  boxShadow: '0 4px 14px rgba(59, 130, 246, 0.4)'
+                }}
+              >
+                {uploadingExcel ? '⏳ Sedang Mengimpor Data...' : '📤 Mulai Import Data Pelamar'}
+              </button>
+            </form>
           </div>
+        </div>
+      )}
 
-          {/* AI HRD ASSESSMENT RESULT CARD (JIKA SUDAH DI-SCAN) */}
-          {aiResult && (
-            <div style={{
-              background: 'var(--bg-card, #1e1e2d)',
-              border: '1px solid var(--border-color)',
-              borderRadius: '14px',
-              padding: '24px',
-              marginBottom: '24px',
-              boxShadow: '0 8px 24px rgba(0,0,0,0.2)'
-            }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '14px', marginBottom: '18px', borderBottom: '1px solid var(--border-color)', paddingBottom: '14px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <span style={{ fontSize: '24px' }}>🎯</span>
-                  <div>
-                    <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 800, color: 'var(--text-primary)' }}>
-                      Hasil Penilaian & Standar HRD (Google Gemini AI)
-                    </h3>
-                    <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-muted)' }}>
-                      Evaluasi kesesuaian profil untuk posisi Retail Frontliner / Kasir / Staff
-                    </p>
-                  </div>
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Match Score</div>
-                    <div style={{
-                      fontSize: '24px',
-                      fontWeight: 900,
-                      color: aiResult.match_score >= 80 ? '#10b981' : aiResult.match_score >= 60 ? '#f59e0b' : '#ef4444'
-                    }}>
-                      {aiResult.match_score}%
-                    </div>
-                  </div>
-                  <span style={{
-                    padding: '6px 14px',
-                    borderRadius: '8px',
-                    fontSize: '12px',
-                    fontWeight: 800,
-                    background: aiResult.match_score >= 80 ? 'rgba(16,185,129,0.2)' : aiResult.match_score >= 60 ? 'rgba(245,158,11,0.2)' : 'rgba(239,68,68,0.2)',
-                    color: aiResult.match_score >= 80 ? '#10b981' : aiResult.match_score >= 60 ? '#f59e0b' : '#ef4444',
-                    border: `1px solid ${aiResult.match_score >= 80 ? 'rgba(16,185,129,0.4)' : aiResult.match_score >= 60 ? 'rgba(245,158,11,0.4)' : 'rgba(239,68,68,0.4)'}`
-                  }}>
-                    {aiResult.recommendation || (aiResult.match_score >= 80 ? 'Sangat Direkomendasikan' : aiResult.match_score >= 60 ? 'Dipertimbangkan' : 'Kurang Sesuai')}
-                  </span>
-                </div>
-              </div>
-
-              {/* Criteria Checks Grid */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px', marginBottom: '18px' }}>
-                <div style={{ background: 'var(--bg-secondary)', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span>{aiResult.usia_sesuai ? '✅' : '⚠️'}</span>
-                  <span style={{ fontSize: '12px', color: aiResult.usia_sesuai ? 'var(--text-primary)' : '#f59e0b', fontWeight: 600 }}>
-                    Usia (18-25 Thn)
-                  </span>
-                </div>
-                <div style={{ background: 'var(--bg-secondary)', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span>{aiResult.pendidikan_sesuai ? '✅' : '⚠️'}</span>
-                  <span style={{ fontSize: '12px', color: aiResult.pendidikan_sesuai ? 'var(--text-primary)' : '#f59e0b', fontWeight: 600 }}>
-                    Min. SMA / SMK
-                  </span>
-                </div>
-                <div style={{ background: 'var(--bg-secondary)', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span>{aiResult.domisili_sesuai ? '✅' : '⚠️'}</span>
-                  <span style={{ fontSize: '12px', color: aiResult.domisili_sesuai ? 'var(--text-primary)' : '#f59e0b', fontWeight: 600 }}>
-                    Domisili Sesuai
-                  </span>
-                </div>
-                <div style={{ background: 'var(--bg-secondary)', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span>{aiResult.pengalaman_relevan ? '✅' : 'ℹ️'}</span>
-                  <span style={{ fontSize: '12px', color: 'var(--text-primary)', fontWeight: 600 }}>
-                    Pengalaman & Skill
-                  </span>
-                </div>
-              </div>
-
-              {/* Summary */}
-              {aiResult.summary && (
-                <div style={{ background: 'rgba(255,255,255,0.03)', padding: '12px 16px', borderRadius: '8px', borderLeft: '3px solid #3b82f6', marginBottom: '16px', fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                  <strong>Ringkasan Profil:</strong> {aiResult.summary}
-                </div>
-              )}
-
-              {/* Strengths & Interview Notes */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
-                {aiResult.strengths && aiResult.strengths.length > 0 && (
-                  <div style={{ background: 'rgba(16, 185, 129, 0.05)', border: '1px solid rgba(16, 185, 129, 0.2)', padding: '14px', borderRadius: '10px' }}>
-                    <div style={{ fontWeight: 700, fontSize: '12px', color: '#10b981', marginBottom: '6px', textTransform: 'uppercase' }}>
-                      🌟 Kelebihan Utama (Strengths)
-                    </div>
-                    <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '12px', color: 'var(--text-primary)', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                      {aiResult.strengths.map((s, idx) => (
-                        <li key={idx}>{s}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-
-                {aiResult.interview_notes && aiResult.interview_notes.length > 0 && (
-                  <div style={{ background: 'rgba(245, 158, 11, 0.05)', border: '1px solid rgba(245, 158, 11, 0.2)', padding: '14px', borderRadius: '10px' }}>
-                    <div style={{ fontWeight: 700, fontSize: '12px', color: '#f59e0b', marginBottom: '6px', textTransform: 'uppercase' }}>
-                      🔍 Catatan Konfirmasi Wawancara
-                    </div>
-                    <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '12px', color: 'var(--text-primary)', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                      {aiResult.interview_notes.map((n, idx) => (
-                        <li key={idx}>{n}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
+      {/* TAB 2: FORM INPUT PELAMAR MANUAL + UPLOAD BERKAS */}
+      {activeTab === 'single' && (
+        <div>
           {/* Success Banner */}
           {submitResult && (
             <div style={{
@@ -543,7 +456,7 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
                   </div>
                   {submitResult.uploadedDocuments && submitResult.uploadedDocuments.length > 0 && (
                     <div style={{ marginTop: '10px', fontSize: '12px', color: 'var(--text-muted)' }}>
-                      Berkas tersimpan di ZimaOS: {submitResult.uploadedDocuments.map(d => `${d.doc_type} (${d.original_name})`).join(', ')}
+                      Berkas tersimpan di penyimpanan: {submitResult.uploadedDocuments.map(d => `${d.doc_type} (${d.original_name})`).join(', ')}
                     </div>
                   )}
                 </div>
@@ -796,10 +709,10 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
               {/* KOLOM KANAN: BERKAS FISIK DOKUMEN ZIMAOS */}
               <div className="card" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span>📂</span> 2. Berkas Dokumen Fisik (ZimaOS Storage)
+                  <span>📂</span> 2. Berkas Dokumen Fisik (Penyimpanan Server)
                 </h3>
                 <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-muted)' }}>
-                  File yang terlampir akan disimpan permanen ke server ZimaOS.
+                  File yang terlampir akan disimpan permanen ke server.
                 </p>
 
                 {/* 1. CV / Resume */}
@@ -1002,168 +915,12 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
                     gap: '8px'
                   }}
                 >
-                  {submitting ? '💾 Sedang Menyimpan ke ZimaOS...' : '🚀 Simpan Pelamar & Upload Berkas ke ZimaOS'}
+                  {submitting ? '💾 Sedang Menyimpan Data...' : '🚀 Simpan Pelamar & Berkas'}
                 </button>
               </div>
 
             </div>
           </form>
-        </div>
-      )}
-
-      {/* TAB 2: IMPORT MASSAL EXCEL */}
-      {activeTab === 'bulk' && (
-        <div className="card" style={{ padding: '30px' }}>
-          <div style={{ maxWidth: '640px', margin: '0 auto', textAlign: 'center' }}>
-            <div style={{ fontSize: '48px', marginBottom: '16px' }}>📊</div>
-            <h2 style={{ fontSize: '20px', fontWeight: 800, color: 'var(--text-primary)', margin: '0 0 8px' }}>
-              Import Massal Data Pelamar via Spreadsheet
-            </h2>
-            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '24px', lineHeight: 1.6 }}>
-              Unggah file Excel (<code style={{ background: 'rgba(255,255,255,0.06)', padding: '2px 6px', borderRadius: '4px' }}>.xlsx</code> / <code style={{ background: 'rgba(255,255,255,0.06)', padding: '2px 6px', borderRadius: '4px' }}>.csv</code>) untuk mendaftarkan banyak pelamar baru sekaligus. Sistem akan otomatis men-generate kode akses ujian untuk masing-masing kandidat.
-            </p>
-
-            {/* Template Download Card */}
-            <div style={{
-              background: 'var(--bg-secondary)',
-              border: '1px solid var(--border-color)',
-              borderRadius: '12px',
-              padding: '16px 20px',
-              marginBottom: '24px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              textAlign: 'left'
-            }}>
-              <div>
-                <div style={{ fontWeight: 700, fontSize: '13px', color: 'var(--text-primary)' }}>
-                  Template Excel Standar Pelamar
-                </div>
-                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                  Gunakan format kolom yang sudah disesuaikan dengan database recruitment HRMv2.
-                </div>
-              </div>
-              <a
-                href={candidateApi.getTemplateExcelUrl()}
-                download
-                style={{
-                  padding: '8px 14px',
-                  borderRadius: '8px',
-                  background: 'rgba(59, 130, 246, 0.15)',
-                  color: '#3b82f6',
-                  fontWeight: 700,
-                  fontSize: '12px',
-                  textDecoration: 'none',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px'
-                }}
-              >
-                📥 Unduh Template (.xlsx)
-              </a>
-            </div>
-
-            {/* Error Message */}
-            {excelError && (
-              <div style={{
-                background: 'rgba(239, 68, 68, 0.15)',
-                border: '1px solid rgba(239, 68, 68, 0.4)',
-                borderRadius: '10px',
-                padding: '12px 18px',
-                marginBottom: '20px',
-                color: '#ef4444',
-                fontSize: '13px',
-                textAlign: 'left'
-              }}>
-                ⚠️ {excelError}
-              </div>
-            )}
-
-            {/* Success Result */}
-            {excelResult && (
-              <div style={{
-                background: 'rgba(16, 185, 129, 0.12)',
-                border: '1px solid rgba(16, 185, 129, 0.4)',
-                borderRadius: '12px',
-                padding: '20px',
-                marginBottom: '24px',
-                textAlign: 'left'
-              }}>
-                <div style={{ fontWeight: 800, fontSize: '15px', color: '#10b981', marginBottom: '8px' }}>
-                  🎉 {excelResult.message}
-                </div>
-                {excelResult.stats && (
-                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '12px' }}>
-                    Total Baris: <strong>{excelResult.stats.total_rows}</strong> • Berhasil: <strong>{excelResult.stats.success_count}</strong> • Dilewati: <strong>{excelResult.stats.skipped_count}</strong>
-                  </div>
-                )}
-                {excelResult.candidates && excelResult.candidates.length > 0 && (
-                  <div style={{ maxHeight: '180px', overflowY: 'auto', background: 'rgba(0,0,0,0.3)', padding: '10px', borderRadius: '8px' }}>
-                    <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '6px' }}>KANDIDAT BARU DITAMBAHKAN:</div>
-                    {excelResult.candidates.map(c => (
-                      <div key={c.id} style={{ fontSize: '12px', color: 'var(--text-primary)', display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                        <span>{c.name}</span>
-                        <code style={{ color: '#f59e0b', fontWeight: 700 }}>{c.access_code}</code>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Dropzone & Upload Button */}
-            <form onSubmit={handleUploadExcel}>
-              <div style={{
-                border: '2px dashed var(--border-color)',
-                borderRadius: '14px',
-                padding: '30px 20px',
-                marginBottom: '20px',
-                background: 'var(--bg-secondary)',
-                cursor: 'pointer'
-              }}>
-                <input
-                  type="file"
-                  id="excel_input"
-                  accept=".xlsx,.xls,.csv"
-                  onChange={(e) => setExcelFile(e.target.files ? e.target.files[0] : null)}
-                  style={{ display: 'none' }}
-                />
-                <label htmlFor="excel_input" style={{ cursor: 'pointer', display: 'block' }}>
-                  <div style={{ fontSize: '36px', marginBottom: '8px' }}>📁</div>
-                  {excelFile ? (
-                    <div>
-                      <div style={{ fontSize: '14px', fontWeight: 700, color: '#10b981' }}>{excelFile.name}</div>
-                      <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>{formatBytes(excelFile.size)} • Klik untuk ganti file</div>
-                    </div>
-                  ) : (
-                    <div>
-                      <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>Pilih File Excel / CSV</div>
-                      <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>Seret file ke sini atau klik untuk browse file dari komputer</div>
-                    </div>
-                  )}
-                </label>
-              </div>
-
-              <button
-                type="submit"
-                disabled={!excelFile || uploadingExcel}
-                style={{
-                  width: '100%',
-                  padding: '12px 20px',
-                  borderRadius: '10px',
-                  border: 'none',
-                  background: 'var(--primary)',
-                  color: '#fff',
-                  fontWeight: 700,
-                  fontSize: '14px',
-                  cursor: !excelFile || uploadingExcel ? 'not-allowed' : 'pointer',
-                  boxShadow: '0 4px 14px rgba(59, 130, 246, 0.4)'
-                }}
-              >
-                {uploadingExcel ? '⏳ Sedang Mengimpor Data...' : '📤 Mulai Import Data Pelamar'}
-              </button>
-            </form>
-          </div>
         </div>
       )}
     </div>

@@ -19,6 +19,7 @@ import LaporanKonsolidasi from './views/LaporanKonsolidasi';
 import Settings from './views/Settings';
 import Discipline from './views/Discipline';
 import UploadPelamar from './views/UploadPelamar';
+import OutletActivity from './views/OutletActivity';
 import Login from './views/Login';
 import API_BASE from './config';
 
@@ -48,6 +49,7 @@ function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(() => !!localStorage.getItem('auth_token'));
   const [currentUsername, setCurrentUsername] = useState(() => localStorage.getItem('auth_username') || '');
   const [currentRole, setCurrentRole] = useState(() => localStorage.getItem('auth_role') || 'master');
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Change Password state
   const [showProfileModal, setShowProfileModal] = useState(false);
@@ -99,14 +101,15 @@ function App() {
 
   // Access control helpers
   const canAccess = {
-    rekrutmen:  ['staff', 'master'].includes(currentRole),
-    karyawan:   ['finance', 'master'].includes(currentRole),
-    cabang:     ['finance', 'master'].includes(currentRole),
-    absensi:    true,
-    payroll:    ['finance', 'master'].includes(currentRole),
-    laporan:    ['finance', 'master'].includes(currentRole),
-    settings:   currentRole === 'master',
-    disiplin:   ['finance', 'master'].includes(currentRole),
+    rekrutmen:        ['staff', 'master'].includes(currentRole),
+    karyawan:         ['finance', 'master'].includes(currentRole),
+    cabang:           ['finance', 'master'].includes(currentRole),
+    absensi:          true,
+    payroll:          ['finance', 'master'].includes(currentRole),
+    laporan:          ['finance', 'master'].includes(currentRole),
+    settings:         currentRole === 'master',
+    disiplin:         ['finance', 'master'].includes(currentRole),
+    aktivitas_outlet: true,
   };
 
   const handleChangePassword = async (e) => {
@@ -227,6 +230,8 @@ function App() {
         return canAccess.rekrutmen ? <TrainingQuestionBank /> : <Denied />;
       case 'discipline':
         return canAccess.disiplin ? <Discipline /> : <Denied />;
+      case 'outlet-activity':
+        return <OutletActivity />;
       default:
         return (
           <HRDashboard
@@ -257,25 +262,68 @@ function App() {
 
   return (
     <div className="app-container">
+      {/* Mobile Top Header (Visible on phone screens) */}
+      <div className="mobile-topbar" style={{
+        position: 'fixed', top: 0, left: 0, right: 0, height: '54px',
+        background: 'var(--bg-sidebar)', borderBottom: '1px solid var(--border-color)',
+        alignItems: 'center', justifyContent: 'space-between',
+        padding: '0 16px', zIndex: 999, backdropFilter: 'blur(10px)'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <button
+            onClick={() => setMobileMenuOpen(prev => !prev)}
+            style={{
+              background: 'var(--bg-secondary)', border: '1px solid var(--border-color)',
+              color: 'var(--text-primary)', borderRadius: '8px', padding: '6px 10px',
+              cursor: 'pointer', fontSize: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center'
+            }}
+            aria-label="Toggle Menu"
+          >
+            ☰
+          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div className="sidebar-logo-icon" style={{ width: '26px', height: '26px', fontSize: '14px' }}>H</div>
+            <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>HRMv2</span>
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>{currentUsername}</span>
+        </div>
+      </div>
+
+      {mobileMenuOpen && (
+        <div className="sidebar-backdrop" onClick={() => setMobileMenuOpen(false)} />
+      )}
+
       {/* Admin Sidebar */}
-      <aside className="sidebar">
-        <div className="sidebar-logo">
-          <div className="sidebar-logo-icon">H</div>
-          <span className="sidebar-logo-text">Cv. Asya Bisnis Indonesia</span>
+      <aside className={`sidebar ${mobileMenuOpen ? 'mobile-open' : ''}`}>
+        <div className="sidebar-logo" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div className="sidebar-logo-icon">H</div>
+            <span className="sidebar-logo-text">Cv. Asya Bisnis Indonesia</span>
+          </div>
+          {mobileMenuOpen && (
+            <button
+              onClick={() => setMobileMenuOpen(false)}
+              style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '20px', cursor: 'pointer', padding: '0 4px' }}
+            >
+              ✕
+            </button>
+          )}
         </div>
 
         <nav style={{ flexGrow: 1 }}>
           <ul className="sidebar-menu">
             <li
               className={`sidebar-item ${view === 'dashboard' ? 'active' : ''}`}
-              onClick={() => setView('dashboard')}
+              onClick={() => { setView('dashboard'); setMobileMenuOpen(false); }}
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px' }}><rect x="3" y="3" width="7" height="9"></rect><rect x="14" y="3" width="7" height="5"></rect><rect x="14" y="12" width="7" height="9"></rect><rect x="3" y="16" width="7" height="5"></rect></svg>
               Dashboard
             </li>
             {canAccess.karyawan && <li
               className={`sidebar-item ${view === 'employees' ? 'active' : ''}`}
-              onClick={() => setView('employees')}
+              onClick={() => { setView('employees'); setMobileMenuOpen(false); }}
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px', color: 'var(--color-success)' }}><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><polyline points="16 11 18 13 22 9"></polyline></svg>
               Data Karyawan
@@ -283,28 +331,36 @@ function App() {
 
             {canAccess.cabang && <li
               className={`sidebar-item ${view === 'branches' ? 'active' : ''}`}
-              onClick={() => setView('branches')}
+              onClick={() => { setView('branches'); setMobileMenuOpen(false); }}
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px', color: '#f59e0b' }}><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></svg>
               Cabang Outlet
             </li>}
+
+            {canAccess.aktivitas_outlet && <li
+              className={`sidebar-item ${view === 'outlet-activity' ? 'active' : ''}`}
+              onClick={() => { setView('outlet-activity'); setMobileMenuOpen(false); }}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px', color: '#10b981' }}><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+              Aktivitas GA & Audit
+            </li>}
             <li
               className={`sidebar-item ${view === 'attendance' ? 'active' : ''}`}
-              onClick={() => setView('attendance')}
+              onClick={() => { setView('attendance'); setMobileMenuOpen(false); }}
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px', color: '#3b82f6' }}><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><polyline points="9 16 11 18 15 14"/></svg>
               Absensi
             </li>
             {canAccess.payroll && <li
               className={`sidebar-item ${view === 'payroll' ? 'active' : ''}`}
-              onClick={() => setView('payroll')}
+              onClick={() => { setView('payroll'); setMobileMenuOpen(false); }}
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px', color: '#10b981' }}><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
               Payroll & Slip Gaji
             </li>}
             {canAccess.disiplin && <li
               className={`sidebar-item ${view === 'discipline' ? 'active' : ''}`}
-              onClick={() => setView('discipline')}
+              onClick={() => { setView('discipline'); setMobileMenuOpen(false); }}
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px', color: '#ef4444' }}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
               Disiplin & Pelanggaran
@@ -375,7 +431,7 @@ function App() {
               <ul style={{ listStyle: 'none', margin: '2px 0 4px', padding: '0', display: 'flex', flexDirection: 'column', gap: '2px', borderLeft: '2px solid rgba(167,139,250,0.3)', marginLeft: '12px', paddingLeft: '8px' }}>
                 <li
                   className={`sidebar-item ${view === 'recruitment-dashboard' ? 'active' : ''}`}
-                  onClick={() => setView('recruitment-dashboard')}
+                  onClick={() => { setView('recruitment-dashboard'); setMobileMenuOpen(false); }}
                   style={{ fontSize: '13px', padding: '8px 10px' }}
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px' }}><rect x="3" y="3" width="7" height="9"></rect><rect x="14" y="3" width="7" height="5"></rect><rect x="14" y="12" width="7" height="9"></rect><rect x="3" y="16" width="7" height="5"></rect></svg>
@@ -383,7 +439,7 @@ function App() {
                 </li>
                 <li
                   className={`sidebar-item ${view === 'upload-pelamar' ? 'active' : ''}`}
-                  onClick={() => setView('upload-pelamar')}
+                  onClick={() => { setView('upload-pelamar'); setMobileMenuOpen(false); }}
                   style={{ fontSize: '13px', padding: '8px 10px' }}
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px', color: '#10b981' }}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
@@ -391,7 +447,7 @@ function App() {
                 </li>
                 <li
                   className={`sidebar-item ${view === 'candidates' ? 'active' : ''}`}
-                  onClick={() => setView('candidates')}
+                  onClick={() => { setView('candidates'); setMobileMenuOpen(false); }}
                   style={{ fontSize: '13px', padding: '8px 10px' }}
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px' }}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>

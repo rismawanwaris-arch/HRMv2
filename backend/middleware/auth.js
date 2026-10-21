@@ -9,7 +9,7 @@ const { verifyToken } = require('../utils/crypto');
 function authenticateToken(req, res, next) {
   try {
     const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
+    const token = (authHeader && authHeader.split(' ')[1]) || req.query.token;
 
     if (!token) {
       return res.status(401).json({ success: false, message: 'Akses ditolak. Token tidak ditemukan.' });

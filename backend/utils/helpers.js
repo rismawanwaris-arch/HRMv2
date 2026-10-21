@@ -104,6 +104,39 @@ const excelUpload = multer({
   }
 });
 
+const outletPhotosDir = path.join(uploadsDir, 'outlet_photos');
+if (!fs.existsSync(outletPhotosDir)) {
+  fs.mkdirSync(outletPhotosDir, { recursive: true });
+}
+
+const outletPhotoStorage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    if (!fs.existsSync(outletPhotosDir)) {
+      fs.mkdirSync(outletPhotosDir, { recursive: true });
+    }
+    cb(null, outletPhotosDir);
+  },
+  filename: function (req, file, cb) {
+    const ext = path.extname(file.originalname).toLowerCase().replace(/[^a-z0-9.]/g, '') || '.jpg';
+    const uniqueSuffix = Date.now() + '-' + crypto.randomInt(1000, 9999);
+    cb(null, `visit_${uniqueSuffix}${ext}`);
+  }
+});
+
+const outletPhotoUpload = multer({
+  storage: outletPhotoStorage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB Limit per photo
+  fileFilter: function (req, file, cb) {
+    const allowed = ['.jpg', '.jpeg', '.png', '.webp'];
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (allowed.includes(ext) || (file.mimetype && file.mimetype.startsWith('image/'))) {
+      cb(null, true);
+    } else {
+      cb(new Error('Format file foto tidak didukung. Gunakan JPG, PNG, atau WEBP.'));
+    }
+  }
+});
+
 /**
  * Generate a random access code using a CSPRNG.
  * @param {string} [prefix] - Optional prefix (e.g. 'MAN-' for manual entries).
@@ -124,5 +157,7 @@ module.exports = {
   upload,
   candidateCreationUpload,
   excelUpload,
+  outletPhotoUpload,
+  outletPhotosDir,
   generateAccessCode
 };

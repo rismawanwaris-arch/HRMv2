@@ -736,6 +736,78 @@ async function initDb() {
     `);
     await query.run('CREATE INDEX IF NOT EXISTS idx_discipline_emp ON discipline_records(employee_id)').catch(() => {});
 
+    // Outlet Visits & Field Activity (Store Visit Log)
+    await query.run(`
+      CREATE TABLE IF NOT EXISTS outlet_visits (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        branch_id INTEGER NOT NULL REFERENCES branches(id),
+        visit_date TEXT NOT NULL,
+        visit_time TEXT,
+        visitor_name TEXT NOT NULL,
+        purpose TEXT NOT NULL,
+        status TEXT DEFAULT 'Completed',
+        score_cleanliness INTEGER DEFAULT 0,
+        score_security INTEGER DEFAULT 0,
+        score_display INTEGER DEFAULT 0,
+        score_sop INTEGER DEFAULT 0,
+        overall_score INTEGER DEFAULT 0,
+        checklist_data TEXT,
+        notes TEXT,
+        action_plan TEXT,
+        staff_present TEXT,
+        photos TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await query.run('CREATE INDEX IF NOT EXISTS idx_visits_branch ON outlet_visits(branch_id)').catch(() => {});
+    await query.run('CREATE INDEX IF NOT EXISTS idx_visits_date ON outlet_visits(visit_date)').catch(() => {});
+
+    // Outlet Incidents & Event Log (Kejadian Unik per Cabang)
+    await query.run(`
+      CREATE TABLE IF NOT EXISTS outlet_incidents (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        branch_id INTEGER NOT NULL REFERENCES branches(id),
+        visit_id INTEGER REFERENCES outlet_visits(id) ON DELETE SET NULL,
+        incident_date TEXT NOT NULL,
+        category TEXT NOT NULL,
+        severity TEXT DEFAULT 'Medium',
+        title TEXT NOT NULL,
+        description TEXT NOT NULL,
+        action_taken TEXT,
+        status TEXT DEFAULT 'Open',
+        resolved_date TEXT,
+        reported_by TEXT NOT NULL,
+        linked_employee_id INTEGER REFERENCES employees(id),
+        photos TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await query.run('CREATE INDEX IF NOT EXISTS idx_incidents_branch ON outlet_incidents(branch_id)').catch(() => {});
+    await query.run('CREATE INDEX IF NOT EXISTS idx_incidents_date ON outlet_incidents(incident_date)').catch(() => {});
+    await query.run('CREATE INDEX IF NOT EXISTS idx_incidents_status ON outlet_incidents(status)').catch(() => {});
+
+    // Action Items / PR Follow-up (Tindak Lanjut Perbaikan)
+    await query.run(`
+      CREATE TABLE IF NOT EXISTS outlet_action_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        branch_id INTEGER NOT NULL REFERENCES branches(id),
+        visit_id INTEGER REFERENCES outlet_visits(id) ON DELETE SET NULL,
+        incident_id INTEGER REFERENCES outlet_incidents(id) ON DELETE SET NULL,
+        task_description TEXT NOT NULL,
+        assigned_to TEXT,
+        due_date TEXT,
+        priority TEXT DEFAULT 'Medium',
+        status TEXT DEFAULT 'Pending',
+        completion_notes TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await query.run('CREATE INDEX IF NOT EXISTS idx_actions_branch ON outlet_action_items(branch_id)').catch(() => {});
+    await query.run('CREATE INDEX IF NOT EXISTS idx_actions_status ON outlet_action_items(status)').catch(() => {});
+
     // Clean up cognitive test table from training questions if any exist
     await query.run("DELETE FROM test_questions WHERE subtest = 'training'").catch(() => {});
 
