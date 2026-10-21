@@ -23,6 +23,40 @@ import OutletActivity from './views/OutletActivity';
 import Login from './views/Login';
 import API_BASE from './config';
 
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error, errorInfo) {
+    console.error('UI Crash caught by ErrorBoundary:', error, errorInfo);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: '60px 20px', textAlign: 'center', maxWidth: '500px', margin: '0 auto' }}>
+          <div style={{ fontSize: '48px', marginBottom: '16px' }}>⚠️</div>
+          <h2 style={{ color: 'var(--text-primary)', marginBottom: '8px' }}>Terjadi Kesalahan Tampilan</h2>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '13px', marginBottom: '20px', background: 'var(--bg-secondary)', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color)', textAlign: 'left', fontFamily: 'monospace' }}>
+            {this.state.error?.message || 'Gagal memuat komponen.'}
+          </p>
+          <button
+            onClick={() => { this.setState({ hasError: false, error: null }); window.location.reload(); }}
+            className="btn btn-primary"
+            style={{ padding: '10px 24px', fontWeight: 700 }}
+          >
+            Muat Ulang Halaman
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function App() {
   const [view, setView] = useState(() => {
     const params = new URLSearchParams(window.location.search);
@@ -561,7 +595,9 @@ function App() {
 
       {/* Admin Content Area */}
       <main className="main-content">
-        {renderView()}
+        <ErrorBoundary>
+          {renderView()}
+        </ErrorBoundary>
       </main>
 
       {/* Change Password Modal */}

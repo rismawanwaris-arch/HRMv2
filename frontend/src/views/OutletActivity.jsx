@@ -830,7 +830,11 @@ export default function OutletActivity() {
             <h3 style={{ fontSize: '16px', fontWeight: 700, marginBottom: '12px', color: 'var(--text-primary)' }}>
               Kunjungan Outlet ({summaryData?.visits?.length || 0})
             </h3>
-            {summaryData?.visits?.length === 0 ? (
+            {summaryLoading && !summaryData ? (
+              <div className="card" style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)' }}>
+                Memuat data kunjungan...
+              </div>
+            ) : (!summaryData?.visits || summaryData.visits.length === 0) ? (
               <div className="card" style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)' }}>
                 Belum ada catatan kunjungan pada tanggal {summaryData?.formattedDate || selectedDate}.
                 <div style={{ marginTop: '12px' }}>
@@ -1570,31 +1574,31 @@ export default function OutletActivity() {
                 <div className="card" style={{ padding: '14px' }}>
                   <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>TOTAL KUNJUNGAN</div>
                   <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary)', marginTop: '4px' }}>
-                    {branchHistory.stats.totalVisits} Kali
+                    {branchHistory.stats?.totalVisits || 0} Kali
                   </div>
                   <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
-                    Terakhir: {branchHistory.stats.lastVisitDate || 'Belum pernah'}
+                    Terakhir: {branchHistory.stats?.lastVisitDate || 'Belum pernah'}
                   </div>
                 </div>
 
                 <div className="card" style={{ padding: '14px' }}>
                   <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>RATA-RATA SKOR AUDIT</div>
                   <div style={{ fontSize: '24px', fontWeight: 800, color: '#10b981', marginTop: '4px' }}>
-                    {branchHistory.stats.avgScore > 0 ? `${branchHistory.stats.avgScore}/100` : '-'}
+                    {(branchHistory.stats?.avgScore || 0) > 0 ? `${branchHistory.stats.avgScore}/100` : '-'}
                   </div>
                 </div>
 
                 <div className="card" style={{ padding: '14px' }}>
                   <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>INSIDEN BELUM SELESAI</div>
-                  <div style={{ fontSize: '24px', fontWeight: 800, color: branchHistory.stats.openIncidents > 0 ? '#ef4444' : '#10b981', marginTop: '4px' }}>
-                    {branchHistory.stats.openIncidents} Kejadian
+                  <div style={{ fontSize: '24px', fontWeight: 800, color: (branchHistory.stats?.openIncidents || 0) > 0 ? '#ef4444' : '#10b981', marginTop: '4px' }}>
+                    {branchHistory.stats?.openIncidents || 0} Kejadian
                   </div>
                 </div>
 
                 <div className="card" style={{ padding: '14px' }}>
                   <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>PR / PERBAIKAN PENDING</div>
                   <div style={{ fontSize: '24px', fontWeight: 800, color: '#f59e0b', marginTop: '4px' }}>
-                    {branchHistory.stats.pendingActions} Tugas
+                    {branchHistory.stats?.pendingActions || 0} Tugas
                   </div>
                 </div>
               </div>
@@ -1602,9 +1606,9 @@ export default function OutletActivity() {
               {/* Incidents at this branch */}
               <div className="card" style={{ marginBottom: '20px' }}>
                 <h3 style={{ fontSize: '15px', fontWeight: 800, marginBottom: '14px', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span>🚨</span> Riwayat Insiden & Kejadian di Cabang Ini ({branchHistory.incidents.length})
+                  <span>🚨</span> Riwayat Insiden & Kejadian di Cabang Ini ({branchHistory.incidents?.length || 0})
                 </h3>
-                {branchHistory.incidents.length === 0 ? (
+                {(!branchHistory.incidents || branchHistory.incidents.length === 0) ? (
                   <div style={{ fontSize: '13px', color: 'var(--text-muted)', padding: '10px 0' }}>
                     Tidak ada catatan insiden di cabang ini.
                   </div>
@@ -1637,9 +1641,9 @@ export default function OutletActivity() {
               {/* Visits history at this branch */}
               <div className="card">
                 <h3 style={{ fontSize: '15px', fontWeight: 800, marginBottom: '14px', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span>📝</span> Riwayat Kunjungan di Cabang Ini ({branchHistory.visits.length})
+                  <span>📝</span> Riwayat Kunjungan di Cabang Ini ({branchHistory.visits?.length || 0})
                 </h3>
-                {branchHistory.visits.length === 0 ? (
+                {(!branchHistory.visits || branchHistory.visits.length === 0) ? (
                   <div style={{ fontSize: '13px', color: 'var(--text-muted)', padding: '10px 0' }}>
                     Belum ada riwayat kunjungan di cabang ini.
                   </div>
