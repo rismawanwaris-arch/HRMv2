@@ -808,6 +808,53 @@ async function initDb() {
     await query.run('CREATE INDEX IF NOT EXISTS idx_actions_branch ON outlet_action_items(branch_id)').catch(() => {});
     await query.run('CREATE INDEX IF NOT EXISTS idx_actions_status ON outlet_action_items(status)').catch(() => {});
 
+    // Outlet Assets & Inventory (Inventaris Cabang & Manajemen Aset GA)
+    await query.run(`
+      CREATE TABLE IF NOT EXISTS outlet_assets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        asset_code TEXT UNIQUE,
+        name TEXT NOT NULL,
+        category TEXT NOT NULL,
+        branch_id INTEGER NOT NULL REFERENCES branches(id),
+        purchase_date TEXT,
+        purchase_cost REAL DEFAULT 0,
+        condition TEXT DEFAULT 'Baik',
+        status TEXT DEFAULT 'Aktif',
+        brand TEXT,
+        serial_number TEXT,
+        vendor_supplier TEXT,
+        photos TEXT,
+        notes TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await query.run('CREATE INDEX IF NOT EXISTS idx_assets_branch ON outlet_assets(branch_id)').catch(() => {});
+    await query.run('CREATE INDEX IF NOT EXISTS idx_assets_status ON outlet_assets(status)').catch(() => {});
+    await query.run('CREATE INDEX IF NOT EXISTS idx_assets_category ON outlet_assets(category)').catch(() => {});
+
+    // Asset Activity Logs (Riwayat Penggantian, Penambahan, Mutasi, dan Perbaikan Aset)
+    await query.run(`
+      CREATE TABLE IF NOT EXISTS outlet_asset_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        asset_id INTEGER NOT NULL REFERENCES outlet_assets(id) ON DELETE CASCADE,
+        log_type TEXT NOT NULL,
+        log_date TEXT NOT NULL,
+        from_branch_id INTEGER REFERENCES branches(id),
+        to_branch_id INTEGER REFERENCES branches(id),
+        cost REAL DEFAULT 0,
+        replacement_asset_name TEXT,
+        reason TEXT,
+        performed_by TEXT,
+        photos TEXT,
+        notes TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await query.run('CREATE INDEX IF NOT EXISTS idx_asset_logs_asset ON outlet_asset_logs(asset_id)').catch(() => {});
+    await query.run('CREATE INDEX IF NOT EXISTS idx_asset_logs_date ON outlet_asset_logs(log_date)').catch(() => {});
+    await query.run('CREATE INDEX IF NOT EXISTS idx_asset_logs_type ON outlet_asset_logs(log_type)').catch(() => {});
+
     // Clean up cognitive test table from training questions if any exist
     await query.run("DELETE FROM test_questions WHERE subtest = 'training'").catch(() => {});
 

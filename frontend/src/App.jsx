@@ -20,6 +20,7 @@ import Settings from './views/Settings';
 import Discipline from './views/Discipline';
 import UploadPelamar from './views/UploadPelamar';
 import OutletActivity from './views/OutletActivity';
+import AssetManagement from './views/AssetManagement';
 import Login from './views/Login';
 import API_BASE from './config';
 
@@ -144,6 +145,7 @@ function App() {
     settings:         currentRole === 'master',
     disiplin:         ['finance', 'master'].includes(currentRole),
     aktivitas_outlet: true,
+    assets:           true,
   };
 
   const handleChangePassword = async (e) => {
@@ -266,6 +268,8 @@ function App() {
         return canAccess.disiplin ? <Discipline /> : <Denied />;
       case 'outlet-activity':
         return <OutletActivity />;
+      case 'assets':
+        return <AssetManagement />;
       default:
         return (
           <HRDashboard
@@ -377,6 +381,14 @@ function App() {
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px', color: '#10b981' }}><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
               Aktivitas GA & Audit
+            </li>}
+
+            {canAccess.assets && <li
+              className={`sidebar-item ${view === 'assets' ? 'active' : ''}`}
+              onClick={() => { setView('assets'); setMobileMenuOpen(false); }}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px', color: '#f59e0b' }}><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+              Inventaris & Aset GA
             </li>}
             <li
               className={`sidebar-item ${view === 'attendance' ? 'active' : ''}`}

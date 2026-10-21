@@ -599,3 +599,30 @@ export const outletActivityApi = {
     return `${API_BASE}/outlet-activity/photos/${filename}?token=${token}`;
   }
 };
+
+/**
+ * --- ASSET & INVENTORY API ---
+ * Services for branch assets, additions, replacements, mutations, and repairs.
+ */
+export const assetApi = {
+  getAll: (params) => {
+    const qs = buildQueryString(params);
+    return api.get(`/assets${qs ? `?${qs}` : ''}`);
+  },
+  getStats: () => api.get('/assets/stats'),
+  getById: (id) => api.get(`/assets/${id}`),
+  create: (formDataOrJson) => api.post('/assets', formDataOrJson),
+  update: (id, formDataOrJson) => api.put(`/assets/${id}`, formDataOrJson),
+  delete: (id) => api.delete(`/assets/${id}`),
+  replace: (id, formDataOrJson) => api.post(`/assets/${id}/replace`, formDataOrJson),
+  mutate: (id, data) => api.post(`/assets/${id}/mutate`, data),
+  service: (id, data) => api.post(`/assets/${id}/service`, data),
+  getLogs: (params) => {
+    const qs = buildQueryString(params);
+    return api.get(`/assets/logs/all${qs ? `?${qs}` : ''}`);
+  },
+  getPhotoUrl: (filename) => {
+    const token = localStorage.getItem('auth_token') || '';
+    return `${API_BASE}/outlet-activity/photos/${filename}?token=${token}`;
+  }
+};
