@@ -33,7 +33,7 @@ COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 # Create volume mount point for persistent database
 RUN mkdir -p /app/data
 
-EXPOSE 5000
+EXPOSE 5002
 
 # Start the application
 CMD ["node", "backend/server.js"]
