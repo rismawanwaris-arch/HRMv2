@@ -594,7 +594,7 @@ export default function Settings({ currentRole = 'master' }) {
               fontWeight: 600
             }}>
               <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#10b981' }} />
-              API Server Online (Port {mobileConfig?.port || 5001})
+              API Server Online (Port {mobileConfig?.port || 5002})
             </span>
           </div>
         </div>
@@ -701,7 +701,7 @@ export default function Settings({ currentRole = 'master' }) {
                 Android emulator menggunakan IP loopback khusus <code>10.0.2.2</code> untuk mengakses localhost host.
               </div>
               <code style={{ display: 'inline-block', marginTop: '6px', fontSize: '13px', color: '#38bdf8', fontWeight: 600, background: 'var(--bg-surface)', padding: '4px 8px', borderRadius: '6px' }}>
-                {mobileConfig?.emulator_base_url || 'http://10.0.2.2:5001/api'}
+                {mobileConfig?.emulator_base_url || 'http://10.0.2.2:5002/api'}
               </code>
             </div>
             <button
@@ -872,7 +872,7 @@ export default function Settings({ currentRole = 'master' }) {
               <button
                 type="button"
                 onClick={() => handleCopy(`class ApiConfig {
-  static const String baseUrl = '${customBaseUrl || mobileConfig?.recommended_base_url || 'http://192.168.100.77:5001/api'}';
+  static const String baseUrl = '${customBaseUrl || mobileConfig?.recommended_base_url || 'http://192.168.100.77:5002/api'}';
   static const String login = '\$baseUrl/login';
   static const String masterData = '\$baseUrl/mobile/master-data';
   static const String syncAsset = '\$baseUrl/mobile/sync/asset';
@@ -907,7 +907,7 @@ export default function Settings({ currentRole = 'master' }) {
             }}>
 {`class ApiConfig {
   // Base URL aktif yang dikonfigurasikan di Pengaturan Sistem
-  static const String baseUrl = '${customBaseUrl || mobileConfig?.recommended_base_url || 'http://192.168.100.77:5001/api'}';
+  static const String baseUrl = '${customBaseUrl || mobileConfig?.recommended_base_url || 'http://192.168.100.77:5002/api'}';
 
   // Endpoint Autentikasi & Sinkronisasi
   static const String login = '\$baseUrl/login';

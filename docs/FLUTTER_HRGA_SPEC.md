@@ -180,7 +180,7 @@ CREATE TABLE local_employees (
 
 ## 3. Spesifikasi Kontrak REST API (Backend HRMv2)
 
-Base URL: `http://<IP_SERVER_ATAU_DOMAIN>:3000/api`
+Base URL: `http://<IP_SERVER_ATAU_DOMAIN>:5002/api`
 
 ### 1. Master Data Cache (Dipanggil saat HP Terhubung Internet)
 * **Endpoint**: `GET /api/mobile/master-data`
@@ -350,7 +350,7 @@ Future<bool> syncSingleAsset(LocalAsset asset) async {
 
   try {
     final response = await dio.post(
-      'http://YOUR_SERVER_IP:3000/api/mobile/sync/asset',
+      'http://YOUR_SERVER_IP:5002/api/mobile/sync/asset',
       data: formData,
       options: Options(headers: {'Authorization': 'Bearer $token'}),
     );

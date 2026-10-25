@@ -4,7 +4,7 @@ info:
   description: API documentation for the Human Resource Management v2 portal, covering candidate tracking, pipeline configuration, outlet management, and testing portals.
   version: 1.0.0
 servers:
-  - url: http://localhost:5001/api
+  - url: http://localhost:5002/api
     description: Local development server
 security:
   - BearerAuth: []

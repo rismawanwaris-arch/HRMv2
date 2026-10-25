@@ -127,7 +127,7 @@ exports.deletePenaltyRule = async (req, res) => {
  */
 exports.getMobileConfig = async (req, res) => {
   try {
-    const port = process.env.PORT || '5001';
+    const port = process.env.PORT || '5002';
     const localIp = getLocalIpAddress();
     const customUrlRow = await query.get('SELECT value FROM system_settings WHERE key = "mobile_api_base_url"');
     const customBaseUrl = customUrlRow ? customUrlRow.value : '';
