@@ -855,6 +855,33 @@ async function initDb() {
     await query.run('CREATE INDEX IF NOT EXISTS idx_asset_logs_date ON outlet_asset_logs(log_date)').catch(() => {});
     await query.run('CREATE INDEX IF NOT EXISTS idx_asset_logs_type ON outlet_asset_logs(log_type)').catch(() => {});
 
+    // --- Mobile Offline Sync Tracking Columns & Indexes ---
+    const mobileSyncMigrations = [
+      { table: 'outlet_assets', col: 'client_uuid TEXT' },
+      { table: 'outlet_assets', col: 'synced_at DATETIME' },
+      { table: 'outlet_assets', col: 'client_created_at DATETIME' },
+
+      { table: 'outlet_visits', col: 'client_uuid TEXT' },
+      { table: 'outlet_visits', col: 'synced_at DATETIME' },
+      { table: 'outlet_visits', col: 'client_created_at DATETIME' },
+
+      { table: 'outlet_incidents', col: 'client_uuid TEXT' },
+      { table: 'outlet_incidents', col: 'synced_at DATETIME' },
+      { table: 'outlet_incidents', col: 'client_created_at DATETIME' },
+
+      { table: 'candidates', col: 'client_uuid TEXT' },
+      { table: 'candidates', col: 'synced_at DATETIME' }
+    ];
+
+    for (const m of mobileSyncMigrations) {
+      await query.run(`ALTER TABLE ${m.table} ADD COLUMN ${m.col}`).catch(() => {});
+    }
+
+    await query.run('CREATE UNIQUE INDEX IF NOT EXISTS idx_assets_client_uuid ON outlet_assets(client_uuid)').catch(() => {});
+    await query.run('CREATE UNIQUE INDEX IF NOT EXISTS idx_visits_client_uuid ON outlet_visits(client_uuid)').catch(() => {});
+    await query.run('CREATE UNIQUE INDEX IF NOT EXISTS idx_incidents_client_uuid ON outlet_incidents(client_uuid)').catch(() => {});
+    await query.run('CREATE UNIQUE INDEX IF NOT EXISTS idx_candidates_client_uuid ON candidates(client_uuid)').catch(() => {});
+
     // Clean up cognitive test table from training questions if any exist
     await query.run("DELETE FROM test_questions WHERE subtest = 'training'").catch(() => {});
 

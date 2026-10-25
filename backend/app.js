@@ -68,6 +68,7 @@ app.use('/api/financial',  authenticateToken, auditLog, requireRole(...FINANCE),
 app.use('/api/discipline', authenticateToken, auditLog, requireRole(...FINANCE), require('./routes/disciplineRoutes'));
 app.use('/api/outlet-activity', authenticateToken, auditLog, requireRole(...STAFF), require('./routes/outletActivityRoutes'));
 app.use('/api/assets',          authenticateToken, auditLog, requireRole(...STAFF), require('./routes/assetRoutes'));
+app.use('/api/mobile',          authenticateToken, auditLog, requireRole(...STAFF), require('./routes/mobileRoutes'));
 app.use('/api', require('./routes/testRoutes'));
 
 // --- SERVE FRONTEND STATIC FILES IN PRODUCTION ---
