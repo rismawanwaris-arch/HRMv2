@@ -32,7 +32,92 @@ export default function Settings({ currentRole = 'master' }) {
   const [adminMsg, setAdminMsg] = useState(null);
   const [savingAdmin, setSavingAdmin] = useState(false);
 
+  // Mobile API connection state
+  const [mobileConfig, setMobileConfig] = useState(null);
+  const [customBaseUrl, setCustomBaseUrl] = useState('');
+  const [savingMobileUrl, setSavingMobileUrl] = useState(false);
+  const [mobileUrlMsg, setMobileUrlMsg] = useState(null);
+  const [copiedKey, setCopiedKey] = useState(null);
+  const [testingMobileApi, setTestingMobileApi] = useState(false);
+  const [mobileTestResult, setMobileTestResult] = useState(null);
+  const [showDartSnippet, setShowDartSnippet] = useState(false);
+
   const loadAdmins = () => adminApi.list().then(r => { if (r.success) setAdmins(r.data); }).catch(() => {});
+
+  const loadMobileConfig = () => {
+    settingsApi.getMobileConfig()
+      .then(res => {
+        if (res.success && res.data) {
+          setMobileConfig(res.data);
+          setCustomBaseUrl(res.data.custom_base_url || res.data.recommended_base_url || '');
+        }
+      })
+      .catch(() => {});
+  };
+
+  const handleCopy = (text, key) => {
+    navigator.clipboard.writeText(text);
+    setCopiedKey(key);
+    setTimeout(() => setCopiedKey(null), 2500);
+  };
+
+  const handleSaveCustomBaseUrl = async (e) => {
+    e.preventDefault();
+    setSavingMobileUrl(true);
+    setMobileUrlMsg(null);
+    try {
+      const res = await settingsApi.updateSettings({ mobile_api_base_url: customBaseUrl });
+      if (res.success) {
+        setMobileUrlMsg({ type: 'ok', text: 'URL API Kustom berhasil disimpan.' });
+        loadMobileConfig();
+      } else {
+        setMobileUrlMsg({ type: 'err', text: res.message || 'Gagal menyimpan URL.' });
+      }
+    } catch {
+      setMobileUrlMsg({ type: 'err', text: 'Kesalahan jaringan saat menyimpan URL.' });
+    } finally {
+      setSavingMobileUrl(false);
+    }
+  };
+
+  const handleTestMobileApi = async () => {
+    setTestingMobileApi(true);
+    setMobileTestResult(null);
+    const start = performance.now();
+    try {
+      const token = localStorage.getItem('token');
+      const targetUrl = customBaseUrl || mobileConfig?.recommended_base_url || '/api';
+      const cleanUrl = targetUrl.replace(/\/$/, '');
+      const res = await fetch(`${cleanUrl}/mobile/master-data`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const end = performance.now();
+      const latency = Math.round(end - start);
+      if (res.ok) {
+        const json = await res.json();
+        setMobileTestResult({
+          ok: true,
+          latency,
+          message: `Koneksi Berhasil (${res.status} OK). Ditemukan ${json.data?.branches?.length || 0} cabang aktif.`
+        });
+      } else {
+        setMobileTestResult({
+          ok: false,
+          latency,
+          message: `Server merespon status ${res.status}: ${res.statusText}`
+        });
+      }
+    } catch (err) {
+      const end = performance.now();
+      setMobileTestResult({
+        ok: false,
+        latency: Math.round(end - start),
+        message: `Gagal terhubung: ${err.message}. Pastikan URL dan port dapat diakses.`
+      });
+    } finally {
+      setTestingMobileApi(false);
+    }
+  };
 
   useEffect(() => {
     Promise.all([settingsApi.getSettings(), settingsApi.getPenaltyRules()])
@@ -41,6 +126,7 @@ export default function Settings({ currentRole = 'master' }) {
         if (r.success) setRules(r.data);
       })
       .finally(() => setLoadingSettings(false));
+    loadMobileConfig();
     if (currentRole === 'master') loadAdmins();
   }, [currentRole]);
 
@@ -479,6 +565,362 @@ export default function Settings({ currentRole = 'master' }) {
           </div>
         </div>
       )}
+
+      {/* ── PENGATURAN API MOBILE & FLUTTER ── */}
+      <div className="card" style={{ marginTop: '24px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px', marginBottom: '16px' }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '20px' }}>📱</span>
+              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                Koneksi API Mobile (Flutter / Android)
+              </h3>
+            </div>
+            <p style={{ margin: '4px 0 0', fontSize: '12px', color: 'var(--text-muted)' }}>
+              Alamat endpoint dan pengaturan komunikasi offline-first untuk aplikasi Android HRGA
+            </p>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '4px 10px',
+              borderRadius: '20px',
+              background: 'rgba(16,185,129,0.12)',
+              color: '#10b981',
+              border: '1px solid rgba(16,185,129,0.25)',
+              fontSize: '12px',
+              fontWeight: 600
+            }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#10b981' }} />
+              API Server Online (Port {mobileConfig?.port || 5001})
+            </span>
+          </div>
+        </div>
+
+        {/* Statistik Sinkronisasi Mobile */}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+          gap: '12px',
+          marginBottom: '20px'
+        }}>
+          <div style={{ background: 'var(--bg-hover)', padding: '12px', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
+            <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600 }}>ASET TERSINKRON</div>
+            <div style={{ fontSize: '20px', fontWeight: 800, color: '#3b82f6', marginTop: '4px' }}>
+              {mobileConfig?.sync_stats?.synced_assets ?? 0}
+            </div>
+          </div>
+          <div style={{ background: 'var(--bg-hover)', padding: '12px', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
+            <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600 }}>KUNJUNGAN GA</div>
+            <div style={{ fontSize: '20px', fontWeight: 800, color: '#10b981', marginTop: '4px' }}>
+              {mobileConfig?.sync_stats?.synced_visits ?? 0}
+            </div>
+          </div>
+          <div style={{ background: 'var(--bg-hover)', padding: '12px', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
+            <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600 }}>INSIDEN OUTLET</div>
+            <div style={{ fontSize: '20px', fontWeight: 800, color: '#f59e0b', marginTop: '4px' }}>
+              {mobileConfig?.sync_stats?.synced_incidents ?? 0}
+            </div>
+          </div>
+          <div style={{ background: 'var(--bg-hover)', padding: '12px', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
+            <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600 }}>KARYAWAN BARU</div>
+            <div style={{ fontSize: '20px', fontWeight: 800, color: '#8b5cf6', marginTop: '4px' }}>
+              {mobileConfig?.sync_stats?.synced_employees ?? 0}
+            </div>
+          </div>
+        </div>
+
+        {/* Opsi Alamat Koneksi */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginBottom: '20px' }}>
+          {/* 1. HP Fisik Android */}
+          <div style={{
+            background: 'var(--bg-hover)',
+            padding: '14px',
+            borderRadius: '10px',
+            border: '1px solid var(--border-color)',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '12px'
+          }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                  1. HP Fisik Android (Wi-Fi Lokal)
+                </span>
+                <span style={{ fontSize: '11px', background: '#3b82f622', color: '#60a5fa', padding: '2px 8px', borderRadius: '4px', fontWeight: 600 }}>
+                  Rekomendasi Lapangan
+                </span>
+              </div>
+              <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                Gunakan URL ini di Flutter jika HP Android dan laptop terhubung di Wi-Fi yang sama.
+              </div>
+              <code style={{ display: 'inline-block', marginTop: '6px', fontSize: '13px', color: '#10b981', fontWeight: 600, background: 'var(--bg-surface)', padding: '4px 8px', borderRadius: '6px' }}>
+                {mobileConfig?.recommended_base_url || 'Memuat IP...'}
+              </code>
+            </div>
+            <button
+              type="button"
+              onClick={() => handleCopy(mobileConfig?.recommended_base_url || '', 'wifi')}
+              style={{
+                padding: '8px 14px',
+                borderRadius: '8px',
+                border: '1px solid var(--border-color)',
+                background: copiedKey === 'wifi' ? '#10b981' : 'var(--bg-surface)',
+                color: copiedKey === 'wifi' ? '#fff' : 'var(--text-primary)',
+                fontSize: '12px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'all 0.2s ease'
+              }}
+            >
+              {copiedKey === 'wifi' ? '✓ Tersalin!' : '📋 Salin URL'}
+            </button>
+          </div>
+
+          {/* 2. Android Studio Emulator */}
+          <div style={{
+            background: 'var(--bg-hover)',
+            padding: '14px',
+            borderRadius: '10px',
+            border: '1px solid var(--border-color)',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '12px'
+          }}>
+            <div>
+              <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                2. Android Studio Emulator (Di Komputer Ini)
+              </div>
+              <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                Android emulator menggunakan IP loopback khusus <code>10.0.2.2</code> untuk mengakses localhost host.
+              </div>
+              <code style={{ display: 'inline-block', marginTop: '6px', fontSize: '13px', color: '#38bdf8', fontWeight: 600, background: 'var(--bg-surface)', padding: '4px 8px', borderRadius: '6px' }}>
+                {mobileConfig?.emulator_base_url || 'http://10.0.2.2:5001/api'}
+              </code>
+            </div>
+            <button
+              type="button"
+              onClick={() => handleCopy(mobileConfig?.emulator_base_url || '', 'emu')}
+              style={{
+                padding: '8px 14px',
+                borderRadius: '8px',
+                border: '1px solid var(--border-color)',
+                background: copiedKey === 'emu' ? '#10b981' : 'var(--bg-surface)',
+                color: copiedKey === 'emu' ? '#fff' : 'var(--text-primary)',
+                fontSize: '12px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'all 0.2s ease'
+              }}
+            >
+              {copiedKey === 'emu' ? '✓ Tersalin!' : '📋 Salin URL'}
+            </button>
+          </div>
+
+          {/* 3. URL Kustom / Domain Produksi */}
+          <form onSubmit={handleSaveCustomBaseUrl} style={{
+            background: 'var(--bg-hover)',
+            padding: '14px',
+            borderRadius: '10px',
+            border: '1px solid var(--border-color)'
+          }}>
+            <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
+              3. URL API Kustom / Domain VPS (Produksi)
+            </div>
+            <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px', marginBottom: '10px' }}>
+              Masukkan domain HTTPS atau IP publik jika aplikasi sudah di-deploy ke server online.
+            </div>
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+              <input
+                type="text"
+                placeholder="https://hrm.perusahaan.com/api"
+                value={customBaseUrl}
+                onChange={e => setCustomBaseUrl(e.target.value)}
+                style={{
+                  flex: 1,
+                  minWidth: '240px',
+                  padding: '8px 12px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-color)',
+                  background: 'var(--bg-surface)',
+                  color: 'var(--text-primary)',
+                  fontSize: '13px'
+                }}
+              />
+              <button
+                type="submit"
+                disabled={savingMobileUrl}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: '8px',
+                  border: 'none',
+                  background: savingMobileUrl ? '#666' : 'linear-gradient(135deg, #7c3aed, #6d28d9)',
+                  color: '#fff',
+                  fontWeight: 600,
+                  fontSize: '13px',
+                  cursor: savingMobileUrl ? 'not-allowed' : 'pointer',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                {savingMobileUrl ? 'Menyimpan...' : 'Simpan URL'}
+              </button>
+            </div>
+            {mobileUrlMsg && (
+              <div style={{ marginTop: '8px', fontSize: '12px', color: mobileUrlMsg.type === 'ok' ? '#10b981' : '#ef4444' }}>
+                {mobileUrlMsg.text}
+              </div>
+            )}
+          </form>
+        </div>
+
+        {/* Uji Koneksi & Tombol Lihat Kode Dart */}
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '12px',
+          paddingTop: '12px',
+          borderTop: '1px solid var(--border-color)'
+        }}>
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+            <button
+              type="button"
+              onClick={handleTestMobileApi}
+              disabled={testingMobileApi}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '9px 16px',
+                borderRadius: '8px',
+                border: '1px solid #10b981',
+                background: testingMobileApi ? '#10b98133' : 'rgba(16,185,129,0.1)',
+                color: '#10b981',
+                fontSize: '13px',
+                fontWeight: 700,
+                cursor: testingMobileApi ? 'not-allowed' : 'pointer'
+              }}
+            >
+              {testingMobileApi ? '⏳ Menguji...' : '⚡ Uji Respon API Mobile'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowDartSnippet(p => !p)}
+              style={{
+                padding: '9px 14px',
+                borderRadius: '8px',
+                border: '1px solid var(--border-color)',
+                background: 'var(--bg-hover)',
+                color: 'var(--text-primary)',
+                fontSize: '13px',
+                fontWeight: 600,
+                cursor: 'pointer'
+              }}
+            >
+              {showDartSnippet ? 'Sembunyikan Kode Dart' : '📋 Lihat Template ApiConfig.dart'}
+            </button>
+          </div>
+
+          <a
+            href="/docs/FLUTTER_HRGA_SPEC.md"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ fontSize: '12px', color: '#a78bfa', textDecoration: 'none', fontWeight: 600 }}
+          >
+            Buka Dokumen PRD Mobile Spec ↗
+          </a>
+        </div>
+
+        {/* Hasil Uji Respon API */}
+        {mobileTestResult && (
+          <div style={{
+            marginTop: '14px',
+            padding: '12px 14px',
+            borderRadius: '8px',
+            fontSize: '13px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            background: mobileTestResult.ok ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
+            border: `1px solid ${mobileTestResult.ok ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'}`,
+            color: mobileTestResult.ok ? '#10b981' : '#ef4444'
+          }}>
+            <div>
+              <strong>{mobileTestResult.ok ? '✓ Sukses: ' : '✕ Gagal: '}</strong>
+              {mobileTestResult.message}
+            </div>
+            <div style={{ fontSize: '11px', opacity: 0.85, fontWeight: 700 }}>
+              Latency: {mobileTestResult.latency} ms
+            </div>
+          </div>
+        )}
+
+        {/* Template Kode Dart Flutter */}
+        {showDartSnippet && (
+          <div style={{ marginTop: '16px', background: 'var(--bg-surface)', padding: '16px', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)' }}>
+                lib/core/api_config.dart
+              </span>
+              <button
+                type="button"
+                onClick={() => handleCopy(`class ApiConfig {
+  static const String baseUrl = '${customBaseUrl || mobileConfig?.recommended_base_url || 'http://192.168.100.77:5001/api'}';
+  static const String login = '\$baseUrl/login';
+  static const String masterData = '\$baseUrl/mobile/master-data';
+  static const String syncAsset = '\$baseUrl/mobile/sync/asset';
+  static const String syncVisit = '\$baseUrl/mobile/sync/visit';
+  static const String syncIncident = '\$baseUrl/mobile/sync/incident';
+  static const String syncEmployee = '\$baseUrl/mobile/sync/employee';
+}`, 'dart')}
+                style={{
+                  padding: '4px 10px',
+                  borderRadius: '6px',
+                  border: '1px solid var(--border-color)',
+                  background: copiedKey === 'dart' ? '#10b981' : 'var(--bg-hover)',
+                  color: copiedKey === 'dart' ? '#fff' : 'var(--text-primary)',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  cursor: 'pointer'
+                }}
+              >
+                {copiedKey === 'dart' ? '✓ Tersalin!' : 'Salin Kode Dart'}
+              </button>
+            </div>
+            <pre style={{
+              margin: 0,
+              fontSize: '12px',
+              fontFamily: 'monospace',
+              color: '#34d399',
+              background: '#0d1117',
+              padding: '12px',
+              borderRadius: '8px',
+              overflowX: 'auto',
+              lineHeight: '1.5'
+            }}>
+{`class ApiConfig {
+  // Base URL aktif yang dikonfigurasikan di Pengaturan Sistem
+  static const String baseUrl = '${customBaseUrl || mobileConfig?.recommended_base_url || 'http://192.168.100.77:5001/api'}';
+
+  // Endpoint Autentikasi & Sinkronisasi
+  static const String login = '\$baseUrl/login';
+  static const String masterData = '\$baseUrl/mobile/master-data';
+  static const String syncAsset = '\$baseUrl/mobile/sync/asset';
+  static const String syncVisit = '\$baseUrl/mobile/sync/visit';
+  static const String syncIncident = '\$baseUrl/mobile/sync/incident';
+  static const String syncEmployee = '\$baseUrl/mobile/sync/employee';
+}`}
+            </pre>
+          </div>
+        )}
+      </div>
 
       {/* ── MANAJEMEN ADMIN (master only) ── */}
       {currentRole === 'master' && (

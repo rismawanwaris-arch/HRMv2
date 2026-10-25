@@ -1,4 +1,17 @@
+const os = require('os');
 const { query } = require('../db');
+
+function getLocalIpAddress() {
+  const interfaces = os.networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name]) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        return iface.address;
+      }
+    }
+  }
+  return '127.0.0.1';
+}
 
 exports.getSettings = async (req, res) => {
   try {
@@ -37,6 +50,14 @@ exports.updateSettings = async (req, res) => {
           [key, val]
         );
       }
+    }
+
+    if (req.body.mobile_api_base_url !== undefined) {
+      const val = String(req.body.mobile_api_base_url).trim();
+      await query.run(
+        'INSERT INTO system_settings (key, value, updated_at) VALUES ("mobile_api_base_url", ?, CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at',
+        [val]
+      );
     }
     res.json({ success: true, message: 'Pengaturan berhasil disimpan.' });
   } catch (error) {
@@ -99,3 +120,42 @@ exports.deletePenaltyRule = async (req, res) => {
     res.status(500).json({ success: false, message: 'Server error.' });
   }
 };
+
+/**
+ * GET /api/settings/mobile-config
+ * Mengembalikan info jaringan server untuk koneksi aplikasi Android Flutter
+ */
+exports.getMobileConfig = async (req, res) => {
+  try {
+    const port = process.env.PORT || '5001';
+    const localIp = getLocalIpAddress();
+    const customUrlRow = await query.get('SELECT value FROM system_settings WHERE key = "mobile_api_base_url"');
+    const customBaseUrl = customUrlRow ? customUrlRow.value : '';
+
+    const assetSync = await query.get('SELECT COUNT(*) as count FROM outlet_assets WHERE client_uuid IS NOT NULL');
+    const visitSync = await query.get('SELECT COUNT(*) as count FROM outlet_visits WHERE client_uuid IS NOT NULL');
+    const incidentSync = await query.get('SELECT COUNT(*) as count FROM outlet_incidents WHERE client_uuid IS NOT NULL');
+    const empSync = await query.get('SELECT COUNT(*) as count FROM candidates WHERE client_uuid IS NOT NULL');
+
+    res.json({
+      success: true,
+      data: {
+        detected_ip: localIp,
+        port: parseInt(port, 10),
+        recommended_base_url: `http://${localIp}:${port}/api`,
+        emulator_base_url: `http://10.0.2.2:${port}/api`,
+        custom_base_url: customBaseUrl || `http://${localIp}:${port}/api`,
+        sync_stats: {
+          synced_assets: assetSync ? assetSync.count : 0,
+          synced_visits: visitSync ? visitSync.count : 0,
+          synced_incidents: incidentSync ? incidentSync.count : 0,
+          synced_employees: empSync ? empSync.count : 0
+        }
+      }
+    });
+  } catch (error) {
+    console.error('API Error (getMobileConfig):', error);
+    res.status(500).json({ success: false, message: 'Gagal memuat konfigurasi mobile API.' });
+  }
+};
+

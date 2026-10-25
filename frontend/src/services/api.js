@@ -428,6 +428,7 @@ export const portalTrainingApi = {
 export const settingsApi = {
   getSettings: () => api.get('/settings'),
   updateSettings: (data) => api.put('/settings', data),
+  getMobileConfig: () => api.get('/settings/mobile-config'),
   getPenaltyRules: () => api.get('/settings/penalty-rules'),
   createPenaltyRule: (data) => api.post('/settings/penalty-rules', data),
   updatePenaltyRule: (id, data) => api.put(`/settings/penalty-rules/${id}`, data),
