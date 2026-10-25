@@ -68,8 +68,17 @@ app.use('/api/financial',  authenticateToken, auditLog, requireRole(...FINANCE),
 app.use('/api/discipline', authenticateToken, auditLog, requireRole(...FINANCE), require('./routes/disciplineRoutes'));
 app.use('/api/outlet-activity', authenticateToken, auditLog, requireRole(...STAFF), require('./routes/outletActivityRoutes'));
 app.use('/api/assets',          authenticateToken, auditLog, requireRole(...STAFF), require('./routes/assetRoutes'));
-app.use('/api/mobile',          authenticateToken, auditLog, requireRole(...STAFF), require('./routes/mobileRoutes'));
+app.use('/api/mobile',          require('./routes/mobileRoutes'));
+app.use('/api',                 require('./routes/mobileRoutes')); // Fallback alias (e.g. /api/master-data, /api/sync/*)
 app.use('/api', require('./routes/testRoutes'));
+
+// Strict JSON 404 response for unhandled /api/* requests (mencegah HTML fallback terkirim ke mobile app)
+app.all('/api/*', (req, res) => {
+  res.status(404).json({
+    success: false,
+    message: `Endpoint ${req.method} ${req.originalUrl} tidak ditemukan di server.`
+  });
+});
 
 // --- SERVE FRONTEND STATIC FILES IN PRODUCTION ---
 const frontendBuildPath = path.join(__dirname, '..', 'frontend', 'dist');
@@ -80,6 +89,18 @@ app.get('*', (req, res) => {
   if (!req.path.startsWith('/api')) {
     res.sendFile(path.join(frontendBuildPath, 'index.html'));
   }
+});
+
+// Global JSON error handler for API requests
+app.use((err, req, res, next) => {
+  if (req.path.startsWith('/api') || req.headers.accept?.includes('application/json')) {
+    console.error('Unhandled API error:', err);
+    return res.status(err.status || 500).json({
+      success: false,
+      message: err.message || 'Terjadi kesalahan pada server.'
+    });
+  }
+  next(err);
 });
 
 module.exports = app;

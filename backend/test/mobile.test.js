@@ -113,4 +113,42 @@ describe('Mobile Sync & HRGA Endpoints', () => {
     assert.equal(empRes.status, 200);
     assert.ok(empRes.body.data.length > 0);
   });
+
+  it('POST /api/mobile/login should return user object and token', async () => {
+    const res = await client.post('/api/mobile/login').send({ username: 'admin', password: 'admin123' });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.success, true);
+    assert.ok(res.body.token);
+    assert.ok(res.body.message);
+    assert.equal(res.body.user.username, 'admin');
+    assert.ok(res.body.user.role);
+  });
+
+  it('GET /api/master-data (alias) should work and include branch phone field', async () => {
+    const res = await client.get('/api/master-data');
+    assert.equal(res.status, 200);
+    assert.equal(res.body.success, true);
+    assert.ok(Array.isArray(res.body.data.branches));
+    assert.ok('phone' in res.body.data.branches[0]);
+  });
+
+  it('POST /api/sync/asset (alias without /mobile) should succeed', async () => {
+    const res = await client.post('/api/sync/asset').send({
+      client_uuid: 'alias-test-uuid-' + Date.now(),
+      name: 'Printer Alias Test',
+      category: 'Elektronik',
+      branch_id: branchId
+    });
+    assert.equal(res.status, 201);
+    assert.equal(res.body.success, true);
+    assert.equal(res.body.message, 'Aset berhasil disinkronkan ke server.');
+  });
+
+  it('Unknown API routes should strictly return JSON 404 and never HTML', async () => {
+    const res = await client.get('/api/this-route-does-not-exist');
+    assert.equal(res.status, 404);
+    assert.equal(res.headers['content-type'].includes('application/json'), true);
+    assert.equal(res.body.success, false);
+    assert.match(res.body.message, /tidak ditemukan/i);
+  });
 });

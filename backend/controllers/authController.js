@@ -21,7 +21,19 @@ exports.login = async (req, res) => {
       }
       const role = admin.role || 'master';
       const token = generateToken(admin.username, { role });
-      res.json({ success: true, token, username: admin.username, role });
+      res.json({
+        success: true,
+        message: 'Login berhasil.',
+        token,
+        role,
+        username: admin.username,
+        user: {
+          id: admin.id,
+          username: admin.username,
+          name: admin.username === 'admin' ? 'Administrator HRGA' : admin.username,
+          role
+        }
+      });
     } else {
       res.status(401).json({ success: false, message: 'Username atau password salah.' });
     }

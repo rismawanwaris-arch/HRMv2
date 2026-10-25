@@ -17,9 +17,19 @@ function getTodayDateStr() {
  */
 exports.getMasterData = async (req, res) => {
   try {
-    const branches = await query.all(
+    const rawBranches = await query.all(
       'SELECT id, code, name, city, address, status FROM branches WHERE status = "Active" ORDER BY name ASC'
     );
+
+    const branches = rawBranches.map(b => ({
+      id: b.id,
+      code: b.code,
+      name: b.name,
+      address: b.address || '',
+      city: b.city || '',
+      phone: b.phone || '',
+      status: b.status
+    }));
 
     res.json({
       success: true,
@@ -154,7 +164,7 @@ exports.syncAsset = async (req, res) => {
 
     res.status(201).json({
       success: true,
-      message: 'Aset berhasil disinkronkan.',
+      message: 'Aset berhasil disinkronkan ke server.',
       data: {
         server_id: newAssetId,
         client_uuid,
@@ -249,7 +259,7 @@ exports.syncVisit = async (req, res) => {
 
     res.status(201).json({
       success: true,
-      message: 'Kunjungan berhasil disinkronkan.',
+      message: 'Data kunjungan audit berhasil disimpan.',
       data: {
         server_id: result.id,
         client_uuid
@@ -334,7 +344,7 @@ exports.syncIncident = async (req, res) => {
 
     res.status(201).json({
       success: true,
-      message: 'Insiden berhasil disinkronkan.',
+      message: 'Laporan insiden berhasil diterima.',
       data: {
         server_id: result.id,
         client_uuid
@@ -415,7 +425,7 @@ exports.syncEmployee = async (req, res) => {
 
     res.status(201).json({
       success: true,
-      message: 'Data karyawan berhasil disinkronkan.',
+      message: 'Karyawan berhasil terdaftar di sistem.',
       data: {
         server_id: candidateId,
         access_code: accessCode,
