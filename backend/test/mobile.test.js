@@ -1,4 +1,4 @@
-const { app, dbReady, login, authed } = require('./helpers');
+const { app, request, dbReady, login, authed } = require('./helpers');
 const { describe, it, before } = require('node:test');
 const assert = require('node:assert/strict');
 
@@ -150,5 +150,73 @@ describe('Mobile Sync & HRGA Endpoints', () => {
     assert.equal(res.headers['content-type'].includes('application/json'), true);
     assert.equal(res.body.success, false);
     assert.match(res.body.message, /tidak ditemukan/i);
+  });
+
+  it('Security: unauthenticated requests to /api/master-data and /api/mobile/sync/* must be rejected with 401', async () => {
+    const r1 = await request(app).get('/api/master-data');
+    assert.equal(r1.status, 401);
+
+    const r2 = await request(app).get('/api/mobile/master-data');
+    assert.equal(r2.status, 401);
+
+    const r3 = await request(app).post('/api/mobile/sync/employee').send({
+      client_uuid: 'unauth-uuid-12345678',
+      name: 'Hacker'
+    });
+    assert.equal(r3.status, 401);
+  });
+
+  it('Security: invalid client_uuid or NIK format is rejected with 400', async () => {
+    const badUuidRes = await client.post('/api/mobile/sync/asset').send({
+      client_uuid: 'bad; DROP TABLE outlet_assets;--',
+      name: 'Bad Asset',
+      category: 'Elektronik',
+      branch_id: branchId
+    });
+    assert.equal(badUuidRes.status, 400);
+
+    const badNikRes = await client.post('/api/mobile/sync/employee').send({
+      client_uuid: 'valid-uuid-nik-test-123',
+      name: 'Invalid NIK Test',
+      nik: 'ABC-NOT-DIGITS',
+      branch_id: branchId
+    });
+    assert.equal(badNikRes.status, 400);
+  });
+
+  it('Security: spoofed non-image file disguised as .jpg is rejected by magic-byte check', async () => {
+    const fakeHtmlBuffer = Buffer.from('<html><script>alert(1)</script></html>', 'utf-8');
+    const spoofRes = await client
+      .post('/api/mobile/sync/asset')
+      .field('client_uuid', 'spoof-test-uuid-' + Date.now())
+      .field('name', 'Spoofed Photo Asset')
+      .field('category', 'Elektronik')
+      .field('branch_id', String(branchId))
+      .attach('photos', fakeHtmlBuffer, { filename: 'exploit.jpg', contentType: 'image/jpeg' });
+    assert.equal(spoofRes.status, 400);
+    assert.match(spoofRes.body.message, /bukan gambar asli/i);
+
+    // Valid JPEG magic header (FF D8 FF E0) succeeds
+    const validJpegBuffer = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01]);
+    const validRes = await client
+      .post('/api/mobile/sync/asset')
+      .field('client_uuid', 'valid-jpg-uuid-' + Date.now())
+      .field('name', 'Valid Photo Asset')
+      .field('category', 'Elektronik')
+      .field('branch_id', String(branchId))
+      .attach('photos', validJpegBuffer, { filename: 'photo.jpg', contentType: 'image/jpeg' });
+    assert.equal(validRes.status, 201);
+  });
+
+  it('Security: GET /api/mobile/employees does not leak sensitive PII (NIK, salary, bank)', async () => {
+    const empRes = await client.get('/api/mobile/employees');
+    assert.equal(empRes.status, 200);
+    for (const emp of empRes.body.data) {
+      assert.equal('nik' in emp, false);
+      assert.equal('nik_bidx' in emp, false);
+      assert.equal('salary_offered' in emp, false);
+      assert.equal('bank_account_number' in emp, false);
+      assert.equal('address_ktp' in emp, false);
+    }
   });
 });

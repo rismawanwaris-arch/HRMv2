@@ -1,7 +1,20 @@
 const { query } = require('../db');
-const { generateAccessCode } = require('../utils/helpers');
+const {
+  generateAccessCode,
+  cleanupUploadedFiles,
+  verifyImageMagicBytes
+} = require('../utils/helpers');
 const { EMPLOYEE_FIELDS, buildInsert } = require('../utils/candidateFields');
-const { decryptRow, blindIndex } = require('../utils/fieldCrypto');
+
+const CLIENT_UUID_REGEX = /^[a-zA-Z0-9_-]{8,64}$/;
+
+const VALID_CATEGORIES = ['Elektronik', 'Furniture', 'Peralatan', 'Kendaraan', 'Lainnya', 'Elektronik & HP'];
+const VALID_CONDITIONS = ['Baik', 'Rusak Ringan', 'Rusak Berat'];
+const VALID_STATUSES = ['Aktif', 'Dalam Perbaikan', 'Dipensiunkan', 'Dimutasi'];
+const VALID_CONTRACT_TYPES = ['PKWT', 'PKWTT', 'Freelance', 'Magang'];
+const VALID_INCIDENT_CATEGORIES = ['Fasilitas', 'Kehilangan', 'Operasional', 'Lainnya'];
+const VALID_INCIDENT_SEVERITIES = ['Low', 'Medium', 'High', 'Critical'];
+const VALID_INCIDENT_STATUSES = ['Open', 'In Progress', 'Resolved'];
 
 function getTodayDateStr() {
   const now = new Date();
@@ -11,9 +24,32 @@ function getTodayDateStr() {
   return `${year}-${month}-${day}`;
 }
 
+function isValidClientUuid(uuid) {
+  return typeof uuid === 'string' && CLIENT_UUID_REGEX.test(uuid.trim());
+}
+
+function sanitizeText(val, maxLen = 500) {
+  if (val === undefined || val === null) return null;
+  const s = String(val).trim();
+  if (!s) return null;
+  return s.slice(0, maxLen);
+}
+
+function clampScore(val) {
+  const n = parseInt(val, 10);
+  if (Number.isNaN(n)) return 0;
+  return Math.max(0, Math.min(100, n));
+}
+
+function clampPositiveMoney(val, maxVal = 1000000000) {
+  const n = parseFloat(val);
+  if (Number.isNaN(n) || n < 0) return 0;
+  return Math.min(n, maxVal);
+}
+
 /**
  * 1. GET /api/mobile/master-data
- * Mengambil data referensi untuk disimpan di cache lokal SQLite Flutter
+ * Mengambil data referensi untuk disimpan di cache lokal SQLite Flutter (Wajib Token)
  */
 exports.getMasterData = async (req, res) => {
   try {
@@ -36,12 +72,12 @@ exports.getMasterData = async (req, res) => {
       data: {
         branches,
         categories: ['Elektronik', 'Furniture', 'Peralatan', 'Kendaraan', 'Lainnya'],
-        asset_conditions: ['Baik', 'Rusak Ringan', 'Rusak Berat'],
-        asset_statuses: ['Aktif', 'Dalam Perbaikan', 'Dipensiunkan', 'Dimutasi'],
-        contract_types: ['PKWT', 'PKWTT', 'Freelance', 'Magang'],
-        incident_categories: ['Fasilitas', 'Kehilangan', 'Operasional', 'Lainnya'],
-        incident_severities: ['Low', 'Medium', 'High', 'Critical'],
-        incident_statuses: ['Open', 'In Progress', 'Resolved'],
+        asset_conditions: VALID_CONDITIONS,
+        asset_statuses: VALID_STATUSES,
+        contract_types: VALID_CONTRACT_TYPES,
+        incident_categories: VALID_INCIDENT_CATEGORIES,
+        incident_severities: VALID_INCIDENT_SEVERITIES,
+        incident_statuses: VALID_INCIDENT_STATUSES,
         visit_purposes: ['Audit Rutin', 'Perbaikan/Maintenance', 'Stock Opname Aset', 'Kunjungan Darurat', 'Lainnya']
       }
     });
@@ -74,20 +110,41 @@ exports.syncAsset = async (req, res) => {
       created_at_client
     } = req.body;
 
-    if (!client_uuid) {
-      return res.status(400).json({ success: false, message: 'client_uuid wajib disertakan.' });
+    if (!isValidClientUuid(client_uuid)) {
+      cleanupUploadedFiles(req.files);
+      return res.status(400).json({ success: false, message: 'client_uuid wajib disertakan dengan format yang valid.' });
     }
 
-    if (!name || !category || !branch_id) {
+    const cleanUuid = client_uuid.trim();
+    const cleanName = sanitizeText(name, 200);
+    const cleanCategory = sanitizeText(category, 100);
+    const branchIdInt = parseInt(branch_id, 10);
+
+    if (!cleanName || !cleanCategory || Number.isNaN(branchIdInt) || branchIdInt < 1) {
+      cleanupUploadedFiles(req.files);
       return res.status(400).json({
         success: false,
         message: 'Nama aset, kategori, dan cabang outlet wajib diisi.'
       });
     }
 
+    // Validasi magic bytes foto jika ada file yang diunggah
+    if (req.files && req.files.length > 0 && !verifyImageMagicBytes(req.files)) {
+      cleanupUploadedFiles(req.files);
+      return res.status(400).json({
+        success: false,
+        message: 'File foto tidak valid atau terdeteksi bukan gambar asli (JPG/PNG/WEBP).'
+      });
+    }
+
     // Cek idempotensi: apakah client_uuid ini sudah pernah tersinkron?
-    const existing = await query.get('SELECT id, asset_code, client_uuid FROM outlet_assets WHERE client_uuid = ?', [client_uuid]);
+    const existing = await query.get(
+      'SELECT id, asset_code, client_uuid FROM outlet_assets WHERE client_uuid = ?',
+      [cleanUuid]
+    );
     if (existing) {
+      // Hapus file duplikat yang baru diupload agar tidak mengotori disk
+      cleanupUploadedFiles(req.files);
       return res.status(200).json({
         success: true,
         message: 'Aset sudah tersinkronkan sebelumnya (idempotent).',
@@ -99,22 +156,30 @@ exports.syncAsset = async (req, res) => {
       });
     }
 
+    // Pastikan cabang benar-benar ada di database (mencegah FK error)
+    const branch = await query.get('SELECT id, code FROM branches WHERE id = ?', [branchIdInt]);
+    if (!branch) {
+      cleanupUploadedFiles(req.files);
+      return res.status(400).json({ success: false, message: 'Cabang outlet tidak ditemukan.' });
+    }
+
     // Generate asset_code jika tidak disediakan
-    let finalCode = asset_code ? String(asset_code).trim() : '';
+    let finalCode = sanitizeText(asset_code, 64);
     if (!finalCode) {
-      const branch = await query.get('SELECT code FROM branches WHERE id = ?', [branch_id]);
-      const branchCode = branch?.code ? branch.code.replace(/[^A-Za-z0-9]/g, '').toUpperCase() : 'OUT';
+      const branchCode = branch.code ? branch.code.replace(/[^A-Za-z0-9]/g, '').toUpperCase() : 'OUT';
       const rand = generateAccessCode().slice(0, 4);
       finalCode = `AST-${branchCode}-${rand}`;
     }
 
-    // Ambil foto yang diunggah
     let photosList = [];
     if (req.files && Array.isArray(req.files) && req.files.length > 0) {
       photosList = req.files.map(f => f.filename);
     }
 
-    const date = purchase_date || getTodayDateStr();
+    const safeCondition = VALID_CONDITIONS.includes(condition) ? condition : 'Baik';
+    const safeStatus = VALID_STATUSES.includes(status) ? status : 'Aktif';
+    const safeCost = clampPositiveMoney(purchase_cost);
+    const date = sanitizeText(purchase_date, 20) || getTodayDateStr();
 
     const insertSql = `
       INSERT INTO outlet_assets (
@@ -125,21 +190,21 @@ exports.syncAsset = async (req, res) => {
     `;
 
     const result = await query.run(insertSql, [
-      client_uuid,
+      cleanUuid,
       finalCode,
-      name.trim(),
-      category,
-      parseInt(branch_id, 10),
+      cleanName,
+      cleanCategory,
+      branchIdInt,
       date,
-      parseFloat(purchase_cost) || 0,
-      condition || 'Baik',
-      status || 'Aktif',
-      brand || null,
-      serial_number || null,
-      vendor_supplier || null,
+      safeCost,
+      safeCondition,
+      safeStatus,
+      sanitizeText(brand, 100),
+      sanitizeText(serial_number, 100),
+      sanitizeText(vendor_supplier, 150),
       JSON.stringify(photosList),
-      notes || null,
-      created_at_client || new Date().toISOString()
+      sanitizeText(notes, 1000),
+      sanitizeText(created_at_client, 40) || new Date().toISOString()
     ]);
 
     const newAssetId = result.id;
@@ -153,12 +218,12 @@ exports.syncAsset = async (req, res) => {
       [
         newAssetId,
         date,
-        parseInt(branch_id, 10),
-        parseFloat(purchase_cost) || 0,
+        branchIdInt,
+        safeCost,
         'Registrasi aset baru via aplikasi mobile Flutter',
         req.user?.username || 'Tim Lapangan GA',
         JSON.stringify(photosList),
-        notes || null
+        sanitizeText(notes, 1000)
       ]
     );
 
@@ -167,13 +232,17 @@ exports.syncAsset = async (req, res) => {
       message: 'Aset berhasil disinkronkan ke server.',
       data: {
         server_id: newAssetId,
-        client_uuid,
+        client_uuid: cleanUuid,
         asset_code: finalCode
       }
     });
   } catch (error) {
+    cleanupUploadedFiles(req.files);
+    if (error.message && error.message.includes('UNIQUE constraint failed: outlet_assets.asset_code')) {
+      return res.status(409).json({ success: false, message: 'Kode aset (asset_code) sudah terdaftar di sistem.' });
+    }
     console.error('Mobile API Error (syncAsset):', error);
-    res.status(500).json({ success: false, message: 'Gagal menyinkronkan aset: ' + error.message });
+    res.status(500).json({ success: false, message: 'Gagal menyinkronkan data aset ke server.' });
   }
 };
 
@@ -201,20 +270,36 @@ exports.syncVisit = async (req, res) => {
       created_at_client
     } = req.body;
 
-    if (!client_uuid) {
-      return res.status(400).json({ success: false, message: 'client_uuid wajib disertakan.' });
+    if (!isValidClientUuid(client_uuid)) {
+      cleanupUploadedFiles(req.files);
+      return res.status(400).json({ success: false, message: 'client_uuid wajib disertakan dengan format yang valid.' });
     }
 
-    if (!branch_id || !visitor_name || !purpose) {
+    const cleanUuid = client_uuid.trim();
+    const branchIdInt = parseInt(branch_id, 10);
+    const cleanVisitor = sanitizeText(visitor_name, 150);
+    const cleanPurpose = sanitizeText(purpose, 200);
+
+    if (Number.isNaN(branchIdInt) || branchIdInt < 1 || !cleanVisitor || !cleanPurpose) {
+      cleanupUploadedFiles(req.files);
       return res.status(400).json({
         success: false,
         message: 'Cabang, nama pengunjung, dan tujuan kunjungan wajib diisi.'
       });
     }
 
+    if (req.files && req.files.length > 0 && !verifyImageMagicBytes(req.files)) {
+      cleanupUploadedFiles(req.files);
+      return res.status(400).json({
+        success: false,
+        message: 'File foto tidak valid atau terdeteksi bukan gambar asli (JPG/PNG/WEBP).'
+      });
+    }
+
     // Cek idempotensi
-    const existing = await query.get('SELECT id, client_uuid FROM outlet_visits WHERE client_uuid = ?', [client_uuid]);
+    const existing = await query.get('SELECT id, client_uuid FROM outlet_visits WHERE client_uuid = ?', [cleanUuid]);
     if (existing) {
+      cleanupUploadedFiles(req.files);
       return res.status(200).json({
         success: true,
         message: 'Kunjungan sudah tersinkronkan sebelumnya (idempotent).',
@@ -223,6 +308,12 @@ exports.syncVisit = async (req, res) => {
           client_uuid: existing.client_uuid
         }
       });
+    }
+
+    const branch = await query.get('SELECT id FROM branches WHERE id = ?', [branchIdInt]);
+    if (!branch) {
+      cleanupUploadedFiles(req.files);
+      return res.status(400).json({ success: false, message: 'Cabang outlet tidak ditemukan.' });
     }
 
     let photosList = [];
@@ -239,22 +330,22 @@ exports.syncVisit = async (req, res) => {
     `;
 
     const result = await query.run(insertSql, [
-      client_uuid,
-      parseInt(branch_id, 10),
-      visit_date || getTodayDateStr(),
-      visit_time || null,
-      visitor_name.trim(),
-      purpose.trim(),
-      parseInt(score_cleanliness, 10) || 0,
-      parseInt(score_security, 10) || 0,
-      parseInt(score_display, 10) || 0,
-      parseInt(score_sop, 10) || 0,
-      parseInt(overall_score, 10) || 0,
-      notes || null,
-      action_plan || null,
-      staff_present || null,
+      cleanUuid,
+      branchIdInt,
+      sanitizeText(visit_date, 20) || getTodayDateStr(),
+      sanitizeText(visit_time, 10),
+      cleanVisitor,
+      cleanPurpose,
+      clampScore(score_cleanliness),
+      clampScore(score_security),
+      clampScore(score_display),
+      clampScore(score_sop),
+      clampScore(overall_score),
+      sanitizeText(notes, 1000),
+      sanitizeText(action_plan, 1000),
+      sanitizeText(staff_present, 500),
       JSON.stringify(photosList),
-      created_at_client || new Date().toISOString()
+      sanitizeText(created_at_client, 40) || new Date().toISOString()
     ]);
 
     res.status(201).json({
@@ -262,12 +353,13 @@ exports.syncVisit = async (req, res) => {
       message: 'Data kunjungan audit berhasil disimpan.',
       data: {
         server_id: result.id,
-        client_uuid
+        client_uuid: cleanUuid
       }
     });
   } catch (error) {
+    cleanupUploadedFiles(req.files);
     console.error('Mobile API Error (syncVisit):', error);
-    res.status(500).json({ success: false, message: 'Gagal menyinkronkan kunjungan: ' + error.message });
+    res.status(500).json({ success: false, message: 'Gagal menyinkronkan data kunjungan ke server.' });
   }
 };
 
@@ -291,19 +383,36 @@ exports.syncIncident = async (req, res) => {
       created_at_client
     } = req.body;
 
-    if (!client_uuid) {
-      return res.status(400).json({ success: false, message: 'client_uuid wajib disertakan.' });
+    if (!isValidClientUuid(client_uuid)) {
+      cleanupUploadedFiles(req.files);
+      return res.status(400).json({ success: false, message: 'client_uuid wajib disertakan dengan format yang valid.' });
     }
 
-    if (!branch_id || !title || !description || !reported_by) {
+    const cleanUuid = client_uuid.trim();
+    const branchIdInt = parseInt(branch_id, 10);
+    const cleanTitle = sanitizeText(title, 200);
+    const cleanDesc = sanitizeText(description, 2000);
+    const cleanReporter = sanitizeText(reported_by, 150);
+
+    if (Number.isNaN(branchIdInt) || branchIdInt < 1 || !cleanTitle || !cleanDesc || !cleanReporter) {
+      cleanupUploadedFiles(req.files);
       return res.status(400).json({
         success: false,
         message: 'Cabang, judul, deskripsi, dan nama pelapor wajib diisi.'
       });
     }
 
-    const existing = await query.get('SELECT id, client_uuid FROM outlet_incidents WHERE client_uuid = ?', [client_uuid]);
+    if (req.files && req.files.length > 0 && !verifyImageMagicBytes(req.files)) {
+      cleanupUploadedFiles(req.files);
+      return res.status(400).json({
+        success: false,
+        message: 'File foto tidak valid atau terdeteksi bukan gambar asli (JPG/PNG/WEBP).'
+      });
+    }
+
+    const existing = await query.get('SELECT id, client_uuid FROM outlet_incidents WHERE client_uuid = ?', [cleanUuid]);
     if (existing) {
+      cleanupUploadedFiles(req.files);
       return res.status(200).json({
         success: true,
         message: 'Insiden sudah tersinkronkan sebelumnya (idempotent).',
@@ -314,10 +423,20 @@ exports.syncIncident = async (req, res) => {
       });
     }
 
+    const branch = await query.get('SELECT id FROM branches WHERE id = ?', [branchIdInt]);
+    if (!branch) {
+      cleanupUploadedFiles(req.files);
+      return res.status(400).json({ success: false, message: 'Cabang outlet tidak ditemukan.' });
+    }
+
     let photosList = [];
     if (req.files && Array.isArray(req.files) && req.files.length > 0) {
       photosList = req.files.map(f => f.filename);
     }
+
+    const safeCategory = VALID_INCIDENT_CATEGORIES.includes(category) ? category : 'Fasilitas';
+    const safeSeverity = VALID_INCIDENT_SEVERITIES.includes(severity) ? severity : 'Medium';
+    const safeStatus = VALID_INCIDENT_STATUSES.includes(status) ? status : 'Open';
 
     const insertSql = `
       INSERT INTO outlet_incidents (
@@ -328,18 +447,18 @@ exports.syncIncident = async (req, res) => {
     `;
 
     const result = await query.run(insertSql, [
-      client_uuid,
-      parseInt(branch_id, 10),
-      incident_date || getTodayDateStr(),
-      category || 'Fasilitas',
-      severity || 'Medium',
-      title.trim(),
-      description.trim(),
-      action_taken || null,
-      status || 'Open',
-      reported_by.trim(),
+      cleanUuid,
+      branchIdInt,
+      sanitizeText(incident_date, 20) || getTodayDateStr(),
+      safeCategory,
+      safeSeverity,
+      cleanTitle,
+      cleanDesc,
+      sanitizeText(action_taken, 1000),
+      safeStatus,
+      cleanReporter,
       JSON.stringify(photosList),
-      created_at_client || new Date().toISOString()
+      sanitizeText(created_at_client, 40) || new Date().toISOString()
     ]);
 
     res.status(201).json({
@@ -347,18 +466,19 @@ exports.syncIncident = async (req, res) => {
       message: 'Laporan insiden berhasil diterima.',
       data: {
         server_id: result.id,
-        client_uuid
+        client_uuid: cleanUuid
       }
     });
   } catch (error) {
+    cleanupUploadedFiles(req.files);
     console.error('Mobile API Error (syncIncident):', error);
-    res.status(500).json({ success: false, message: 'Gagal menyinkronkan insiden: ' + error.message });
+    res.status(500).json({ success: false, message: 'Gagal menyinkronkan laporan insiden ke server.' });
   }
 };
 
 /**
  * 5. POST /api/mobile/sync/employee
- * Pendaftaran karyawan baru manual langsung dari lapangan (Idempotent)
+ * Pendaftaran karyawan baru manual langsung dari lapangan (Idempotent + PII Encrypted at Rest)
  */
 exports.syncEmployee = async (req, res) => {
   try {
@@ -367,19 +487,34 @@ exports.syncEmployee = async (req, res) => {
       contract_type,
       salary_offered,
       allowance,
-      hire_date
+      hire_date,
+      branch_id
     } = req.body;
 
-    if (!client_uuid) {
-      return res.status(400).json({ success: false, message: 'client_uuid wajib disertakan.' });
+    if (!isValidClientUuid(client_uuid)) {
+      return res.status(400).json({ success: false, message: 'client_uuid wajib disertakan dengan format yang valid.' });
     }
 
-    if (!req.body.name) {
+    const cleanUuid = client_uuid.trim();
+    const cleanName = sanitizeText(req.body.name, 150);
+
+    if (!cleanName) {
       return res.status(400).json({ success: false, message: 'Nama karyawan wajib diisi.' });
     }
 
+    // Validasi NIK jika diisi (wajib angka 16 digit untuk standar KTP Indonesia)
+    if (req.body.nik !== undefined && req.body.nik !== null && String(req.body.nik).trim() !== '') {
+      const nikStr = String(req.body.nik).trim();
+      if (!/^\d{8,20}$/.test(nikStr)) {
+        return res.status(400).json({ success: false, message: 'Format NIK tidak valid (harus berupa angka 8-20 digit).' });
+      }
+    }
+
     // Cek idempotensi
-    const existing = await query.get('SELECT id, access_code, client_uuid FROM candidates WHERE client_uuid = ?', [client_uuid]);
+    const existing = await query.get(
+      'SELECT id, access_code, client_uuid FROM candidates WHERE client_uuid = ?',
+      [cleanUuid]
+    );
     if (existing) {
       return res.status(200).json({
         success: true,
@@ -392,6 +527,20 @@ exports.syncEmployee = async (req, res) => {
       });
     }
 
+    // Validasi branch_id jika disertakan
+    let validBranchId = null;
+    if (branch_id !== undefined && branch_id !== null && String(branch_id).trim() !== '') {
+      const parsedBranch = parseInt(branch_id, 10);
+      if (Number.isNaN(parsedBranch) || parsedBranch < 1) {
+        return res.status(400).json({ success: false, message: 'ID cabang tidak valid.' });
+      }
+      const branch = await query.get('SELECT id FROM branches WHERE id = ?', [parsedBranch]);
+      if (!branch) {
+        return res.status(400).json({ success: false, message: 'Cabang outlet tidak ditemukan.' });
+      }
+      validBranchId = parsedBranch;
+    }
+
     let accessCode;
     let codeExists = true;
     while (codeExists) {
@@ -400,15 +549,25 @@ exports.syncEmployee = async (req, res) => {
       codeExists = !!found;
     }
 
-    const { columns, placeholders, values } = buildInsert(EMPLOYEE_FIELDS, req.body);
+    const sanitizedBody = {
+      ...req.body,
+      name: cleanName,
+      branch_id: validBranchId
+    };
+
+    // buildInsert secara otomatis mengenkripsi kolom PII sensitif (NIK, NPWP, Bank, BPJS) menggunakan AES-256-GCM
+    const { columns, placeholders, values } = buildInsert(EMPLOYEE_FIELDS, sanitizedBody);
     const candidateResult = await query.run(
       `INSERT INTO candidates (
         client_uuid, access_code, ${columns}, is_manual_entry, status, current_stage, synced_at, created_at, updated_at
       ) VALUES (?, ?, ${placeholders}, 1, 'Hired', 7, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-      [client_uuid, accessCode, ...values]
+      [cleanUuid, accessCode, ...values]
     );
 
     const candidateId = candidateResult.id;
+    const safeContract = VALID_CONTRACT_TYPES.includes(contract_type) ? contract_type : 'PKWT';
+    const safeSalary = clampPositiveMoney(salary_offered, 100000000);
+    const safeAllowance = clampPositiveMoney(allowance, 50000000);
 
     await query.run(
       `INSERT OR REPLACE INTO stage7_offering 
@@ -416,10 +575,10 @@ exports.syncEmployee = async (req, res) => {
        VALUES (?, ?, ?, ?, ?, 'Accepted', 1)`,
       [
         candidateId,
-        contract_type || 'PKWT',
-        salary_offered || 0,
-        allowance || 0,
-        hire_date || null
+        safeContract,
+        safeSalary,
+        safeAllowance,
+        sanitizeText(hire_date, 20)
       ]
     );
 
@@ -429,7 +588,7 @@ exports.syncEmployee = async (req, res) => {
       data: {
         server_id: candidateId,
         access_code: accessCode,
-        client_uuid
+        client_uuid: cleanUuid
       }
     });
   } catch (error) {
@@ -437,7 +596,7 @@ exports.syncEmployee = async (req, res) => {
       return res.status(409).json({ success: false, message: 'NIK sudah terdaftar di sistem.' });
     }
     console.error('Mobile API Error (syncEmployee):', error);
-    res.status(500).json({ success: false, message: 'Gagal menyinkronkan data karyawan: ' + error.message });
+    res.status(500).json({ success: false, message: 'Gagal menyinkronkan data karyawan ke server.' });
   }
 };
 
@@ -464,11 +623,12 @@ exports.getAssets = async (req, res) => {
     }
     if (category) {
       sql += ' AND a.category = ?';
-      params.push(category);
+      params.push(String(category).trim());
     }
-    if (search && search.trim() !== '') {
+    if (search && String(search).trim() !== '') {
+      const q = `%${String(search).trim().slice(0, 100)}%`;
       sql += ' AND (a.name LIKE ? OR a.asset_code LIKE ? OR a.serial_number LIKE ?)';
-      params.push(`%${search.trim()}%`, `%${search.trim()}%`, `%${search.trim()}%`);
+      params.push(q, q, q);
     }
 
     sql += ' ORDER BY a.id DESC LIMIT 100';
@@ -489,13 +649,13 @@ exports.getAssets = async (req, res) => {
 
 /**
  * 7. GET /api/mobile/employees
- * Pencarian & daftar karyawan per cabang untuk mobile
+ * Pencarian & daftar karyawan per cabang untuk mobile (PII-Minimized: Tanpa NIK, Gaji, Rekening, atau Alamat KTP)
  */
 exports.getEmployees = async (req, res) => {
   try {
     const { branch_id, search } = req.query;
     let sql = `
-      SELECT c.id, c.client_uuid, c.access_code, c.name, c.gender, c.phone, c.email, c.branch_id,
+      SELECT c.id, c.client_uuid, c.access_code, c.name, c.gender, c.branch_id,
              c.hire_date, b.name as branch_name, s7.contract_type
       FROM candidates c
       LEFT JOIN branches b ON c.branch_id = b.id
@@ -508,9 +668,10 @@ exports.getEmployees = async (req, res) => {
       sql += ' AND c.branch_id = ?';
       params.push(parseInt(branch_id, 10));
     }
-    if (search && search.trim() !== '') {
-      sql += ' AND (c.name LIKE ? OR c.phone LIKE ?)';
-      params.push(`%${search.trim()}%`, `%${search.trim()}%`);
+    if (search && String(search).trim() !== '') {
+      const q = `%${String(search).trim().slice(0, 100)}%`;
+      sql += ' AND (c.name LIKE ? OR c.access_code LIKE ?)';
+      params.push(q, q);
     }
 
     sql += ' ORDER BY c.id DESC LIMIT 100';

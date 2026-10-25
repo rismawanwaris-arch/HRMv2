@@ -109,6 +109,15 @@ if (!fs.existsSync(outletPhotosDir)) {
   fs.mkdirSync(outletPhotosDir, { recursive: true });
 }
 
+const ALLOWED_PHOTO_EXT = ['.jpg', '.jpeg', '.png', '.webp'];
+const ALLOWED_PHOTO_MIMES = [
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/webp',
+  'application/octet-stream' // Flutter MultipartFile default when contentType is omitted
+];
+
 const outletPhotoStorage = multer.diskStorage({
   destination: function (req, file, cb) {
     if (!fs.existsSync(outletPhotosDir)) {
@@ -117,25 +126,94 @@ const outletPhotoStorage = multer.diskStorage({
     cb(null, outletPhotosDir);
   },
   filename: function (req, file, cb) {
-    const ext = path.extname(file.originalname).toLowerCase().replace(/[^a-z0-9.]/g, '') || '.jpg';
-    const uniqueSuffix = Date.now() + '-' + crypto.randomInt(1000, 9999);
-    cb(null, `visit_${uniqueSuffix}${ext}`);
+    const rawExt = path.extname(file.originalname || '').toLowerCase();
+    const safeExt = ALLOWED_PHOTO_EXT.includes(rawExt) ? rawExt : '.jpg';
+    const uniqueSuffix = Date.now() + '-' + crypto.randomInt(100000, 999999);
+    cb(null, `visit_${uniqueSuffix}${safeExt}`);
   }
 });
 
 const outletPhotoUpload = multer({
   storage: outletPhotoStorage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB Limit per photo
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10 MB Limit per photo
+    files: 5
+  },
   fileFilter: function (req, file, cb) {
-    const allowed = ['.jpg', '.jpeg', '.png', '.webp'];
-    const ext = path.extname(file.originalname).toLowerCase();
-    if (allowed.includes(ext) || (file.mimetype && file.mimetype.startsWith('image/'))) {
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    const mime = (file.mimetype || '').toLowerCase();
+    if (ALLOWED_PHOTO_EXT.includes(ext) && ALLOWED_PHOTO_MIMES.includes(mime)) {
       cb(null, true);
     } else {
-      cb(new Error('Format file foto tidak didukung. Gunakan JPG, PNG, atau WEBP.'));
+      const err = new Error('Format file foto tidak didukung. Gunakan file asli JPG, PNG, atau WEBP.');
+      err.status = 400;
+      cb(err);
     }
   }
 });
+
+/**
+ * Safely remove uploaded files from disk (used when validation fails or on idempotent replay).
+ * @param {Array<{path?: string}>} [files]
+ */
+function cleanupUploadedFiles(files) {
+  if (!files || !Array.isArray(files)) return;
+  for (const f of files) {
+    if (f && f.path && fs.existsSync(f.path)) {
+      try {
+        fs.unlinkSync(f.path);
+      } catch (e) {
+        console.error('Failed to cleanup uploaded file:', e.message);
+      }
+    }
+  }
+}
+
+/**
+ * Inspect binary magic bytes of uploaded files to prevent MIME/extension spoofing.
+ * Accepts genuine JPEG, PNG, and WEBP files.
+ * @param {Array<{path: string}>} [files]
+ * @returns {boolean} True if all files have valid image magic headers.
+ */
+function verifyImageMagicBytes(files) {
+  if (!files || !Array.isArray(files) || files.length === 0) return true;
+  for (const f of files) {
+    if (!f || !f.path || !fs.existsSync(f.path)) return false;
+    try {
+      const fd = fs.openSync(f.path, 'r');
+      const buf = Buffer.alloc(12);
+      const bytesRead = fs.readSync(fd, buf, 0, 12, 0);
+      fs.closeSync(fd);
+      if (bytesRead < 4) return false;
+
+      // JPEG: FF D8 FF
+      const isJpeg = buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff;
+      // PNG: 89 50 4E 47 0D 0A 1A 0A
+      const isPng =
+        bytesRead >= 8 &&
+        buf[0] === 0x89 &&
+        buf[1] === 0x50 &&
+        buf[2] === 0x4e &&
+        buf[3] === 0x47 &&
+        buf[4] === 0x0d &&
+        buf[5] === 0x0a &&
+        buf[6] === 0x1a &&
+        buf[7] === 0x0a;
+      // WEBP: "RIFF" (0..3) and "WEBP" (8..11)
+      const isWebp =
+        bytesRead >= 12 &&
+        buf.toString('ascii', 0, 4) === 'RIFF' &&
+        buf.toString('ascii', 8, 12) === 'WEBP';
+
+      if (!isJpeg && !isPng && !isWebp) {
+        return false;
+      }
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
 
 /**
  * Generate a random access code using a CSPRNG.
@@ -159,5 +237,7 @@ module.exports = {
   excelUpload,
   outletPhotoUpload,
   outletPhotosDir,
+  cleanupUploadedFiles,
+  verifyImageMagicBytes,
   generateAccessCode
 };

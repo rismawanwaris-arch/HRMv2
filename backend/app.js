@@ -94,10 +94,25 @@ app.get('*', (req, res) => {
 // Global JSON error handler for API requests
 app.use((err, req, res, next) => {
   if (req.path.startsWith('/api') || req.headers.accept?.includes('application/json')) {
-    console.error('Unhandled API error:', err);
-    return res.status(err.status || 500).json({
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({
+        success: false,
+        message: 'Ukuran file foto melebihi batas maksimal (10MB per file).'
+      });
+    }
+    if (err.code === 'LIMIT_FILE_COUNT' || err.code === 'LIMIT_UNEXPECTED_FILE') {
+      return res.status(400).json({
+        success: false,
+        message: 'Jumlah file foto melebihi batas maksimal (maks 5 foto).'
+      });
+    }
+    const status = err.status || (err.message && err.message.includes('Format file') ? 400 : 500);
+    if (status >= 500) {
+      console.error('Unhandled API error:', err);
+    }
+    return res.status(status).json({
       success: false,
-      message: err.message || 'Terjadi kesalahan pada server.'
+      message: status < 500 ? err.message : 'Terjadi kesalahan internal pada server.'
     });
   }
   next(err);
