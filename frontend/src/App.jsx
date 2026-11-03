@@ -425,7 +425,7 @@ function App() {
               <span style={{ fontSize: '10px', transition: 'transform 0.2s', transform: isLaporanOpen ? 'rotate(90deg)' : 'none', color: 'var(--text-muted)', marginRight: '4px' }}>▶</span>
             </li>
             {isLaporanOpen && (
-              <ul style={{ listStyle: 'none', margin: '2px 0 4px', padding: '0', display: 'flex', flexDirection: 'column', gap: '2px', borderLeft: '2px solid rgba(6,182,212,0.3)', marginLeft: '12px', paddingLeft: '8px' }}>
+              <ul className="sidebar-submenu" style={{ listStyle: 'none', margin: '2px 0 4px', padding: '0', display: 'flex', flexDirection: 'column', gap: '2px', borderLeft: '2px solid rgba(6,182,212,0.3)', marginLeft: '12px', paddingLeft: '8px' }}>
                 <li
                   className={`sidebar-item ${view === 'laporan-konter' ? 'active' : ''}`}
                   onClick={() => setView('laporan-konter')}
@@ -474,7 +474,7 @@ function App() {
               <span style={{ fontSize: '10px', transition: 'transform 0.2s', transform: isRekrutmenOpen ? 'rotate(90deg)' : 'none', color: 'var(--text-muted)', marginRight: '4px' }}>▶</span>
             </li>
             {isRekrutmenOpen && (
-              <ul style={{ listStyle: 'none', margin: '2px 0 4px', padding: '0', display: 'flex', flexDirection: 'column', gap: '2px', borderLeft: '2px solid rgba(167,139,250,0.3)', marginLeft: '12px', paddingLeft: '8px' }}>
+              <ul className="sidebar-submenu" style={{ listStyle: 'none', margin: '2px 0 4px', padding: '0', display: 'flex', flexDirection: 'column', gap: '2px', borderLeft: '2px solid rgba(167,139,250,0.3)', marginLeft: '12px', paddingLeft: '8px' }}>
                 <li
                   className={`sidebar-item ${view === 'recruitment-dashboard' ? 'active' : ''}`}
                   onClick={() => { setView('recruitment-dashboard'); setMobileMenuOpen(false); }}
@@ -608,7 +608,9 @@ function App() {
       {/* Admin Content Area */}
       <main className="main-content">
         <ErrorBoundary>
-          {renderView()}
+          <div key={view} className="view-transition-wrapper">
+            {renderView()}
+          </div>
         </ErrorBoundary>
       </main>
 

@@ -1081,7 +1081,7 @@ textarea:focus {
   color: white;
 }
 
-/* Animations */
+/* Animations & Professional Motion System */
 @keyframes fadeIn {
   from { opacity: 0; }
   to { opacity: 1; }
@@ -1090,6 +1090,131 @@ textarea:focus {
 @keyframes slideUp {
   from { transform: translateY(20px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes pageEnter {
+  0% {
+    opacity: 0;
+    transform: translateY(14px) scale(0.992);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes cardReveal {
+  0% {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes popIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  70% {
+    transform: scale(1.02);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes pulseRing {
+  0% {
+    transform: scale(0.85);
+    opacity: 0.85;
+  }
+  70% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+}
+
+@keyframes floatAmbient {
+  0%, 100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(18px, -18px) scale(1.06);
+  }
+}
+
+@keyframes shimmerSweep {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+@keyframes submenuExpand {
+  0% {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* View Transition Wrapper */
+.view-transition-wrapper {
+  animation: pageEnter 0.38s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: transform, opacity;
+}
+
+/* Live Radar Pulse Dot */
+.live-pulse-dot {
+  position: relative;
+  display: inline-flex;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #10b981;
+  flex-shrink: 0;
+}
+
+.live-pulse-dot::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background-color: #10b981;
+  animation: pulseRing 2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+}
+
+/* Custom Sleek Scrollbar */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(156, 163, 175, 0.22);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(99, 102, 241, 0.5);
 }
 
 /* Custom general table */
@@ -1101,9 +1226,10 @@ textarea:focus {
 
 .data-table th,
 .data-table td {
-  padding: 10px 12px;
+  padding: 11px 14px;
   text-align: left;
   border-bottom: 1px solid var(--border-color);
+  transition: background-color 0.18s ease;
 }
 
 .data-table th {
@@ -1112,10 +1238,15 @@ textarea:focus {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+  background: rgba(255, 255, 255, 0.015);
 }
 
-.data-table tr:hover td {
-  background-color: rgba(255, 255, 255, 0.02);
+.data-table tbody tr {
+  transition: transform 0.18s ease, background-color 0.18s ease;
+}
+
+.data-table tbody tr:hover td {
+  background-color: rgba(99, 102, 241, 0.05);
 }
 
 .loading-spinner {
@@ -1135,19 +1266,100 @@ textarea:focus {
 /* Card (glass surface used throughout views) */
 .card {
   background: var(--bg-surface);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   border: 1px solid var(--border-color);
-  border-radius: 12px;
-  padding: 16px;
-  box-shadow: 0 4px 16px -4px rgba(0,0,0,0.3);
+  border-radius: 14px;
+  padding: 18px 20px;
+  box-shadow: 0 8px 28px -8px rgba(0, 0, 0, 0.35), inset 0 1px 0 0 rgba(255, 255, 255, 0.05);
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.25s ease, box-shadow 0.25s ease;
+  animation: cardReveal 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-/* Sidebar icons sizing */
+.card:hover {
+  border-color: rgba(99, 102, 241, 0.24);
+  box-shadow: 0 14px 34px -10px rgba(0, 0, 0, 0.45), inset 0 1px 0 0 rgba(255, 255, 255, 0.08);
+}
+
+.stat-card {
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s ease, border-color 0.25s ease;
+}
+
+.stat-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(99, 102, 241, 0.35);
+  box-shadow: 0 12px 28px -8px rgba(79, 70, 229, 0.25);
+}
+
+/* Sidebar icons & micro-interactions */
+.sidebar-item {
+  position: relative;
+  overflow: hidden;
+}
+
 .sidebar-item svg {
   flex-shrink: 0;
   width: 16px;
   height: 16px;
+  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.sidebar-item:hover svg {
+  transform: scale(1.12) translateX(1px);
+}
+
+.sidebar-item:hover {
+  transform: translateX(2px);
+}
+
+.sidebar-item.active {
+  transform: translateX(0);
+}
+
+.sidebar-submenu {
+  animation: submenuExpand 0.24s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Interactive Connection Card in Settings */
+.api-conn-card {
+  position: relative;
+  background: var(--bg-hover);
+  padding: 16px 18px;
+  border-radius: 12px;
+  border: 1px solid var(--border-color);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  transition: all 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.api-conn-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(99, 102, 241, 0.35);
+  background: rgba(43, 55, 84, 0.55);
+  box-shadow: 0 8px 24px -8px rgba(0, 0, 0, 0.35);
+}
+
+:root[data-theme='light'] .api-conn-card:hover {
+  background: rgba(79, 70, 229, 0.04);
+}
+
+.sync-metric-card {
+  position: relative;
+  overflow: hidden;
+  background: var(--bg-hover);
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--border-color);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.sync-metric-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(99, 102, 241, 0.35);
+  box-shadow: 0 10px 24px -8px rgba(0, 0, 0, 0.35);
 }
 
 /* Tab menu */
@@ -1173,11 +1385,13 @@ textarea:focus {
 .tab-btn:hover {
   color: var(--text-primary);
   background-color: var(--bg-hover);
+  transform: translateY(-1px);
 }
 
 .tab-btn.active {
   color: white;
-  background-color: var(--primary);
+  background: linear-gradient(135deg, var(--primary), var(--secondary));
+  box-shadow: 0 4px 12px var(--primary-glow);
 }
 
 /* ==============================================================================

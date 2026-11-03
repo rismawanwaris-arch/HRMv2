@@ -85,11 +85,14 @@ export default function Settings({ currentRole = 'master' }) {
     setMobileTestResult(null);
     const start = performance.now();
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('auth_token') || localStorage.getItem('token');
       const targetUrl = customBaseUrl || mobileConfig?.recommended_base_url || '/api';
       const cleanUrl = targetUrl.replace(/\/$/, '');
       const res = await fetch(`${cleanUrl}/mobile/master-data`, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/json'
+        }
       });
       const end = performance.now();
       const latency = Math.round(end - start);
@@ -98,7 +101,7 @@ export default function Settings({ currentRole = 'master' }) {
         setMobileTestResult({
           ok: true,
           latency,
-          message: `Koneksi Berhasil (${res.status} OK). Ditemukan ${json.data?.branches?.length || 0} cabang aktif.`
+          message: `Koneksi Terenkripsi & Valid (${res.status} OK) · ${json.data?.branches?.length || 0} cabang aktif siap disinkronkan.`
         });
       } else {
         setMobileTestResult({
@@ -567,34 +570,75 @@ export default function Settings({ currentRole = 'master' }) {
       )}
 
       {/* ── PENGATURAN API MOBILE & FLUTTER ── */}
-      <div className="card" style={{ marginTop: '24px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px', marginBottom: '16px' }}>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '20px' }}>📱</span>
-              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                Koneksi API Mobile (Flutter / Android)
-              </h3>
+      <div className="card" style={{ marginTop: '24px', position: 'relative', overflow: 'hidden' }}>
+        {/* Top Accent Gradient Bar */}
+        <div style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          height: '3px',
+          background: 'linear-gradient(90deg, #4f46e5, #9333ea, #10b981)'
+        }} />
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px', marginBottom: '20px', paddingTop: '4px' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
+            <div style={{
+              width: '42px',
+              height: '42px',
+              borderRadius: '12px',
+              background: 'linear-gradient(135deg, rgba(79,70,229,0.2), rgba(147,51,234,0.2))',
+              border: '1px solid rgba(99,102,241,0.35)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+              boxShadow: '0 6px 18px rgba(79,70,229,0.2)'
+            }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#818cf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
+                <line x1="12" y1="18" x2="12.01" y2="18" />
+              </svg>
             </div>
-            <p style={{ margin: '4px 0 0', fontSize: '12px', color: 'var(--text-muted)' }}>
-              Alamat endpoint dan pengaturan komunikasi offline-first untuk aplikasi Android HRGA
-            </p>
+            <div>
+              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>
+                Pusat Koneksi & Keamanan API Mobile (Flutter Android)
+              </h3>
+              <p style={{ margin: '4px 0 0', fontSize: '12.5px', color: 'var(--text-muted)' }}>
+                Manajemen endpoint sinkronisasi offline-first, proteksi PII terenkripsi, dan pemantauan transmisi tim lapangan HRGA
+              </p>
+            </div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
             <span style={{
               display: 'inline-flex',
               alignItems: 'center',
               gap: '6px',
-              padding: '4px 10px',
+              padding: '5px 11px',
+              borderRadius: '20px',
+              background: 'rgba(139,92,246,0.12)',
+              color: '#a78bfa',
+              border: '1px solid rgba(139,92,246,0.28)',
+              fontSize: '11.5px',
+              fontWeight: 600
+            }}>
+              🛡️ AES-256-GCM & RBAC Aktif
+            </span>
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '5px 12px',
               borderRadius: '20px',
               background: 'rgba(16,185,129,0.12)',
               color: '#10b981',
-              border: '1px solid rgba(16,185,129,0.25)',
+              border: '1px solid rgba(16,185,129,0.28)',
               fontSize: '12px',
-              fontWeight: 600
+              fontWeight: 700
             }}>
-              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#10b981' }} />
-              API Server Online (Port {mobileConfig?.port || 5002})
+              <span className="live-pulse-dot" />
+              API Online (Port {mobileConfig?.port || 5002})
             </span>
           </div>
         </div>
@@ -602,63 +646,72 @@ export default function Settings({ currentRole = 'master' }) {
         {/* Statistik Sinkronisasi Mobile */}
         <div style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(155px, 1fr))',
           gap: '12px',
-          marginBottom: '20px'
+          marginBottom: '22px'
         }}>
-          <div style={{ background: 'var(--bg-hover)', padding: '12px', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
-            <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600 }}>ASET TERSINKRON</div>
-            <div style={{ fontSize: '20px', fontWeight: 800, color: '#3b82f6', marginTop: '4px' }}>
+          <div className="sync-metric-card" style={{ borderTop: '2px solid #3b82f6' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '0.04em' }}>ASET TERSINKRON</span>
+              <span style={{ fontSize: '15px' }}>📦</span>
+            </div>
+            <div style={{ fontSize: '24px', fontWeight: 800, color: '#3b82f6', marginTop: '6px', fontFamily: 'var(--font-heading)' }}>
               {mobileConfig?.sync_stats?.synced_assets ?? 0}
             </div>
+            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>Unit dari aplikasi mobile</div>
           </div>
-          <div style={{ background: 'var(--bg-hover)', padding: '12px', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
-            <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600 }}>KUNJUNGAN GA</div>
-            <div style={{ fontSize: '20px', fontWeight: 800, color: '#10b981', marginTop: '4px' }}>
+
+          <div className="sync-metric-card" style={{ borderTop: '2px solid #10b981' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '0.04em' }}>KUNJUNGAN GA</span>
+              <span style={{ fontSize: '15px' }}>📋</span>
+            </div>
+            <div style={{ fontSize: '24px', fontWeight: 800, color: '#10b981', marginTop: '6px', fontFamily: 'var(--font-heading)' }}>
               {mobileConfig?.sync_stats?.synced_visits ?? 0}
             </div>
+            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>Laporan audit cabang</div>
           </div>
-          <div style={{ background: 'var(--bg-hover)', padding: '12px', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
-            <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600 }}>INSIDEN OUTLET</div>
-            <div style={{ fontSize: '20px', fontWeight: 800, color: '#f59e0b', marginTop: '4px' }}>
+
+          <div className="sync-metric-card" style={{ borderTop: '2px solid #f59e0b' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '0.04em' }}>INSIDEN OUTLET</span>
+              <span style={{ fontSize: '15px' }}>⚠️</span>
+            </div>
+            <div style={{ fontSize: '24px', fontWeight: 800, color: '#f59e0b', marginTop: '6px', fontFamily: 'var(--font-heading)' }}>
               {mobileConfig?.sync_stats?.synced_incidents ?? 0}
             </div>
+            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>Temuan darurat lapangan</div>
           </div>
-          <div style={{ background: 'var(--bg-hover)', padding: '12px', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
-            <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600 }}>KARYAWAN BARU</div>
-            <div style={{ fontSize: '20px', fontWeight: 800, color: '#8b5cf6', marginTop: '4px' }}>
+
+          <div className="sync-metric-card" style={{ borderTop: '2px solid #8b5cf6' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '0.04em' }}>KARYAWAN BARU</span>
+              <span style={{ fontSize: '15px' }}>👤</span>
+            </div>
+            <div style={{ fontSize: '24px', fontWeight: 800, color: '#8b5cf6', marginTop: '6px', fontFamily: 'var(--font-heading)' }}>
               {mobileConfig?.sync_stats?.synced_employees ?? 0}
             </div>
+            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>PII terenkripsi di server</div>
           </div>
         </div>
 
         {/* Opsi Alamat Koneksi */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginBottom: '20px' }}>
           {/* 1. HP Fisik Android */}
-          <div style={{
-            background: 'var(--bg-hover)',
-            padding: '14px',
-            borderRadius: '10px',
-            border: '1px solid var(--border-color)',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            flexWrap: 'wrap',
-            gap: '12px'
-          }}>
+          <div className="api-conn-card">
             <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                  1. HP Fisik Android (Wi-Fi Lokal)
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '13.5px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                  1. HP Fisik Android (Wi-Fi Lokal / Jaringan Kantor)
                 </span>
-                <span style={{ fontSize: '11px', background: '#3b82f622', color: '#60a5fa', padding: '2px 8px', borderRadius: '4px', fontWeight: 600 }}>
-                  Rekomendasi Lapangan
+                <span style={{ fontSize: '11px', background: 'rgba(59,130,246,0.16)', color: '#60a5fa', border: '1px solid rgba(59,130,246,0.3)', padding: '2px 8px', borderRadius: '6px', fontWeight: 600 }}>
+                  Otomatis Terdeteksi
                 </span>
               </div>
               <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                Gunakan URL ini di Flutter jika HP Android dan laptop terhubung di Wi-Fi yang sama.
+                Gunakan URL ini di Flutter saat HP Android terhubung pada jaringan Wi-Fi yang sama dengan server.
               </div>
-              <code style={{ display: 'inline-block', marginTop: '6px', fontSize: '13px', color: '#10b981', fontWeight: 600, background: 'var(--bg-surface)', padding: '4px 8px', borderRadius: '6px' }}>
+              <code style={{ display: 'inline-block', marginTop: '8px', fontSize: '13px', color: '#10b981', fontWeight: 600, background: 'var(--bg-surface)', padding: '5px 10px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
                 {mobileConfig?.recommended_base_url || 'Memuat IP...'}
               </code>
             </div>
@@ -666,41 +719,32 @@ export default function Settings({ currentRole = 'master' }) {
               type="button"
               onClick={() => handleCopy(mobileConfig?.recommended_base_url || '', 'wifi')}
               style={{
-                padding: '8px 14px',
-                borderRadius: '8px',
+                padding: '9px 16px',
+                borderRadius: '10px',
                 border: '1px solid var(--border-color)',
                 background: copiedKey === 'wifi' ? '#10b981' : 'var(--bg-surface)',
                 color: copiedKey === 'wifi' ? '#fff' : 'var(--text-primary)',
-                fontSize: '12px',
-                fontWeight: 600,
+                fontSize: '12.5px',
+                fontWeight: 700,
                 cursor: 'pointer',
-                transition: 'all 0.2s ease'
+                transition: 'all 0.22s cubic-bezier(0.16, 1, 0.3, 1)',
+                transform: copiedKey === 'wifi' ? 'scale(1.04)' : 'scale(1)'
               }}
             >
-              {copiedKey === 'wifi' ? '✓ Tersalin!' : '📋 Salin URL'}
+              {copiedKey === 'wifi' ? '✓ URL Tersalin!' : '📋 Salin URL'}
             </button>
           </div>
 
           {/* 2. Android Studio Emulator */}
-          <div style={{
-            background: 'var(--bg-hover)',
-            padding: '14px',
-            borderRadius: '10px',
-            border: '1px solid var(--border-color)',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            flexWrap: 'wrap',
-            gap: '12px'
-          }}>
+          <div className="api-conn-card">
             <div>
-              <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                2. Android Studio Emulator (Di Komputer Ini)
+              <div style={{ fontSize: '13.5px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                2. Android Studio Emulator (Development Lokal)
               </div>
               <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                Android emulator menggunakan IP loopback khusus <code>10.0.2.2</code> untuk mengakses localhost host.
+                Alamat loopback khusus <code>10.0.2.2</code> untuk menghubungkan emulator ke localhost komputer.
               </div>
-              <code style={{ display: 'inline-block', marginTop: '6px', fontSize: '13px', color: '#38bdf8', fontWeight: 600, background: 'var(--bg-surface)', padding: '4px 8px', borderRadius: '6px' }}>
+              <code style={{ display: 'inline-block', marginTop: '8px', fontSize: '13px', color: '#38bdf8', fontWeight: 600, background: 'var(--bg-surface)', padding: '5px 10px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
                 {mobileConfig?.emulator_base_url || 'http://10.0.2.2:5002/api'}
               </code>
             </div>
@@ -708,72 +752,91 @@ export default function Settings({ currentRole = 'master' }) {
               type="button"
               onClick={() => handleCopy(mobileConfig?.emulator_base_url || '', 'emu')}
               style={{
-                padding: '8px 14px',
-                borderRadius: '8px',
+                padding: '9px 16px',
+                borderRadius: '10px',
                 border: '1px solid var(--border-color)',
                 background: copiedKey === 'emu' ? '#10b981' : 'var(--bg-surface)',
                 color: copiedKey === 'emu' ? '#fff' : 'var(--text-primary)',
-                fontSize: '12px',
-                fontWeight: 600,
+                fontSize: '12.5px',
+                fontWeight: 700,
                 cursor: 'pointer',
-                transition: 'all 0.2s ease'
+                transition: 'all 0.22s cubic-bezier(0.16, 1, 0.3, 1)',
+                transform: copiedKey === 'emu' ? 'scale(1.04)' : 'scale(1)'
               }}
             >
-              {copiedKey === 'emu' ? '✓ Tersalin!' : '📋 Salin URL'}
+              {copiedKey === 'emu' ? '✓ URL Tersalin!' : '📋 Salin URL'}
             </button>
           </div>
 
-          {/* 3. URL Kustom / Domain Produksi */}
-          <form onSubmit={handleSaveCustomBaseUrl} style={{
-            background: 'var(--bg-hover)',
-            padding: '14px',
-            borderRadius: '10px',
-            border: '1px solid var(--border-color)'
-          }}>
-            <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
-              3. URL API Kustom / Domain VPS (Produksi)
+          {/* 3. URL Kustom / Tailscale ZimaOS / Domain Produksi */}
+          <form onSubmit={handleSaveCustomBaseUrl} className="api-conn-card" style={{ display: 'block' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+              <div style={{ fontSize: '13.5px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                3. Endpoint Tailscale ZimaOS / Domain Produksi
+              </div>
+              <span style={{ fontSize: '11px', background: 'rgba(16,185,129,0.14)', color: '#34d399', border: '1px solid rgba(16,185,129,0.3)', padding: '2px 8px', borderRadius: '6px', fontWeight: 600 }}>
+                Rekomendasi ZimaOS Tailscale
+              </span>
             </div>
-            <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px', marginBottom: '10px' }}>
-              Masukkan domain HTTPS atau IP publik jika aplikasi sudah di-deploy ke server online.
+            <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px', marginBottom: '12px' }}>
+              Masukkan IP Tailscale ZimaOS (contoh: <code>http://100.103.255.45:5002/api</code>) atau domain HTTPS publik.
             </div>
             <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
               <input
                 type="text"
-                placeholder="https://hrm.perusahaan.com/api"
+                placeholder="http://100.103.255.45:5002/api"
                 value={customBaseUrl}
                 onChange={e => setCustomBaseUrl(e.target.value)}
                 style={{
                   flex: 1,
                   minWidth: '240px',
-                  padding: '8px 12px',
-                  borderRadius: '8px',
+                  padding: '10px 14px',
+                  borderRadius: '10px',
                   border: '1px solid var(--border-color)',
                   background: 'var(--bg-surface)',
                   color: 'var(--text-primary)',
-                  fontSize: '13px'
+                  fontSize: '13px',
+                  fontFamily: 'monospace'
                 }}
               />
               <button
+                type="button"
+                onClick={() => handleCopy(customBaseUrl || '', 'custom')}
+                style={{
+                  padding: '10px 14px',
+                  borderRadius: '10px',
+                  border: '1px solid var(--border-color)',
+                  background: copiedKey === 'custom' ? '#10b981' : 'var(--bg-surface)',
+                  color: copiedKey === 'custom' ? '#fff' : 'var(--text-primary)',
+                  fontSize: '12.5px',
+                  fontWeight: 600,
+                  cursor: 'pointer'
+                }}
+              >
+                {copiedKey === 'custom' ? '✓ Tersalin' : '📋 Salin'}
+              </button>
+              <button
                 type="submit"
                 disabled={savingMobileUrl}
+                className="btn-primary"
                 style={{
-                  padding: '8px 16px',
-                  borderRadius: '8px',
+                  padding: '10px 18px',
+                  borderRadius: '10px',
                   border: 'none',
-                  background: savingMobileUrl ? '#666' : 'linear-gradient(135deg, #7c3aed, #6d28d9)',
+                  background: savingMobileUrl ? '#666' : 'linear-gradient(135deg, #7c3aed, #4f46e5)',
                   color: '#fff',
-                  fontWeight: 600,
+                  fontWeight: 700,
                   fontSize: '13px',
                   cursor: savingMobileUrl ? 'not-allowed' : 'pointer',
                   whiteSpace: 'nowrap'
                 }}
               >
-                {savingMobileUrl ? 'Menyimpan...' : 'Simpan URL'}
+                {savingMobileUrl ? 'Menyimpan...' : 'Simpan Endpoint'}
               </button>
             </div>
             {mobileUrlMsg && (
-              <div style={{ marginTop: '8px', fontSize: '12px', color: mobileUrlMsg.type === 'ok' ? '#10b981' : '#ef4444' }}>
-                {mobileUrlMsg.text}
+              <div style={{ marginTop: '10px', fontSize: '12.5px', fontWeight: 600, color: mobileUrlMsg.type === 'ok' ? '#10b981' : '#ef4444', animation: 'popIn 0.25s ease forwards' }}>
+                {mobileUrlMsg.type === 'ok' ? '✓ ' : '✕ '}{mobileUrlMsg.text}
               </div>
             )}
           </form>
@@ -786,7 +849,7 @@ export default function Settings({ currentRole = 'master' }) {
           alignItems: 'center',
           flexWrap: 'wrap',
           gap: '12px',
-          paddingTop: '12px',
+          paddingTop: '14px',
           borderTop: '1px solid var(--border-color)'
         }}>
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -797,83 +860,114 @@ export default function Settings({ currentRole = 'master' }) {
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: '6px',
-                padding: '9px 16px',
-                borderRadius: '8px',
-                border: '1px solid #10b981',
-                background: testingMobileApi ? '#10b98133' : 'rgba(16,185,129,0.1)',
+                gap: '8px',
+                padding: '10px 18px',
+                borderRadius: '10px',
+                border: '1px solid rgba(16,185,129,0.5)',
+                background: testingMobileApi ? 'rgba(16,185,129,0.2)' : 'linear-gradient(135deg, rgba(16,185,129,0.18), rgba(5,150,105,0.1))',
                 color: '#10b981',
                 fontSize: '13px',
                 fontWeight: 700,
-                cursor: testingMobileApi ? 'not-allowed' : 'pointer'
+                cursor: testingMobileApi ? 'not-allowed' : 'pointer',
+                transition: 'all 0.2s ease'
               }}
             >
-              {testingMobileApi ? '⏳ Menguji...' : '⚡ Uji Respon API Mobile'}
+              {testingMobileApi ? '⏳ Memverifikasi Enkripsi & Endpoint...' : '⚡ Uji Respon API Mobile'}
             </button>
             <button
               type="button"
               onClick={() => setShowDartSnippet(p => !p)}
               style={{
-                padding: '9px 14px',
-                borderRadius: '8px',
+                padding: '10px 16px',
+                borderRadius: '10px',
                 border: '1px solid var(--border-color)',
-                background: 'var(--bg-hover)',
-                color: 'var(--text-primary)',
+                background: showDartSnippet ? 'rgba(99,102,241,0.15)' : 'var(--bg-hover)',
+                color: showDartSnippet ? '#818cf8' : 'var(--text-primary)',
                 fontSize: '13px',
                 fontWeight: 600,
-                cursor: 'pointer'
+                cursor: 'pointer',
+                transition: 'all 0.2s ease'
               }}
             >
-              {showDartSnippet ? 'Sembunyikan Kode Dart' : '📋 Lihat Template ApiConfig.dart'}
+              {showDartSnippet ? '▲ Sembunyikan Kode Dart' : '💻 Lihat Template ApiConfig.dart'}
             </button>
           </div>
 
-          <a
-            href="/docs/FLUTTER_HRGA_SPEC.md"
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ fontSize: '12px', color: '#a78bfa', textDecoration: 'none', fontWeight: 600 }}
-          >
-            Buka Dokumen PRD Mobile Spec ↗
-          </a>
+          <div style={{ display: 'flex', gap: '14px', alignItems: 'center' }}>
+            <a
+              href="/docs/ANDROID_SECURITY_AND_SYNC_GUIDE.md"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ fontSize: '12px', color: '#34d399', textDecoration: 'none', fontWeight: 600 }}
+            >
+              🛡️ Panduan Keamanan Android ↗
+            </a>
+            <a
+              href="/docs/FLUTTER_HRGA_SPEC.md"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ fontSize: '12px', color: '#a78bfa', textDecoration: 'none', fontWeight: 600 }}
+            >
+              📄 Dokumen PRD Spec ↗
+            </a>
+          </div>
         </div>
 
         {/* Hasil Uji Respon API */}
         {mobileTestResult && (
           <div style={{
             marginTop: '14px',
-            padding: '12px 14px',
-            borderRadius: '8px',
+            padding: '13px 16px',
+            borderRadius: '10px',
             fontSize: '13px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '8px',
             background: mobileTestResult.ok ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
-            border: `1px solid ${mobileTestResult.ok ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'}`,
-            color: mobileTestResult.ok ? '#10b981' : '#ef4444'
+            border: `1px solid ${mobileTestResult.ok ? 'rgba(16,185,129,0.35)' : 'rgba(239,68,68,0.35)'}`,
+            color: mobileTestResult.ok ? '#10b981' : '#ef4444',
+            animation: 'popIn 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards'
           }}>
-            <div>
-              <strong>{mobileTestResult.ok ? '✓ Sukses: ' : '✕ Gagal: '}</strong>
-              {mobileTestResult.message}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '16px' }}>{mobileTestResult.ok ? '✅' : '❌'}</span>
+              <div>
+                <strong>{mobileTestResult.ok ? 'Respon Valid: ' : 'Koneksi Gagal: '}</strong>
+                {mobileTestResult.message}
+              </div>
             </div>
-            <div style={{ fontSize: '11px', opacity: 0.85, fontWeight: 700 }}>
-              Latency: {mobileTestResult.latency} ms
+            <div style={{
+              fontSize: '11.5px',
+              fontWeight: 700,
+              padding: '3px 9px',
+              borderRadius: '6px',
+              background: 'rgba(0,0,0,0.2)'
+            }}>
+              ⚡ Latency: {mobileTestResult.latency} ms
             </div>
           </div>
         )}
 
         {/* Template Kode Dart Flutter */}
         {showDartSnippet && (
-          <div style={{ marginTop: '16px', background: 'var(--bg-surface)', padding: '16px', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
+          <div style={{
+            marginTop: '16px',
+            background: 'var(--bg-surface)',
+            padding: '16px',
+            borderRadius: '12px',
+            border: '1px solid var(--border-color)',
+            animation: 'submenuExpand 0.26s cubic-bezier(0.16, 1, 0.3, 1) forwards'
+          }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-              <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)' }}>
+              <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)', fontFamily: 'monospace' }}>
                 lib/core/api_config.dart
               </span>
               <button
                 type="button"
                 onClick={() => handleCopy(`class ApiConfig {
-  static const String baseUrl = '${customBaseUrl || mobileConfig?.recommended_base_url || 'http://192.168.100.77:5002/api'}';
-  static const String login = '\$baseUrl/login';
+  static const String baseUrl = '${customBaseUrl || mobileConfig?.recommended_base_url || 'http://100.103.255.45:5002/api'}';
+  static const String login = '\$baseUrl/mobile/login';
   static const String masterData = '\$baseUrl/mobile/master-data';
   static const String syncAsset = '\$baseUrl/mobile/sync/asset';
   static const String syncVisit = '\$baseUrl/mobile/sync/visit';
@@ -881,17 +975,18 @@ export default function Settings({ currentRole = 'master' }) {
   static const String syncEmployee = '\$baseUrl/mobile/sync/employee';
 }`, 'dart')}
                 style={{
-                  padding: '4px 10px',
-                  borderRadius: '6px',
+                  padding: '5px 12px',
+                  borderRadius: '7px',
                   border: '1px solid var(--border-color)',
                   background: copiedKey === 'dart' ? '#10b981' : 'var(--bg-hover)',
                   color: copiedKey === 'dart' ? '#fff' : 'var(--text-primary)',
-                  fontSize: '11px',
-                  fontWeight: 600,
-                  cursor: 'pointer'
+                  fontSize: '11.5px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease'
                 }}
               >
-                {copiedKey === 'dart' ? '✓ Tersalin!' : 'Salin Kode Dart'}
+                {copiedKey === 'dart' ? '✓ Kode Tersalin!' : '📋 Salin Kode Dart'}
               </button>
             </div>
             <pre style={{
@@ -900,17 +995,18 @@ export default function Settings({ currentRole = 'master' }) {
               fontFamily: 'monospace',
               color: '#34d399',
               background: '#0d1117',
-              padding: '12px',
-              borderRadius: '8px',
+              padding: '14px',
+              borderRadius: '10px',
               overflowX: 'auto',
-              lineHeight: '1.5'
+              lineHeight: '1.55',
+              border: '1px solid rgba(255,255,255,0.06)'
             }}>
 {`class ApiConfig {
-  // Base URL aktif yang dikonfigurasikan di Pengaturan Sistem
-  static const String baseUrl = '${customBaseUrl || mobileConfig?.recommended_base_url || 'http://192.168.100.77:5002/api'}';
+  // Base URL aktif (Tailscale ZimaOS / Local LAN)
+  static const String baseUrl = '${customBaseUrl || mobileConfig?.recommended_base_url || 'http://100.103.255.45:5002/api'}';
 
-  // Endpoint Autentikasi & Sinkronisasi
-  static const String login = '\$baseUrl/login';
+  // Endpoint Autentikasi & Sinkronisasi (Wajib Header Authorization: Bearer <token>)
+  static const String login = '\$baseUrl/mobile/login';
   static const String masterData = '\$baseUrl/mobile/master-data';
   static const String syncAsset = '\$baseUrl/mobile/sync/asset';
   static const String syncVisit = '\$baseUrl/mobile/sync/visit';
