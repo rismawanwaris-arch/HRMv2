@@ -971,15 +971,24 @@ async function migrateEmployeeEncryption() {
 
 async function syncHiredManualCandidatesToEmployees() {
   try {
-    // 1. Hapus duplikat baris manual entry tanpa NIK yang memiliki nama persis sama
+    // 1. Hapus duplikat baris manual entry yang memiliki nama persis sama (simpan ID terbaru)
     await query.run(`
       DELETE FROM candidates
-      WHERE is_manual_entry = 1 AND status = 'Hired' AND nik IS NULL
+      WHERE is_manual_entry = 1 AND status = 'Hired'
         AND id NOT IN (
-          SELECT MIN(id) FROM candidates
-          WHERE is_manual_entry = 1 AND status = 'Hired' AND nik IS NULL
+          SELECT MAX(id) FROM candidates
+          WHERE is_manual_entry = 1 AND status = 'Hired'
           GROUP BY LOWER(TRIM(name))
         )
+    `).catch(() => {});
+
+    // Hapus juga duplikat nama di tabel employees jika ada (simpan ID terbaru)
+    await query.run(`
+      DELETE FROM employees
+      WHERE id NOT IN (
+        SELECT MAX(id) FROM employees
+        GROUP BY LOWER(TRIM(name))
+      )
     `).catch(() => {});
 
     // 2. Sinkronkan kandidat Hired manual entry yang belum masuk ke tabel employees
@@ -988,7 +997,10 @@ async function syncHiredManualCandidatesToEmployees() {
       FROM candidates c
       LEFT JOIN stage7_offering s7 ON c.id = s7.candidate_id
       WHERE c.status = 'Hired' AND c.is_manual_entry = 1
-        AND NOT EXISTS (SELECT 1 FROM employees e WHERE e.candidate_id = c.id)
+        AND NOT EXISTS (
+          SELECT 1 FROM employees e
+          WHERE e.candidate_id = c.id OR LOWER(TRIM(e.name)) = LOWER(TRIM(c.name))
+        )
     `);
     if (!unpromoted.length) return;
 

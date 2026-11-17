@@ -342,7 +342,7 @@ exports.importExcel = async (req, res) => {
           if (existingCand) candidateId = existingCand.id;
         }
         if (!candidateId) {
-          const existingByName = await query.get('SELECT id FROM candidates WHERE LOWER(name) = LOWER(?) AND status = ?', [name, 'Hired']);
+          const existingByName = await query.get('SELECT id FROM candidates WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) AND status = ?', [name, 'Hired']);
           if (existingByName) candidateId = existingByName.id;
         }
 
@@ -388,7 +388,7 @@ exports.importExcel = async (req, res) => {
           existingStaff = await query.get('SELECT id FROM employees WHERE candidate_id = ?', [candidateId]);
         }
         if (!existingStaff) {
-          existingStaff = await query.get('SELECT id FROM employees WHERE LOWER(name) = LOWER(?)', [name]);
+          existingStaff = await query.get('SELECT id FROM employees WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))', [name]);
         }
 
         const staffPayload = { ...rowBody, candidate_id: candidateId };
