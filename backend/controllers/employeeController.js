@@ -3,6 +3,7 @@ const fs = require('fs');
 const { query } = require('../db');
 const { generateAccessCode } = require('../utils/helpers');
 const { EMPLOYEE_FIELDS, buildInsert, buildUpdate } = require('../utils/candidateFields');
+const { STAFF_ALL_FIELDS, buildInsert: buildStaffInsert, buildUpdate: buildStaffUpdate } = require('../utils/staffFields');
 const { decryptRow, blindIndex } = require('../utils/fieldCrypto');
 
 /**
@@ -182,11 +183,46 @@ exports.importExcel = async (req, res) => {
     }
 
     // Ambil data cabang untuk pencocokan
-    const branches = await query.all('SELECT id, name FROM branches');
+    const branches = await query.all('SELECT id, code, name FROM branches');
     const branchMap = {};
+    const branchCodes = new Set();
     branches.forEach(b => {
-      branchMap[b.name.toLowerCase()] = b.id;
+      branchMap[b.name.toLowerCase().trim()] = b.id;
+      if (b.code) branchCodes.add(b.code.toUpperCase().trim());
     });
+
+    const getOrCreateBranchId = async (rawBranchName) => {
+      const cleanName = (rawBranchName || '').toString().trim();
+      if (!cleanName) return null;
+      const key = cleanName.toLowerCase();
+      if (branchMap[key]) return branchMap[key];
+
+      // Auto-generate kode cabang unik jika belum terdaftar di master cabang
+      let baseCode = cleanName
+        .toUpperCase()
+        .replace(/[^A-Z0-9\s]/g, '')
+        .trim()
+        .split(/\s+/)
+        .map(w => w.slice(0, 4))
+        .join('-')
+        .slice(0, 12) || 'CBG';
+      let code = baseCode;
+      let seq = 1;
+      while (branchCodes.has(code)) {
+        seq++;
+        code = `${baseCode}-${seq}`;
+      }
+      branchCodes.add(code);
+
+      const hasPetshop = /petshop/i.test(cleanName) ? 1 : 0;
+      const locType = /^(admin|cs|gudang|ho|head office)$/i.test(cleanName) ? 'Kantor/Pusat' : 'Konter';
+      const ins = await query.run(
+        'INSERT INTO branches (code, name, address, city, location_type, has_petshop, rent_amount, status) VALUES (?, ?, ?, ?, ?, ?, 0, ?)',
+        [code, cleanName, '', 'Bandung', locType, hasPetshop, 'Active']
+      );
+      branchMap[key] = ins.id;
+      return ins.id;
+    };
 
     let successCount = 0;
     let errorCount = 0;
@@ -195,20 +231,19 @@ exports.importExcel = async (req, res) => {
     for (let i = 0; i < data.length; i++) {
       const row = data[i];
       try {
-        const name = (row['Nama Lengkap'] || row['Nama'] || '').toString().trim();
+        const name = (row['Nama Lengkap'] || row['Nama'] || row['Employee Name'] || '').toString().trim();
         if (!name) continue; // Skip baris kosong
 
-        // Parsing Tempat & Tanggal Lahir
-        let birth_place = '';
-        let birth_date = '';
-        const ttl = (row['Tempat & Tanggal Lahir'] || '').toString();
-        if (ttl) {
+        const str = (key) => (row[key] !== undefined && row[key] !== null ? row[key] : '').toString().trim();
+
+        // Parsing Tempat & Tanggal Lahir (mendukung kolom terpisah maupun gabungan)
+        let birth_place = str('Tempat Lahir');
+        let birth_date = str('Tanggal Lahir') || str('Date of Birth');
+        const ttl = str('Tempat & Tanggal Lahir');
+        if (!birth_place && !birth_date && ttl) {
           const parts = ttl.split(',');
           if (parts.length > 1) {
             birth_place = parts[0].trim();
-            // Parsing tanggal dari format (bisa bervariasi, kita simpan stringnya atau ubah ke format YYYY-MM-DD jika memungkinkan)
-            // Untuk amannya, kita simpan string asli jika tidak valid date, tapi untuk input date type html idealnya YYYY-MM-DD
-            // Disini kita akan simpan apa adanya, tapi user idealnya format YYYY-MM-DD
             birth_date = parts.slice(1).join(',').trim();
           } else {
             birth_place = ttl.trim();
@@ -216,60 +251,60 @@ exports.importExcel = async (req, res) => {
         }
 
         // Parsing Bank & Rekening
-        let bank_name = '';
-        let bank_account = '';
-        const bankInfo = (row['Nama Bank & Nomor Rekening'] || '').toString();
+        let bank_name = str('Nama Bank');
+        let bank_account = str('Nomor Rekening') || str('Rek BCA');
+        const bankInfo = str('Nama Bank & Nomor Rekening');
         if (bankInfo) {
-          const parts = bankInfo.split(/[ -]+/);
+          const parts = bankInfo.split(/\s*-\s*|\s+/);
           if (parts.length > 1) {
-            bank_name = parts[0];
-            bank_account = parts.slice(1).join(' ');
+            bank_name = parts[0].trim();
+            bank_account = parts.slice(1).join(' ').trim();
+          } else if (/^\d+$/.test(bankInfo)) {
+            bank_name = 'BCA';
+            bank_account = bankInfo;
           } else {
             bank_name = bankInfo;
           }
+        } else if (bank_account && !bank_name) {
+          bank_name = 'BCA';
         }
 
-        // Parsing Cabang
-        const branchStr = (row['Cabang Penempatan'] || '').toString().trim().toLowerCase();
-        let branch_id = null;
-        if (branchStr && branchMap[branchStr]) {
-          branch_id = branchMap[branchStr];
-        } else {
-          // Cari pendekatan terdekat jika perlu, atau null
-        }
+        // Parsing Cabang (auto-match atau auto-create jika belum ada)
+        const rawBranch = str('Cabang Penempatan') || str('Departement') || str('Cabang');
+        const branch_id = await getOrCreateBranchId(rawBranch);
 
-        const phone = (row['No. Handphone'] || row['No. Telephone'] || '').toString().trim();
-        let nik = (row['NIK'] || row['Nomor KTP'] || '').toString().trim();
-        if (!nik) nik = null; // Biar bisa unik atau null
+        const phone = str('No. Handphone') || str('No. Telephone') || str('Phone');
+        let nik = str('NIK') || str('Nomor KTP') || str('KTP');
+        if (!nik) nik = null;
 
-        // Generate access code
-        let accessCode;
-        let codeExists = true;
-        while (codeExists) {
-          accessCode = generateAccessCode('MAN-');
-          const existing = await query.get('SELECT id FROM candidates WHERE access_code = ?', [accessCode]);
-          codeExists = !!existing;
-        }
+        const position = str('Jabatan') || str('Posisi') || 'Frontliner';
+        const rawEmpType = str('Tipe Karyawan');
+        const employee_type = rawEmpType
+          ? (rawEmpType.toLowerCase() === 'staff' ? 'Staff' : 'Frontliner')
+          : (/^(admin|admin setoran|cs|hr|finance|spv|supervisor|manager)$/i.test(position) ? 'Staff' : 'Frontliner');
+        const contract_type = str('Tipe Kontrak') || 'PKWT';
+        const hire_date = str('Tanggal Diterima') || str('Joining Date') || null;
+        const address_ktp = str('Alamat KTP') || str('Permanent Address');
+        const address_domicile = str('Alamat Domisili') || address_ktp;
 
-        const str = (key) => (row[key] || '').toString().trim();
         const rowBody = {
           name,
           nik,
-          gender: str('Jenis Kelamin'),
+          gender: str('Jenis Kelamin') || str('Gender'),
           birth_place,
           birth_date,
-          religion: str('Agama'),
-          marital_status: str('Status Perkawinan'),
+          religion: str('Agama') || str('Religion'),
+          marital_status: str('Status Perkawinan') || str('Marital Status'),
           dependents: parseInt(row['Jumlah Tanggungan']) || 0,
           blood_type: str('Golongan Darah'),
           phone,
-          email: str('E-mail'),
-          address_ktp: str('Alamat KTP'),
-          address_domicile: str('Alamat Domisili'),
-          emergency_contact_1: str('Kontak Darurat 1 (Nama & No HP)'),
+          email: str('E-mail') || str('Email'),
+          address_ktp,
+          address_domicile,
+          emergency_contact_1: str('Kontak Darurat 1 (Nama & No HP)') || str('Emergency Contact Person & Number'),
           emergency_contact_2: str('Kontak Darurat 2 (Nama & No HP)'),
-          father_name: str('Nama Ayah'),
-          mother_name: str('Nama Ibu'),
+          father_name: str('Nama Ayah') || str("Father's Name"),
+          mother_name: str('Nama Ibu') || str("Mother's Name"),
           spouse_name: str('Nama Pasangan (Jika ada)'),
           education_level: str('Pendidikan Terakhir'),
           education_institution: str('Nama Institusi Pendidikan'),
@@ -289,30 +324,82 @@ exports.importExcel = async (req, res) => {
           bpjs_employment: str('Nomor BPJS Ketenagakerjaan'),
           uniform_size: str('Ukuran Seragam'),
           branch_id,
-          hire_date: str('Tanggal Diterima'),
+          hire_date,
+          position,
+          employee_type,
+          contract_type,
+          salary: parseFloat(row['Gaji Pokok']) || 0,
+          allowance: parseFloat(row['Tunjangan']) || 0,
         };
 
-        const { columns, placeholders, values } = buildInsert(EMPLOYEE_FIELDS, rowBody);
-        const candidateResult = await query.run(
-          `INSERT INTO candidates (access_code, ${columns}, is_manual_entry, status, current_stage, created_at, updated_at)
-           VALUES (?, ${placeholders}, 1, 'Hired', 7, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-          [accessCode, ...values]
-        );
+        // 1. Upsert ke tabel candidates (Data Karyawan Rekrutmen)
+        let candidateId = null;
+        if (nik) {
+          const existingCand = await query.get('SELECT id FROM candidates WHERE nik_bidx = ?', [blindIndex(nik)]);
+          if (existingCand) candidateId = existingCand.id;
+        }
+        if (!candidateId) {
+          const existingByName = await query.get('SELECT id FROM candidates WHERE LOWER(name) = LOWER(?) AND status = ?', [name, 'Hired']);
+          if (existingByName) candidateId = existingByName.id;
+        }
 
-        const candidateId = candidateResult.id;
+        if (candidateId) {
+          const { assignments, values } = buildUpdate(EMPLOYEE_FIELDS, rowBody);
+          await query.run(
+            `UPDATE candidates SET ${assignments}, status = 'Hired', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+            [...values, candidateId]
+          );
+        } else {
+          let accessCode;
+          let codeExists = true;
+          while (codeExists) {
+            accessCode = generateAccessCode('MAN-');
+            const existing = await query.get('SELECT id FROM candidates WHERE access_code = ?', [accessCode]);
+            codeExists = !!existing;
+          }
+          const { columns, placeholders, values } = buildInsert(EMPLOYEE_FIELDS, rowBody);
+          const candidateResult = await query.run(
+            `INSERT INTO candidates (access_code, ${columns}, is_manual_entry, status, current_stage, created_at, updated_at)
+             VALUES (?, ${placeholders}, 1, 'Hired', 7, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+            [accessCode, ...values]
+          );
+          candidateId = candidateResult.id;
+        }
 
         await query.run(
           `INSERT OR REPLACE INTO stage7_offering 
             (candidate_id, contract_type, salary_offered, allowance, start_date, offering_status, passed)
            VALUES (?, ?, ?, ?, ?, 'Accepted', 1)`,
-          [
-            candidateId,
-            (row['Tipe Kontrak'] || 'PKWT').toString().trim(),
-            0,
-            0,
-            (row['Tanggal Diterima'] || '').toString().trim()
-          ]
+          [candidateId, contract_type, rowBody.salary, rowBody.allowance, hire_date]
         );
+
+        // 2. Upsert ke tabel employees (Manajemen Karyawan, Absensi, Payroll & Mobile API)
+        let existingStaff = null;
+        if (nik) {
+          existingStaff = await query.get('SELECT id FROM employees WHERE nik_bidx = ?', [blindIndex(nik)]);
+        }
+        if (!existingStaff && candidateId) {
+          existingStaff = await query.get('SELECT id FROM employees WHERE candidate_id = ?', [candidateId]);
+        }
+        if (!existingStaff) {
+          existingStaff = await query.get('SELECT id FROM employees WHERE LOWER(name) = LOWER(?)', [name]);
+        }
+
+        const staffPayload = { ...rowBody, candidate_id: candidateId };
+        if (existingStaff) {
+          const { assignments: staffAssign, values: staffVals } = buildStaffUpdate(STAFF_ALL_FIELDS, staffPayload);
+          await query.run(
+            `UPDATE employees SET ${staffAssign}, candidate_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+            [...staffVals, candidateId, existingStaff.id]
+          );
+        } else {
+          const { columns: staffCols, placeholders: staffPh, values: staffVals } = buildStaffInsert(STAFF_ALL_FIELDS, staffPayload);
+          await query.run(
+            `INSERT INTO employees (${staffCols}, candidate_id, status, created_at, updated_at)
+             VALUES (${staffPh}, ?, 'Active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+            [...staffVals, candidateId]
+          );
+        }
 
         successCount++;
       } catch (err) {
@@ -323,7 +410,7 @@ exports.importExcel = async (req, res) => {
 
     res.json({
       success: true,
-      message: `Berhasil import ${successCount} data. ${errorCount > 0 ? `Gagal ${errorCount} data.` : ''}`,
+      message: `Berhasil import ${successCount} data karyawan. ${errorCount > 0 ? `Gagal ${errorCount} data.` : ''}`,
       errors: errors.length > 0 ? errors : undefined
     });
 
@@ -347,7 +434,7 @@ exports.downloadTemplate = (req, res) => {
     'Tinggi Badan (cm)', 'Berat Badan (kg)', 'Kondisi Fisik', 'Tes Buta Warna',
     'Riwayat Penyakit', 'Alergi', 'Nomor NPWP',
     'Nama Bank & Nomor Rekening', 'Nomor BPJS Kesehatan', 'Nomor BPJS Ketenagakerjaan',
-    'Ukuran Seragam', 'Cabang Penempatan', 'Tipe Kontrak', 'Tanggal Diterima'
+    'Ukuran Seragam', 'Cabang Penempatan', 'Jabatan', 'Tipe Karyawan', 'Tipe Kontrak', 'Tanggal Diterima'
   ];
   const example = [
     'Budi Santoso', '3174012345678901', 'Laki-laki', 'Jakarta', '1990-05-15',
@@ -358,7 +445,7 @@ exports.downloadTemplate = (req, res) => {
     'S1', 'Universitas Indonesia', 'Teknik Informatika', '2013', '3.50',
     '170', '65', 'Normal', 'Tidak', '', '', '12.345.678.9-012.000',
     'BCA - 1234567890', '0001234567890', '10001234567890',
-    'M', 'Cabang Jakarta Pusat', 'PKWTT', '2024-01-15'
+    'M', 'Cabang Jakarta Pusat', 'Frontliner', 'Frontliner', 'PKWT', '2024-01-15'
   ];
   const wb = xlsx.utils.book_new();
   const ws = xlsx.utils.aoa_to_sheet([headers, example]);
