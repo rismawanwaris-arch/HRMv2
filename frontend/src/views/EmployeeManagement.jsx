@@ -69,7 +69,7 @@ export default function EmployeeManagement() {
 
   const [showDeactivateModal, setShowDeactivateModal] = useState(false);
   const [deactivatingEmployee, setDeactivatingEmployee] = useState(null);
-  const [deactivateForm, setDeactivateForm] = useState({ status: 'Resign', resign_date: '' });
+  const [deactivateForm, setDeactivateForm] = useState({ status: 'Resign', resign_date: '', resign_reason: '', resign_notes: '' });
 
   const [showPromoteModal, setShowPromoteModal] = useState(false);
   const [hiredCandidates, setHiredCandidates] = useState([]);
@@ -356,7 +356,7 @@ export default function EmployeeManagement() {
                           Edit
                         </button>
                         {emp.status === 'Active' && (
-                          <button onClick={() => { setDeactivatingEmployee(emp); setDeactivateForm({ status: 'Resign', resign_date: '' }); setShowDeactivateModal(true); }}
+                          <button onClick={() => { setDeactivatingEmployee(emp); setDeactivateForm({ status: 'Resign', resign_date: new Date().toISOString().slice(0, 10), resign_reason: 'Pindah Kerja / Karir Baru', resign_notes: '' }); setShowDeactivateModal(true); }}
                             style={{ background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.25)', color: '#f59e0b', padding: '5px 12px', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>
                             Nonaktifkan
                           </button>
@@ -666,21 +666,74 @@ export default function EmployeeManagement() {
 
       {/* Deactivate Modal */}
       {showDeactivateModal && deactivatingEmployee && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1001, backdropFilter: 'blur(6px)' }}>
-          <div style={{ width: '100%', maxWidth: '400px', background: 'var(--bg-surface-opaque)', border: '1px solid var(--border-color)', borderRadius: '20px', boxShadow: '0 24px 48px rgba(0,0,0,0.3)' }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1001, backdropFilter: 'blur(6px)', padding: '16px' }}>
+          <div style={{ width: '100%', maxWidth: '460px', background: 'var(--bg-surface-opaque)', border: '1px solid var(--border-color)', borderRadius: '20px', boxShadow: '0 24px 48px rgba(0,0,0,0.3)' }}>
             <div style={{ padding: '24px 28px 20px', borderBottom: '1px solid var(--border-color)' }}>
               <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)' }}>Nonaktifkan Karyawan</h3>
-              <p style={{ margin: '6px 0 0', fontSize: '13px', color: 'var(--text-muted)' }}>{deactivatingEmployee.name}</p>
+              <p style={{ margin: '6px 0 0', fontSize: '13px', color: 'var(--text-muted)' }}>
+                {deactivatingEmployee.name} {deactivatingEmployee.branch_name ? `· ${deactivatingEmployee.branch_name}` : ''}
+              </p>
             </div>
             <form onSubmit={handleDeactivate} style={{ padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <FormField label="Alasan Keluar">
-                <select style={inputStyle} value={deactivateForm.status} onChange={e => setDeactivateForm(p => ({ ...p, status: e.target.value }))}>
-                  <option value="Resign">Resign (mengundurkan diri)</option>
-                  <option value="Terminated">Terminated (diberhentikan)</option>
+              <FormField label="Status Keluar" required>
+                <select
+                  style={inputStyle}
+                  value={deactivateForm.status}
+                  onChange={e => {
+                    const nextStatus = e.target.value;
+                    const defaultReason = nextStatus === 'Resign'
+                      ? 'Pindah Kerja / Karir Baru'
+                      : 'Pelanggaran Disiplin / SOP';
+                    setDeactivateForm(p => ({ ...p, status: nextStatus, resign_reason: defaultReason }));
+                  }}
+                >
+                  <option value="Resign">Resign (Mengundurkan Diri)</option>
+                  <option value="Terminated">Terminated (Dikeluarkan / Diberhentikan)</option>
                 </select>
               </FormField>
-              <FormField label="Tanggal Keluar" required>
+              <FormField label="Kategori Alasan" required>
+                <select
+                  style={inputStyle}
+                  value={deactivateForm.resign_reason}
+                  onChange={e => setDeactivateForm(p => ({ ...p, resign_reason: e.target.value }))}
+                >
+                  {deactivateForm.status === 'Resign' ? (
+                    <>
+                      <option value="Pindah Kerja / Karir Baru">Pindah Kerja / Karir Baru</option>
+                      <option value="Alasan Keluarga / Menikah">Alasan Keluarga / Menikah</option>
+                      <option value="Pindah Domisili / Luar Kota">Pindah Domisili / Luar Kota</option>
+                      <option value="Melanjutkan Pendidikan / Kuliah">Melanjutkan Pendidikan / Kuliah</option>
+                      <option value="Kondisi Kesehatan">Kondisi Kesehatan</option>
+                      <option value="Tidak Cocok Jam Kerja / Shift">Tidak Cocok Jam Kerja / Shift</option>
+                      <option value="Habis Kontrak (Tidak Perpanjang)">Habis Kontrak (Tidak Perpanjang)</option>
+                      <option value="Lainnya (Mengundurkan Diri)">Lainnya (Mengundurkan Diri)</option>
+                    </>
+                  ) : (
+                    <>
+                      <option value="Pelanggaran Disiplin / SOP">Pelanggaran Disiplin / SOP</option>
+                      <option value="Fraud / Selisih Setoran & Keuangan">Fraud / Selisih Setoran & Keuangan</option>
+                      <option value="Mangkir / Absensi Buruk">Mangkir / Absensi Buruk (Alpha Beruntun)</option>
+                      <option value="Evaluasi Kinerja Tidak Mencapai Target">Evaluasi Kinerja Tidak Mencapai Target</option>
+                      <option value="Sikap / Etika Pelayanan Buruk">Sikap / Etika Pelayanan Buruk</option>
+                      <option value="Habis Masa Kontrak / Evaluasi">Habis Masa Kontrak / Evaluasi</option>
+                      <option value="Efisiensi / Penutupan Cabang">Efisiensi / Penutupan Cabang</option>
+                      <option value="Lainnya (Diberhentikan)">Lainnya (Diberhentikan)</option>
+                    </>
+                  )}
+                </select>
+              </FormField>
+              <FormField label="Tanggal Efektif Keluar" required>
                 <input type="date" style={inputStyle} required value={deactivateForm.resign_date} onChange={e => setDeactivateForm(p => ({ ...p, resign_date: e.target.value }))} />
+              </FormField>
+              <FormField label="Keterangan / Kronologi Detail">
+                <textarea
+                  style={{ ...inputStyle, minHeight: '80px', resize: 'vertical' }}
+                  placeholder={deactivateForm.status === 'Resign'
+                    ? 'Contoh: Mengajukan surat resign one-month notice karena diterima kerja di tempat lain...'
+                    : 'Contoh: Dikeluarkan karena pelanggaran SP3 / selisih uang setoran konter...'}
+                  value={deactivateForm.resign_notes}
+                  onChange={e => setDeactivateForm(p => ({ ...p, resign_notes: e.target.value }))}
+                />
               </FormField>
               <div style={{ display: 'flex', gap: '12px' }}>
                 <button type="button" onClick={() => setShowDeactivateModal(false)}
@@ -688,8 +741,8 @@ export default function EmployeeManagement() {
                   Batal
                 </button>
                 <button type="submit"
-                  style={{ flex: 2, padding: '12px', background: 'linear-gradient(135deg, #f59e0b, #d97706)', border: 'none', borderRadius: '10px', color: 'white', cursor: 'pointer', fontWeight: 700, fontFamily: 'inherit', fontSize: '14px' }}>
-                  Nonaktifkan
+                  style={{ flex: 2, padding: '12px', background: deactivateForm.status === 'Terminated' ? 'linear-gradient(135deg, #ef4444, #dc2626)' : 'linear-gradient(135deg, #f59e0b, #d97706)', border: 'none', borderRadius: '10px', color: 'white', cursor: 'pointer', fontWeight: 700, fontFamily: 'inherit', fontSize: '14px' }}>
+                  Simpan & Nonaktifkan
                 </button>
               </div>
             </form>

@@ -510,15 +510,19 @@ async function initDb() {
           allowance REAL DEFAULT 0,
           status TEXT DEFAULT 'Active',
           resign_date TEXT,
+          resign_reason TEXT,
+          resign_notes TEXT,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
       `);
       await query.run('CREATE UNIQUE INDEX IF NOT EXISTS idx_employees_nik_bidx ON employees(nik_bidx)').catch(() => {});
-      // height/weight/physical_condition for employees table
+      // height/weight/physical_condition & resign reason columns for employees table
       await query.run('ALTER TABLE employees ADD COLUMN height REAL').catch(() => {});
       await query.run('ALTER TABLE employees ADD COLUMN weight REAL').catch(() => {});
       await query.run('ALTER TABLE employees ADD COLUMN physical_condition TEXT').catch(() => {});
+      await query.run('ALTER TABLE employees ADD COLUMN resign_reason TEXT').catch(() => {});
+      await query.run('ALTER TABLE employees ADD COLUMN resign_notes TEXT').catch(() => {});
       await migrateEmployeeEncryption();
       await syncHiredManualCandidatesToEmployees();
 

@@ -22,8 +22,8 @@ exports.getAll = async (req, res) => {
     const params = [];
 
     if (search) {
-      sql += ' AND (e.name LIKE ? OR e.phone LIKE ? OR e.nik_bidx = ?)';
-      params.push(`%${search}%`, `%${search}%`, blindIndex(search));
+      sql += ' AND (e.name LIKE ? OR e.phone LIKE ? OR e.nik_bidx = ? OR b.name LIKE ? OR e.resign_reason LIKE ? OR e.resign_notes LIKE ?)';
+      params.push(`%${search}%`, `%${search}%`, blindIndex(search), `%${search}%`, `%${search}%`, `%${search}%`);
     }
     if (branch_id) {
       sql += ' AND e.branch_id = ?';
@@ -34,11 +34,15 @@ exports.getAll = async (req, res) => {
       params.push(employee_type);
     }
     if (status) {
-      sql += ' AND e.status = ?';
-      params.push(status);
+      if (status === 'nonactive') {
+        sql += " AND e.status IN ('Resign', 'Terminated')";
+      } else {
+        sql += ' AND e.status = ?';
+        params.push(status);
+      }
     }
 
-    sql += ' ORDER BY e.name ASC';
+    sql += status === 'nonactive' ? ' ORDER BY e.resign_date DESC, e.updated_at DESC, e.name ASC' : ' ORDER BY e.name ASC';
 
     const employees = await query.all(sql, params);
     employees.forEach(sanitizeEmployee);
@@ -112,15 +116,28 @@ exports.update = async (req, res) => {
 exports.deactivate = async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
-    const { status, resign_date } = req.body;
-    if (!['Resign', 'Terminated'].includes(status)) {
-      return res.status(400).json({ success: false, message: 'Status harus Resign atau Terminated.' });
+    const { status, resign_date, resign_reason, resign_notes } = req.body;
+    if (!['Resign', 'Terminated', 'Active'].includes(status)) {
+      return res.status(400).json({ success: false, message: 'Status harus Active, Resign, atau Terminated.' });
+    }
+    if (status === 'Active') {
+      await query.run(
+        'UPDATE employees SET status = ?, resign_date = NULL, resign_reason = NULL, resign_notes = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        ['Active', id]
+      );
+      return res.json({ success: true, message: 'Karyawan berhasil diaktifkan kembali.' });
     }
     await query.run(
-      'UPDATE employees SET status = ?, resign_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-      [status, resign_date || null, id]
+      'UPDATE employees SET status = ?, resign_date = ?, resign_reason = ?, resign_notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [
+        status,
+        resign_date || null,
+        resign_reason ? String(resign_reason).trim() : null,
+        resign_notes ? String(resign_notes).trim() : null,
+        id,
+      ]
     );
-    res.json({ success: true, message: 'Status karyawan berhasil diperbarui.' });
+    res.json({ success: true, message: 'Status dan alasan keluar karyawan berhasil disimpan.' });
   } catch (error) {
     console.error('API Error (deactivate staff):', error);
     res.status(500).json({ success: false, message: 'Server error.' });

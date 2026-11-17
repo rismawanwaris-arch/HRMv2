@@ -11,6 +11,7 @@ import TrainingTestPortal from './views/TrainingTestPortal';
 import BranchManagement from './views/BranchManagement';
 import StageManagement from './views/StageManagement';
 import EmployeeManagement from './views/EmployeeManagement';
+import ResignedEmployees from './views/ResignedEmployees';
 import AttendanceManagement from './views/AttendanceManagement';
 import PayrollManagement from './views/PayrollManagement';
 import LaporanKeuanganKonter from './views/LaporanKeuanganKonter';
@@ -227,6 +228,8 @@ function App() {
         ) : <Denied />;
       case 'employees':
         return canAccess.karyawan ? <EmployeeManagement /> : <Denied />;
+      case 'resigned-employees':
+        return canAccess.karyawan ? <ResignedEmployees /> : <Denied />;
       case 'employee-legacy':
         return canAccess.karyawan ? (
           <EmployeeData
@@ -365,6 +368,14 @@ function App() {
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px', color: 'var(--color-success)' }}><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><polyline points="16 11 18 13 22 9"></polyline></svg>
               Data Karyawan
+            </li>}
+
+            {canAccess.karyawan && <li
+              className={`sidebar-item ${view === 'resigned-employees' ? 'active' : ''}`}
+              onClick={() => { setView('resigned-employees'); setMobileMenuOpen(false); }}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px', color: '#f59e0b' }}><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><line x1="18" y1="8" x2="23" y2="13"></line><line x1="23" y1="8" x2="18" y2="13"></line></svg>
+              Karyawan Resign & Keluar
             </li>}
 
             {canAccess.cabang && <li
