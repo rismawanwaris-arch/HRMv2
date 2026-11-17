@@ -191,8 +191,12 @@ export default function EmployeeManagement() {
     try {
       const data = await employeeApi.importExcel(formData);
       if (data.success) {
-        setImportMessage({ type: 'success', text: data.message });
+        const errDetail = data.errors && data.errors.length > 0
+          ? ` (${data.errors.slice(0, 3).join('; ')}${data.errors.length > 3 ? '...' : ''})`
+          : '';
+        setImportMessage({ type: data.errors && data.errors.length > 0 ? 'error' : 'success', text: data.message + errDetail });
         fetchEmployees();
+        branchApi.getAll().then(r => { if (r.success) setBranches(r.data); });
       } else {
         setImportMessage({ type: 'error', text: data.message });
       }

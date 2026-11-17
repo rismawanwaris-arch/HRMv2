@@ -335,7 +335,10 @@ exports.importExcel = async (req, res) => {
         // 1. Upsert ke tabel candidates (Data Karyawan Rekrutmen)
         let candidateId = null;
         if (nik) {
-          const existingCand = await query.get('SELECT id FROM candidates WHERE nik_bidx = ?', [blindIndex(nik)]);
+          const bidx = blindIndex(nik);
+          const existingCand = bidx
+            ? await query.get('SELECT id FROM candidates WHERE nik_bidx = ? OR nik = ?', [bidx, nik])
+            : await query.get('SELECT id FROM candidates WHERE nik = ?', [nik]);
           if (existingCand) candidateId = existingCand.id;
         }
         if (!candidateId) {
@@ -376,7 +379,10 @@ exports.importExcel = async (req, res) => {
         // 2. Upsert ke tabel employees (Manajemen Karyawan, Absensi, Payroll & Mobile API)
         let existingStaff = null;
         if (nik) {
-          existingStaff = await query.get('SELECT id FROM employees WHERE nik_bidx = ?', [blindIndex(nik)]);
+          const bidx = blindIndex(nik);
+          existingStaff = bidx
+            ? await query.get('SELECT id FROM employees WHERE nik_bidx = ? OR nik = ?', [bidx, nik])
+            : await query.get('SELECT id FROM employees WHERE nik = ?', [nik]);
         }
         if (!existingStaff && candidateId) {
           existingStaff = await query.get('SELECT id FROM employees WHERE candidate_id = ?', [candidateId]);

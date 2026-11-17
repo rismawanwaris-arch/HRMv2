@@ -520,6 +520,7 @@ async function initDb() {
       await query.run('ALTER TABLE employees ADD COLUMN weight REAL').catch(() => {});
       await query.run('ALTER TABLE employees ADD COLUMN physical_condition TEXT').catch(() => {});
       await migrateEmployeeEncryption();
+      await syncHiredManualCandidatesToEmployees();
 
       // Daily Attendance (per karyawan per tanggal — sumber data utama)
       await query.run(`
@@ -966,6 +967,61 @@ async function migrateEmployeeEncryption() {
     }
   }
   if (migrated) console.log(`[db] Encrypted sensitive fields for ${migrated} existing employee row(s).`);
+}
+
+async function syncHiredManualCandidatesToEmployees() {
+  try {
+    // 1. Hapus duplikat baris manual entry tanpa NIK yang memiliki nama persis sama
+    await query.run(`
+      DELETE FROM candidates
+      WHERE is_manual_entry = 1 AND status = 'Hired' AND nik IS NULL
+        AND id NOT IN (
+          SELECT MIN(id) FROM candidates
+          WHERE is_manual_entry = 1 AND status = 'Hired' AND nik IS NULL
+          GROUP BY LOWER(TRIM(name))
+        )
+    `).catch(() => {});
+
+    // 2. Sinkronkan kandidat Hired manual entry yang belum masuk ke tabel employees
+    const unpromoted = await query.all(`
+      SELECT c.*, s7.contract_type, s7.salary_offered, s7.allowance, s7.start_date
+      FROM candidates c
+      LEFT JOIN stage7_offering s7 ON c.id = s7.candidate_id
+      WHERE c.status = 'Hired' AND c.is_manual_entry = 1
+        AND NOT EXISTS (SELECT 1 FROM employees e WHERE e.candidate_id = c.id)
+    `);
+    if (!unpromoted.length) return;
+
+    const { STAFF_ALL_FIELDS, buildInsert } = require('./utils/staffFields');
+    const fieldCrypto = require('./utils/fieldCrypto');
+    let synced = 0;
+
+    for (const cand of unpromoted) {
+      fieldCrypto.decryptRow(cand);
+      const body = {
+        ...cand,
+        candidate_id: cand.id,
+        contract_type: cand.contract_type || 'PKWT',
+        salary: cand.salary_offered || 0,
+        allowance: cand.allowance || 0,
+        hire_date: cand.start_date || cand.hire_date || null,
+        employee_type: 'Frontliner',
+        position: 'Frontliner',
+      };
+      const { columns, placeholders, values } = buildInsert(STAFF_ALL_FIELDS, body);
+      await query.run(
+        `INSERT INTO employees (${columns}, candidate_id, status, created_at, updated_at)
+         VALUES (${placeholders}, ?, 'Active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        [...values, cand.id]
+      ).catch(() => {});
+      synced++;
+    }
+    if (synced > 0) {
+      console.log(`[db] Synced ${synced} manual Hired candidate(s) into employees table.`);
+    }
+  } catch (err) {
+    console.error('[db] syncHiredManualCandidatesToEmployees error:', err.message);
+  }
 }
 
 async function seedQuestions() {
