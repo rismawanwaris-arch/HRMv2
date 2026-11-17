@@ -236,9 +236,33 @@ exports.importExcel = async (req, res) => {
 
         const str = (key) => (row[key] !== undefined && row[key] !== null ? row[key] : '').toString().trim();
 
+        const normalizeExcelDate = (rawVal) => {
+          if (rawVal === undefined || rawVal === null || rawVal === '') return '';
+          // Jika angka serial tanggal Excel (mis. hasil export Google Form / Google Sheets)
+          if (typeof rawVal === 'number' && rawVal > 10000 && rawVal < 80000) {
+            const utcDays = Math.floor(rawVal - 25569);
+            const d = new Date(utcDays * 86400 * 1000);
+            if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+          }
+          const s = rawVal.toString().trim();
+          if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+          // Format DD/MM/YYYY atau MM/DD/YYYY dari Google Form
+          const slashMatch = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+          if (slashMatch) {
+            let p1 = parseInt(slashMatch[1], 10);
+            let p2 = parseInt(slashMatch[2], 10);
+            const yr = slashMatch[3];
+            // Jika p1 > 12 pasti DD/MM/YYYY; default Google Form ID adalah DD/MM/YYYY
+            const day = p1 > 12 ? p1 : (p2 > 12 ? p2 : p1);
+            const mon = p1 > 12 ? p2 : (p2 > 12 ? p1 : p2);
+            return `${yr}-${String(mon).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+          }
+          return s;
+        };
+
         // Parsing Tempat & Tanggal Lahir (mendukung kolom terpisah maupun gabungan)
         let birth_place = str('Tempat Lahir');
-        let birth_date = str('Tanggal Lahir') || str('Date of Birth');
+        let birth_date = normalizeExcelDate(row['Tanggal Lahir'] || row['Date of Birth']);
         const ttl = str('Tempat & Tanggal Lahir');
         if (!birth_place && !birth_date && ttl) {
           const parts = ttl.split(',');
@@ -283,7 +307,7 @@ exports.importExcel = async (req, res) => {
           ? (rawEmpType.toLowerCase() === 'staff' ? 'Staff' : 'Frontliner')
           : (/^(admin|admin setoran|cs|hr|finance|spv|supervisor|manager)$/i.test(position) ? 'Staff' : 'Frontliner');
         const contract_type = str('Tipe Kontrak') || 'PKWT';
-        const hire_date = str('Tanggal Diterima') || str('Joining Date') || null;
+        const hire_date = normalizeExcelDate(row['Tanggal Diterima'] || row['Joining Date']) || null;
         const address_ktp = str('Alamat KTP') || str('Permanent Address');
         const address_domicile = str('Alamat Domisili') || address_ktp;
 
