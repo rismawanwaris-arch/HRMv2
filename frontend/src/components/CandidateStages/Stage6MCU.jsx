@@ -5,7 +5,7 @@ function Stage6MCU({ candidate, stageData, setStageData, handleStageSubmit, trai
     <form onSubmit={(e) => { e.preventDefault(); handleStageSubmit(6, stageData); }}>
       <div className="eval-title">
         <span>Tahap 6: Evaluasi & Tes Pasca Training</span>
-        <span className={`badge \${stageData.passed ? 'badge-hired' : 'badge-active'}`}>
+        <span className={`badge ${stageData.passed ? 'badge-hired' : 'badge-active'}`}>
           {stageData.passed ? 'Lolos' : 'Menunggu Ujian'}
         </span>
       </div>
@@ -89,7 +89,7 @@ function Stage6MCU({ candidate, stageData, setStageData, handleStageSubmit, trai
         />
       </div>
 
-      <div className={`checklist-item \${stageData.passed ? 'checked' : ''}`} style={{ border: '1px dashed var(--border-color)', marginBottom: '24px' }}
+      <div className={`checklist-item ${stageData.passed ? 'checked' : ''}`} style={{ border: '1px dashed var(--border-color)', marginBottom: '24px' }}
            onClick={() => setStageData(p => ({ ...p, passed: p.passed ? 0 : 1 }))}>
         <div className="checkbox-custom"></div>
         <div className="checklist-label">

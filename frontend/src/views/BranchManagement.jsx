@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { branchApi } from '../services/api';
 
 const iStyle = { background: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '10px 14px', color: 'var(--text-primary)', fontSize: '14px', width: '100%', boxSizing: 'border-box', display: 'block', outline: 'none', fontFamily: 'inherit', transition: 'border-color 0.2s' };
@@ -34,6 +35,7 @@ function BranchForm({ data, setData, onSubmit, isEdit, error, submitting, onCanc
           <select style={iStyle} value={data.location_type} onChange={e => setData(p => ({ ...p, location_type: e.target.value }))}>
             <option value="Konter">Konter (Outlet)</option>
             <option value="Gudang">Gudang (Pusat)</option>
+            <option value="Kantor/Pusat">Kantor / Pusat (Admin/CS)</option>
           </select>
         </Field>
       </div>
@@ -111,6 +113,8 @@ function BranchManagement({ setView }) {
   const [form, setForm] = useState(EMPTY_FORM);
   const [editForm, setEditForm] = useState({ ...EMPTY_FORM, id: null, status: 'Active' });
   const [error, setError] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [typeFilter, setTypeFilter] = useState('');
   const importRef = useRef(null);
   const [importing, setImporting] = useState(false);
   const [importMessage, setImportMessage] = useState(null);
@@ -233,7 +237,21 @@ function BranchManagement({ setView }) {
 
   const totalActive = branches.filter(b => b.status === 'Active').length;
   const totalKonter = branches.filter(b => b.location_type === 'Konter').length;
-  const totalGudang = branches.filter(b => b.location_type === 'Gudang').length;
+  const totalGudang = branches.filter(b => b.location_type === 'Gudang' || b.location_type === 'Kantor/Pusat').length;
+
+  const filteredBranches = branches.filter(b => {
+    if (typeFilter && b.location_type !== typeFilter) return false;
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      return (
+        (b.name || '').toLowerCase().includes(q) ||
+        (b.code || '').toLowerCase().includes(q) ||
+        (b.city || '').toLowerCase().includes(q) ||
+        (b.address || '').toLowerCase().includes(q)
+      );
+    }
+    return true;
+  });
 
   return (
     <div>
@@ -242,7 +260,7 @@ function BranchManagement({ setView }) {
           <h1 className="page-title">Manajemen Cabang Outlet</h1>
           <p className="page-subtitle">Kelola daftar cabang, konter, dan gudang perusahaan.</p>
         </div>
-        <div style={{ display: 'flex', gap: '10px' }}>
+        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
           <input type="file" accept=".xlsx,.xls" style={{ display: 'none' }} ref={importRef} onChange={handleImportExcel} />
           <button
             className="btn btn-secondary"
@@ -282,8 +300,8 @@ function BranchManagement({ setView }) {
 
       <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)', marginBottom: '24px' }}>
         {[
-          { label: 'Total Cabang', value: branches.length, color: 'var(--color-primary)', desc: 'Semua cabang' },
-          { label: 'Aktif', value: totalActive, color: '#10b981', desc: `Konter: ${totalKonter} · Gudang: ${totalGudang}` },
+          { label: 'Total Cabang', value: branches.length, color: '#818cf8', desc: 'Semua cabang' },
+          { label: 'Aktif', value: totalActive, color: '#10b981', desc: `Konter: ${totalKonter} · Kantor/Gudang: ${totalGudang}` },
           { label: 'Punya Petshop', value: branches.filter(b => b.has_petshop).length, color: '#f59e0b', desc: 'Komponen aktif' },
         ].map(s => (
           <div key={s.label} className="glass-panel stat-card" style={{ borderColor: `${s.color}40` }}>
@@ -294,16 +312,50 @@ function BranchManagement({ setView }) {
         ))}
       </div>
 
+      {/* Filter & Search Bar */}
+      <div className="glass-panel" style={{ padding: '16px 20px', marginBottom: '20px', display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
+          <input
+            style={{ ...iStyle, width: '260px', padding: '9px 13px', fontSize: '13px' }}
+            placeholder="Cari nama cabang, kode, atau kota..."
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+          />
+          <select
+            style={{ ...iStyle, width: '180px', padding: '9px 13px', fontSize: '13px' }}
+            value={typeFilter}
+            onChange={e => setTypeFilter(e.target.value)}
+          >
+            <option value="">Semua Tipe Lokasi</option>
+            <option value="Konter">Konter (Outlet)</option>
+            <option value="Gudang">Gudang (Pusat)</option>
+            <option value="Kantor/Pusat">Kantor / Pusat</option>
+          </select>
+          {(searchQuery || typeFilter) && (
+            <button
+              className="btn btn-secondary"
+              style={{ padding: '8px 14px', fontSize: '12px' }}
+              onClick={() => { setSearchQuery(''); setTypeFilter(''); }}
+            >
+              Reset Filter
+            </button>
+          )}
+        </div>
+        <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: 600 }}>
+          Menampilkan <strong style={{ color: 'var(--text-primary)' }}>{filteredBranches.length}</strong> cabang
+        </div>
+      </div>
+
       <div className="glass-panel">
         {loading ? (
           <div style={{ textAlign: 'center', padding: '48px', color: 'var(--text-muted)' }}>
             <div className="loading-spinner" style={{ margin: '0 auto 12px' }} />Memuat data cabang...
           </div>
-        ) : branches.length === 0 ? (
+        ) : filteredBranches.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '64px 24px', color: 'var(--text-muted)' }}>
             <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" style={{ margin: '0 auto 16px', display: 'block', opacity: 0.3 }}><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-            <p style={{ fontSize: '16px', marginBottom: '8px' }}>Belum ada cabang terdaftar</p>
-            <p style={{ fontSize: '13px' }}>Klik <strong>"Tambah Cabang"</strong> untuk menambahkan cabang pertama.</p>
+            <p style={{ fontSize: '16px', marginBottom: '8px' }}>Tidak ada cabang ditemukan</p>
+            <p style={{ fontSize: '13px' }}>Klik <strong>"Tambah Cabang"</strong> untuk menambahkan cabang baru.</p>
           </div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
@@ -322,7 +374,7 @@ function BranchManagement({ setView }) {
                 </tr>
               </thead>
               <tbody>
-                {branches.map(branch => (
+                {filteredBranches.map(branch => (
                   <tr key={branch.id}>
                     <td>
                       <span style={{ background: 'rgba(139,92,246,0.15)', color: 'var(--color-primary)', padding: '3px 10px', borderRadius: '6px', fontFamily: 'monospace', fontWeight: 700, fontSize: '13px', letterSpacing: '0.5px' }}>
@@ -331,7 +383,7 @@ function BranchManagement({ setView }) {
                     </td>
                     <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{branch.name}</td>
                     <td>
-                      <span style={{ background: branch.location_type === 'Gudang' ? 'rgba(139,92,246,0.15)' : 'rgba(59,130,246,0.15)', color: branch.location_type === 'Gudang' ? '#8b5cf6' : '#3b82f6', padding: '3px 10px', borderRadius: '20px', fontSize: '12px', fontWeight: 600 }}>
+                      <span style={{ background: branch.location_type === 'Gudang' || branch.location_type === 'Kantor/Pusat' ? 'rgba(139,92,246,0.15)' : 'rgba(59,130,246,0.15)', color: branch.location_type === 'Gudang' || branch.location_type === 'Kantor/Pusat' ? '#8b5cf6' : '#3b82f6', padding: '3px 10px', borderRadius: '20px', fontSize: '12px', fontWeight: 600 }}>
                         {branch.location_type || 'Konter'}
                       </span>
                     </td>
@@ -377,10 +429,10 @@ function BranchManagement({ setView }) {
       </div>
 
       {/* Add Modal */}
-      {showAddModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px', backdropFilter: 'blur(6px)', overflowY: 'auto' }}>
-          <div style={{ width: '100%', maxWidth: '520px', background: 'var(--bg-surface-opaque)', border: '1px solid var(--border-color)', borderRadius: '24px', boxShadow: '0 32px 64px rgba(0,0,0,0.25)', marginTop: 'auto', marginBottom: 'auto' }}>
-            <div style={{ padding: '28px 32px 20px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      {showAddModal && createPortal(
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px', backdropFilter: 'blur(6px)' }}>
+          <div style={{ width: '100%', maxWidth: '520px', maxHeight: '90vh', overflowY: 'auto', background: 'var(--bg-surface-opaque)', border: '1px solid var(--border-color)', borderRadius: '24px', boxShadow: '0 32px 64px rgba(0,0,0,0.35)' }}>
+            <div style={{ padding: '24px 32px 18px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div>
                 <h2 style={{ margin: 0, fontSize: '22px', fontWeight: 800, color: 'var(--text-primary)' }}>Tambah Cabang Baru</h2>
                 <p style={{ margin: '6px 0 0', fontSize: '13px', color: 'var(--text-secondary)' }}>Daftarkan cabang, konter, atau gudang</p>
@@ -393,14 +445,15 @@ function BranchManagement({ setView }) {
                 onCancel={() => { setShowAddModal(false); setError(''); }} />
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Edit Modal */}
-      {showEditModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px', backdropFilter: 'blur(6px)', overflowY: 'auto' }}>
-          <div style={{ width: '100%', maxWidth: '520px', background: 'var(--bg-surface-opaque)', border: '1px solid var(--border-color)', borderRadius: '24px', boxShadow: '0 32px 64px rgba(0,0,0,0.25)', marginTop: 'auto', marginBottom: 'auto' }}>
-            <div style={{ padding: '28px 32px 20px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      {showEditModal && createPortal(
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px', backdropFilter: 'blur(6px)' }}>
+          <div style={{ width: '100%', maxWidth: '520px', maxHeight: '90vh', overflowY: 'auto', background: 'var(--bg-surface-opaque)', border: '1px solid var(--border-color)', borderRadius: '24px', boxShadow: '0 32px 64px rgba(0,0,0,0.35)' }}>
+            <div style={{ padding: '24px 32px 18px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div>
                 <h2 style={{ margin: 0, fontSize: '22px', fontWeight: 800, color: 'var(--text-primary)' }}>Edit Cabang</h2>
                 <p style={{ margin: '6px 0 0', fontSize: '13px', color: 'var(--text-secondary)' }}>Ubah data cabang atau outlet</p>
@@ -413,7 +466,8 @@ function BranchManagement({ setView }) {
                 onCancel={() => { setShowEditModal(false); setError(''); }} />
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

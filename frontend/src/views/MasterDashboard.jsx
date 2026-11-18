@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { dashboardApi, settingsApi, branchApi, staffApi } from '../services/api';
 
 const fmt = (n) => new Intl.NumberFormat('id-ID').format(n || 0);
@@ -527,8 +528,14 @@ export default function MasterDashboard({ setView }) {
               ))}
             </div>
 
-            <div style={{ background: 'var(--bg-secondary)', padding: '16px', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
-              <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '8px' }}>STATUS NON-AKTIF</div>
+            <div
+              onClick={() => setView('resigned-employees')}
+              style={{ background: 'var(--bg-secondary)', padding: '16px', borderRadius: '10px', border: '1px solid var(--border-color)', cursor: 'pointer' }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)' }}>STATUS NON-AKTIF</span>
+                <span style={{ fontSize: '11px', fontWeight: 600, color: '#f59e0b' }}>Lihat Detail ➔</span>
+              </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
                 <span>Resign:</span>
                 <strong style={{ color: '#f59e0b' }}>{employees.resign} orang</strong>
@@ -846,7 +853,7 @@ export default function MasterDashboard({ setView }) {
       )}
 
       {/* QUICK MODAL: TAMBAH CABANG */}
-      {showBranchModal && (
+      {showBranchModal && createPortal(
         <div style={{
           position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -955,11 +962,12 @@ export default function MasterDashboard({ setView }) {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* QUICK MODAL: TAMBAH ATURAN DENDA */}
-      {showRuleModal && (
+      {showRuleModal && createPortal(
         <div style={{
           position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -1037,7 +1045,8 @@ export default function MasterDashboard({ setView }) {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

@@ -5,7 +5,7 @@ function Stage5User({ candidate, stageData, setStageData, handleStageSubmit }) {
     <form onSubmit={(e) => { e.preventDefault(); handleStageSubmit(5, stageData); }}>
       <div className="eval-title">
         <span>Tahap 5: Wawancara User (Kepala Toko / Area Supervisor)</span>
-        <span className={`badge \${stageData.passed ? 'badge-hired' : 'badge-active'}`}>
+        <span className={`badge ${stageData.passed ? 'badge-hired' : 'badge-active'}`}>
           {stageData.decision === 'Recommended' ? 'Direkomendasikan' : stageData.decision === 'Not Recommended' ? 'Ditolak' : 'Menunggu Umpan Balik'}
         </span>
       </div>
@@ -37,7 +37,7 @@ function Stage5User({ candidate, stageData, setStageData, handleStageSubmit }) {
         />
       </div>
 
-      <div className={`checklist-item \${stageData.passed ? 'checked' : ''}`} style={{ border: '1px dashed var(--border-color)', marginBottom: '24px' }}
+      <div className={`checklist-item ${stageData.passed ? 'checked' : ''}`} style={{ border: '1px dashed var(--border-color)', marginBottom: '24px' }}
            onClick={() => setStageData(p => ({ ...p, passed: p.passed ? 0 : 1 }))}>
         <div className="checkbox-custom"></div>
         <div className="checklist-label">

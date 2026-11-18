@@ -1,14 +1,15 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { disciplineApi, staffApi } from '../services/api';
 
 const TYPE_OPTIONS = ['Teguran Lisan', 'Teguran Tertulis', 'SP-1', 'SP-2', 'SP-3'];
 
 const TYPE_COLOR = {
-  'Teguran Lisan':    { bg: 'rgba(251,191,36,0.15)',  color: '#d97706', border: 'rgba(251,191,36,0.4)' },
-  'Teguran Tertulis': { bg: 'rgba(249,115,22,0.15)',  color: '#ea580c', border: 'rgba(249,115,22,0.4)' },
-  'SP-1':             { bg: 'rgba(239,68,68,0.12)',   color: '#dc2626', border: 'rgba(239,68,68,0.4)' },
-  'SP-2':             { bg: 'rgba(220,38,38,0.18)',   color: '#b91c1c', border: 'rgba(220,38,38,0.5)' },
-  'SP-3':             { bg: 'rgba(127,29,29,0.2)',    color: '#7f1d1d', border: 'rgba(127,29,29,0.5)' },
+  'Teguran Lisan':    { bg: 'rgba(251,191,36,0.15)',  color: '#f59e0b', border: 'rgba(251,191,36,0.4)' },
+  'Teguran Tertulis': { bg: 'rgba(249,115,22,0.15)',  color: '#fb923c', border: 'rgba(249,115,22,0.4)' },
+  'SP-1':             { bg: 'rgba(239,68,68,0.12)',   color: '#ef4444', border: 'rgba(239,68,68,0.4)' },
+  'SP-2':             { bg: 'rgba(220,38,38,0.18)',   color: '#f87171', border: 'rgba(220,38,38,0.5)' },
+  'SP-3':             { bg: 'rgba(239,68,68,0.22)',   color: '#fca5a5', border: 'rgba(239,68,68,0.6)' },
 };
 
 const STATUS_COLOR = {
@@ -124,8 +125,8 @@ export default function Discipline() {
   const totalResolved = records.filter(r => r.status === 'Resolved').length;
   const totalSP3      = records.filter(r => r.type === 'SP-3' && r.status === 'Aktif').length;
 
-  const modalBack = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' };
-  const modalBox  = { background: 'var(--bg-surface)', borderRadius: '16px', padding: '28px', width: '100%', maxWidth: '520px', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' };
+  const modalBack = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px', backdropFilter: 'blur(6px)' };
+  const modalBox  = { background: 'var(--bg-surface-opaque)', border: '1px solid var(--border-color)', borderRadius: '20px', padding: '28px', width: '100%', maxWidth: '520px', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 24px 60px rgba(0,0,0,0.4)' };
 
   return (
     <div>
@@ -152,7 +153,7 @@ export default function Discipline() {
         {[
           { label: 'Sanksi Aktif',  value: totalAktif,    color: '#ef4444' },
           { label: 'Diselesaikan',  value: totalResolved,  color: '#10b981' },
-          { label: 'SP-3 Aktif',    value: totalSP3,       color: '#7f1d1d' },
+          { label: 'SP-3 Aktif',    value: totalSP3,       color: '#f87171' },
         ].map(s => (
           <div key={s.label} className="glass-panel stat-card">
             <div className="stat-card-title">{s.label}</div>
@@ -251,7 +252,7 @@ export default function Discipline() {
       </div>
 
       {/* Add record modal */}
-      {showForm && (
+      {showForm && createPortal(
         <div style={modalBack} onClick={e => { if (e.target === e.currentTarget) setShowForm(false); }}>
           <div style={modalBox}>
             <h3 style={{ margin: '0 0 20px', fontSize: '18px', fontWeight: 700 }}>Catat Sanksi / Pelanggaran</h3>
@@ -292,11 +293,12 @@ export default function Discipline() {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Resolve modal */}
-      {resolveRec && (
+      {resolveRec && createPortal(
         <div style={modalBack} onClick={e => { if (e.target === e.currentTarget) setResolveRec(null); }}>
           <div style={modalBox}>
             <h3 style={{ margin: '0 0 8px', fontSize: '18px', fontWeight: 700 }}>Resolve Sanksi</h3>
@@ -317,7 +319,8 @@ export default function Discipline() {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

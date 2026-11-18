@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { payrollApi, branchApi } from '../services/api';
 
 const fmt = (n) => n ? new Intl.NumberFormat('id-ID').format(Math.round(n)) : '0';
@@ -52,9 +53,9 @@ function SlipModal({ slip, onClose }) {
   const totalBonus = (slip.bonus_penjualan || 0) + (slip.bonus_tartun || 0) + (slip.bonus_lain || 0);
   const totalPotongan = (slip.deduction_kasbon || 0) + (slip.deduction_absent || 0) + (slip.deduction_late || 0) + (slip.deduction_fake_money || 0);
 
-  return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, backdropFilter: 'blur(6px)', padding: '24px', overflowY: 'auto' }}>
-      <div style={{ width: '100%', maxWidth: '520px', background: 'var(--bg-surface-opaque)', border: '1px solid var(--border-color)', borderRadius: '20px', boxShadow: '0 32px 64px rgba(0,0,0,0.4)' }}>
+  return createPortal(
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, backdropFilter: 'blur(6px)', padding: '24px' }}>
+      <div style={{ width: '100%', maxWidth: '520px', maxHeight: '90vh', overflowY: 'auto', background: 'var(--bg-surface-opaque)', border: '1px solid var(--border-color)', borderRadius: '20px', boxShadow: '0 32px 64px rgba(0,0,0,0.4)' }}>
         <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 700, color: 'var(--text-primary)' }}>Slip Gaji</h3>
           <div style={{ display: 'flex', gap: '10px' }}>
@@ -101,7 +102,8 @@ function SlipModal({ slip, onClose }) {
           {slip.notes && <p style={{ marginTop: '10px', fontSize: '11px', color: 'var(--text-muted)', fontStyle: 'italic' }}>Catatan: {slip.notes}</p>}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -135,7 +137,7 @@ function BonusModal({ entry, onSave, onClose }) {
 
   const labelS = { display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' };
 
-  return (
+  return createPortal(
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, backdropFilter: 'blur(6px)', padding: '20px' }}>
       <div style={{ width: '100%', maxWidth: '420px', background: 'var(--bg-surface-opaque)', border: '1px solid var(--border-color)', borderRadius: '20px', boxShadow: '0 24px 48px rgba(0,0,0,0.4)' }}>
         <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -175,7 +177,8 @@ function BonusModal({ entry, onSave, onClose }) {
           <button onClick={() => onSave(form)} style={{ flex: 2, padding: '12px', background: 'linear-gradient(135deg, #7c3aed, #6d28d9)', border: 'none', borderRadius: '10px', color: 'white', cursor: 'pointer', fontWeight: 700, fontFamily: 'inherit', fontSize: '14px' }}>Simpan</button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -184,6 +187,7 @@ export default function PayrollManagement() {
   const [period, setPeriod] = useState(getCurrentPeriod);
   const [employeeType, setEmployeeType] = useState('');
   const [branchId, setBranchId] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const [branches, setBranches] = useState([]);
   const [entries, setEntries] = useState([]);
   const [periodInfo, setPeriodInfo] = useState(null);
@@ -242,10 +246,16 @@ export default function PayrollManagement() {
     } else alert(res.message);
   };
 
-  const totalGross = entries.reduce((s, e) => s + (e.salary || 0) + (e.allowance || 0), 0);
-  const totalBonus = entries.reduce((s, e) => s + (e.bonus_penjualan || 0) + (e.bonus_tartun || 0) + (e.bonus_lain || 0), 0);
-  const totalPot = entries.reduce((s, e) => s + (e.deduction_kasbon || 0) + (e.deduction_absent || 0) + (e.deduction_late || 0) + (e.deduction_fake_money || 0), 0);
-  const totalTHP = entries.reduce((s, e) => s + (e.take_home_pay || 0), 0);
+  const filteredEntries = entries.filter(e => {
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.toLowerCase();
+    return (e.employee_name || '').toLowerCase().includes(q) || (e.branch_name || '').toLowerCase().includes(q) || (e.position || '').toLowerCase().includes(q);
+  });
+
+  const totalGross = filteredEntries.reduce((s, e) => s + (e.salary || 0) + (e.allowance || 0), 0);
+  const totalBonus = filteredEntries.reduce((s, e) => s + (e.bonus_penjualan || 0) + (e.bonus_tartun || 0) + (e.bonus_lain || 0), 0);
+  const totalPot = filteredEntries.reduce((s, e) => s + (e.deduction_kasbon || 0) + (e.deduction_absent || 0) + (e.deduction_late || 0) + (e.deduction_fake_money || 0), 0);
+  const totalTHP = filteredEntries.reduce((s, e) => s + (e.take_home_pay || 0), 0);
 
   const statusBadge = (status) => {
     const m = { Draft: ['rgba(107,114,128,0.15)', '#9ca3af'], Submitted: ['rgba(245,158,11,0.15)', '#f59e0b'], Approved: ['rgba(16,185,129,0.15)', '#10b981'], Rejected: ['rgba(239,68,68,0.15)', '#ef4444'] };
@@ -294,6 +304,16 @@ export default function PayrollManagement() {
             {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
         </div>
+        <div>
+          <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', marginBottom: '4px' }}>Cari Karyawan</label>
+          <input
+            type="text"
+            placeholder="Ketik nama atau cabang..."
+            style={{ ...inputS, textAlign: 'left', width: '220px', padding: '9px 13px' }}
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+          />
+        </div>
       </div>
 
       {/* Summary Stats */}
@@ -307,7 +327,7 @@ export default function PayrollManagement() {
           <div key={s.label} className="glass-panel stat-card" style={{ borderColor: `${s.color}40` }}>
             <div className="stat-card-title">{s.label}</div>
             <div className="stat-card-value" style={{ color: s.color, fontSize: '14px' }}>{s.value}</div>
-            <div className="stat-card-desc">{entries.length} karyawan</div>
+            <div className="stat-card-desc">{filteredEntries.length} karyawan</div>
           </div>
         ))}
       </div>
@@ -328,9 +348,9 @@ export default function PayrollManagement() {
             <div style={{ textAlign: 'center', padding: '60px', color: 'var(--text-muted)' }}>
               <div className="loading-spinner" style={{ margin: '0 auto 12px' }} />Memuat data payroll...
             </div>
-          ) : entries.length === 0 ? (
+          ) : filteredEntries.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '60px', color: 'var(--text-muted)' }}>
-              <p style={{ fontSize: '16px', marginBottom: '8px' }}>Belum ada data payroll untuk periode ini</p>
+              <p style={{ fontSize: '16px', marginBottom: '8px' }}>Belum ada data payroll untuk filter/periode ini</p>
               <p style={{ fontSize: '13px' }}>Klik <strong>"⚡ Generate Payroll"</strong> untuk membuat entri dari data karyawan aktif.</p>
             </div>
           ) : (
@@ -348,7 +368,7 @@ export default function PayrollManagement() {
                   </tr>
                 </thead>
                 <tbody>
-                  {entries.map(e => {
+                  {filteredEntries.map(e => {
                     const bonus = (e.bonus_penjualan || 0) + (e.bonus_tartun || 0) + (e.bonus_lain || 0);
                     const pot = (e.deduction_kasbon || 0) + (e.deduction_absent || 0) + (e.deduction_late || 0) + (e.deduction_fake_money || 0);
                     return (

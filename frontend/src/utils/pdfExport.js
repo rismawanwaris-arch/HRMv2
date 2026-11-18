@@ -43,7 +43,7 @@ export const exportEmployeeToPDF = async (emp) => {
     theme: 'grid',
     head: [[cell('FORMULIR DATA KARYAWAN', 6, { halign: 'center', fontSize: 14, fillColor: [253, 203, 158], textColor: 0, fontStyle: 'bold' })]],
     body: [
-      [cell('1. ISI DENGAN BENAR, KETIK DENGAN LENGKAP DAN JELAS.', 4), cell(`Tanggal : \${new Date().toLocaleDateString('id-ID')}`, 2)],
+      [cell('1. ISI DENGAN BENAR, KETIK DENGAN LENGKAP DAN JELAS.', 4), cell(`Tanggal : ${new Date().toLocaleDateString('id-ID')}`, 2)],
       [cell('2. JANGAN MENAMBAH ATAU MERUBAH BENTUK DAN ISI FORMULIR INI.', 6)]
     ],
     styles: { fontSize: 9, textColor: 0, lineColor: 0, lineWidth: 0.2 },
@@ -60,10 +60,10 @@ export const exportEmployeeToPDF = async (emp) => {
       [cell('1. Nama Lengkap :', 1), cell(emp.name || '-', 5)],
       [
         cell('2. Jenis Kelamin :', 1), cell(emp.gender || '-', 1),
-        cell('3. Tinggi Badan :', 1), cell(emp.height ? `\${emp.height} cm` : '-', 1),
-        cell('4. Berat Badan :', 1), cell(emp.weight ? `\${emp.weight} kg` : '-', 1)
+        cell('3. Tinggi Badan :', 1), cell(emp.height ? `${emp.height} cm` : '-', 1),
+        cell('4. Berat Badan :', 1), cell(emp.weight ? `${emp.weight} kg` : '-', 1)
       ],
-      [cell('5. Tempat & Tgl. Lahir :', 1), cell(`\${emp.birth_place || '-'}, \${emp.birth_date ? new Date(emp.birth_date).toLocaleDateString('id-ID') : '-'}`, 5)],
+      [cell('5. Tempat & Tgl. Lahir :', 1), cell(`${emp.birth_place || '-'}, ${emp.birth_date ? new Date(emp.birth_date).toLocaleDateString('id-ID') : '-'}`, 5)],
       [cell('6. Alamat Domisili :', 1), cell(emp.address_domicile || '-', 5)],
       [cell('7. Alamat KTP :', 1), cell(emp.address_ktp || '-', 5)],
       [cell('8. No. Telephone :', 1), cell(emp.phone || '-', 2), cell('No. Handphone :', 1), cell(emp.phone || '-', 2)],
@@ -148,12 +148,12 @@ export const exportEmployeeToPDF = async (emp) => {
     body: [
       [cell('Cabang Penempatan :', 1), cell(emp.branch_name || '-', 2), cell('Tipe Kontrak :', 1), cell(emp.contract_type || '-', 2)],
       [cell('Tanggal Diterima :', 1), cell(emp.start_date || emp.hire_date ? new Date(emp.start_date || emp.hire_date).toLocaleDateString('id-ID') : '-', 5)],
-      [cell('Gaji Pokok :', 1), cell(emp.salary_offered ? `Rp \${Number(emp.salary_offered).toLocaleString('id-ID')}` : '-', 2), cell('Tunjangan :', 1), cell(emp.allowance ? `Rp \${Number(emp.allowance).toLocaleString('id-ID')}` : '-', 2)],
+      [cell('Gaji Pokok :', 1), cell((emp.salary || emp.salary_offered) ? `Rp ${Number(emp.salary || emp.salary_offered).toLocaleString('id-ID')}` : '-', 2), cell('Tunjangan :', 1), cell(emp.allowance ? `Rp ${Number(emp.allowance).toLocaleString('id-ID')}` : '-', 2)],
     ],
     styles: { fontSize: 9, textColor: 0, lineColor: 0, lineWidth: 0.2 },
     headStyles: { lineWidth: 0.2, lineColor: 0 },
     columnStyles: cWidths
   });
 
-  doc.save(`Data_Karyawan_\${emp.name.replace(/\\s+/g, '_')}.pdf`);
+  doc.save(`Data_Karyawan_${(emp.name || 'Karyawan').replace(/\s+/g, '_')}.pdf`);
 };

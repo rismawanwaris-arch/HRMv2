@@ -5,8 +5,8 @@ function Stage4HRD({ candidate, stageData, setStageData, handleStageSubmit, calc
     <form onSubmit={(e) => { e.preventDefault(); handleStageSubmit(4, stageData); }}>
       <div className="eval-title">
         <span>Tahap 4: Wawancara Terstruktur HRD (BEI)</span>
-        <span className={`badge \${stageData.passed ? 'badge-hired' : 'badge-active'}`}>
-          {stageData.passed ? `Lolos (Rata-rata Terbobot: \${stageData.total_weighted_score})` : 'Menunggu Evaluasi'}
+        <span className={`badge ${stageData.passed ? 'badge-hired' : 'badge-active'}`}>
+          {stageData.passed ? `Lolos (Rata-rata Terbobot: ${stageData.total_weighted_score})` : 'Menunggu Evaluasi'}
         </span>
       </div>
 
@@ -80,7 +80,7 @@ function Stage4HRD({ candidate, stageData, setStageData, handleStageSubmit, calc
         />
       </div>
 
-      <div className={`checklist-item \${stageData.passed ? 'checked' : ''}`} style={{ border: '1px dashed var(--border-color)', marginBottom: '24px' }}
+      <div className={`checklist-item ${stageData.passed ? 'checked' : ''}`} style={{ border: '1px dashed var(--border-color)', marginBottom: '24px' }}
            onClick={() => setStageData(p => ({ ...p, passed: p.passed ? 0 : 1 }))}>
         <div className="checkbox-custom"></div>
         <div className="checklist-label">

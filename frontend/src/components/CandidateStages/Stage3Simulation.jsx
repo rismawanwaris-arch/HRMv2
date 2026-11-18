@@ -5,7 +5,7 @@ function Stage3Simulation({ candidate, stageData, setStageData, handleStageSubmi
     <form onSubmit={(e) => { e.preventDefault(); handleStageSubmit(3, stageData); }}>
       <div className="eval-title">
         <span>Tahap 3: Tes Simulasi & Role Play</span>
-        <span className={`badge \${stageData.passed ? 'badge-hired' : 'badge-active'}`}>
+        <span className={`badge ${stageData.passed ? 'badge-hired' : 'badge-active'}`}>
           {stageData.passed ? 'Lolos' : 'Menunggu Evaluasi'}
         </span>
       </div>
@@ -82,7 +82,7 @@ function Stage3Simulation({ candidate, stageData, setStageData, handleStageSubmi
         />
       </div>
 
-      <div className={`checklist-item \${stageData.passed ? 'checked' : ''}`} style={{ border: '1px dashed var(--border-color)', marginBottom: '24px' }}
+      <div className={`checklist-item ${stageData.passed ? 'checked' : ''}`} style={{ border: '1px dashed var(--border-color)', marginBottom: '24px' }}
            onClick={() => setStageData(p => ({ ...p, passed: p.passed ? 0 : 1 }))}>
         <div className="checkbox-custom"></div>
         <div className="checklist-label">

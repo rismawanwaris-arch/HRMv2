@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { attendanceApi, branchApi } from '../services/api';
 
 const fmt = (n) => n != null ? new Intl.NumberFormat('id-ID').format(n) : '0';
@@ -56,6 +57,7 @@ function periodOptions() {
 function InputHarian({ branches }) {
   const [date, setDate] = useState(todayStr);
   const [branchId, setBranchId] = useState('');
+  const [search, setSearch] = useState('');
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [edits, setEdits] = useState({});
@@ -109,9 +111,15 @@ function InputHarian({ branches }) {
     setSaving(p => ({ ...p, [emp.id]: false }));
   };
 
+  const filteredRows = rows.filter(r => {
+    if (!search.trim()) return true;
+    const q = search.toLowerCase();
+    return (r.name || '').toLowerCase().includes(q) || (r.branch_name || '').toLowerCase().includes(q) || (r.position || '').toLowerCase().includes(q);
+  });
+
   // Split: belum diisi (no record) vs sudah diisi (has record)
-  const belumRows = rows.filter(r => !r.record_id && !saved[r.id]);
-  const sudahRows = rows.filter(r => r.record_id || saved[r.id]);
+  const belumRows = filteredRows.filter(r => !r.record_id && !saved[r.id]);
+  const sudahRows = filteredRows.filter(r => r.record_id || saved[r.id]);
 
   const hadir = sudahRows.filter(r => (saved[r.id] || r.status) === 'Hadir').length;
   const telat = sudahRows.filter(r => (saved[r.id] || r.status) === 'Telat').length;
@@ -230,6 +238,16 @@ function InputHarian({ branches }) {
             {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
         </div>
+        <div>
+          <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', marginBottom: '4px' }}>Cari Karyawan</label>
+          <input
+            type="text"
+            placeholder="Ketik nama atau cabang..."
+            style={{ ...inputS, width: '210px', padding: '9px 12px' }}
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+        </div>
         <div style={{ display: 'flex', gap: '14px', flexWrap: 'wrap', paddingBottom: '2px' }}>
           <span style={{ fontSize: '13px', color: '#f59e0b', fontWeight: 700 }}>{belumRows.length} belum diisi</span>
           <span style={{ fontSize: '13px', color: '#10b981', fontWeight: 600 }}>{hadir} Hadir</span>
@@ -336,14 +354,14 @@ function DetailModal({ emp, period, onClose }) {
     sakit: details.filter(d => d.status === 'Sakit').length,
   };
 
-  return (
+  return createPortal(
     <div style={{
       position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 1000,
       display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px',
       backdropFilter: 'blur(4px)',
     }} onClick={onClose}>
       <div style={{
-        background: 'var(--bg-card)', borderRadius: '16px',
+        background: 'var(--bg-surface-opaque)', borderRadius: '16px',
         width: '100%', maxWidth: '600px', maxHeight: '82vh',
         display: 'flex', flexDirection: 'column',
         boxShadow: '0 24px 80px rgba(0,0,0,0.5)', border: '1px solid var(--border-color)',
@@ -431,7 +449,8 @@ function DetailModal({ emp, period, onClose }) {
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 

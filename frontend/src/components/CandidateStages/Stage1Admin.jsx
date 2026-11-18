@@ -10,7 +10,7 @@ function Stage1Admin({
     <form onSubmit={(e) => { e.preventDefault(); handleStageSubmit(1, stageData); }}>
       <div className="eval-title">
         <span>Tahap 1: Seleksi Administrasi</span>
-        <span className={`badge \${stageData.passed ? 'badge-hired' : 'badge-active'}`}>
+        <span className={`badge ${stageData.passed ? 'badge-hired' : 'badge-active'}`}>
           {stageData.passed ? 'Lolos' : 'Menunggu Evaluasi'}
         </span>
       </div>
@@ -37,7 +37,7 @@ function Stage1Admin({
                 key={slot.key} 
                 style={{ 
                   background: uploadedDoc ? 'rgba(16, 185, 129, 0.05)' : 'rgba(255, 255, 255, 0.02)', 
-                  border: `1px solid \${uploadedDoc ? 'rgba(16, 185, 129, 0.3)' : 'var(--border-color)'}`,
+                  border: `1px solid ${uploadedDoc ? 'rgba(16, 185, 129, 0.3)' : 'var(--border-color)'}`,
                   borderRadius: '12px',
                   padding: '12px 14px',
                   display: 'flex',
@@ -129,7 +129,7 @@ function Stage1Admin({
 
       <div className="checklist-container">
         <div 
-          className={`checklist-item \${stageData.berkas_lengkap ? 'checked' : ''}`}
+          className={`checklist-item ${stageData.berkas_lengkap ? 'checked' : ''}`}
           onClick={() => setStageData(p => ({ ...p, berkas_lengkap: p.berkas_lengkap ? 0 : 1 }))}
         >
           <div className="checkbox-custom"></div>
@@ -140,7 +140,7 @@ function Stage1Admin({
         </div>
 
         <div 
-          className={`checklist-item \${stageData.usia_sesuai ? 'checked' : ''}`}
+          className={`checklist-item ${stageData.usia_sesuai ? 'checked' : ''}`}
           onClick={() => setStageData(p => ({ ...p, usia_sesuai: p.usia_sesuai ? 0 : 1 }))}
         >
           <div className="checkbox-custom"></div>
@@ -151,7 +151,7 @@ function Stage1Admin({
         </div>
 
         <div 
-          className={`checklist-item \${stageData.pendidikan_sesuai ? 'checked' : ''}`}
+          className={`checklist-item ${stageData.pendidikan_sesuai ? 'checked' : ''}`}
           onClick={() => setStageData(p => ({ ...p, pendidikan_sesuai: p.pendidikan_sesuai ? 0 : 1 }))}
         >
           <div className="checkbox-custom"></div>
@@ -162,7 +162,7 @@ function Stage1Admin({
         </div>
 
         <div 
-          className={`checklist-item \${stageData.skck_bersih ? 'checked' : ''}`}
+          className={`checklist-item ${stageData.skck_bersih ? 'checked' : ''}`}
           onClick={() => setStageData(p => ({ ...p, skck_bersih: p.skck_bersih ? 0 : 1 }))}
         >
           <div className="checkbox-custom"></div>
@@ -173,7 +173,7 @@ function Stage1Admin({
         </div>
 
         <div 
-          className={`checklist-item \${stageData.domisili_sesuai ? 'checked' : ''}`}
+          className={`checklist-item ${stageData.domisili_sesuai ? 'checked' : ''}`}
           onClick={() => setStageData(p => ({ ...p, domisili_sesuai: p.domisili_sesuai ? 0 : 1 }))}
         >
           <div className="checkbox-custom"></div>
@@ -194,7 +194,7 @@ function Stage1Admin({
         />
       </div>
 
-      <div className={`checklist-item \${stageData.passed ? 'checked' : ''}`} style={{ border: '1px dashed var(--border-color)', marginBottom: '24px' }}
+      <div className={`checklist-item ${stageData.passed ? 'checked' : ''}`} style={{ border: '1px dashed var(--border-color)', marginBottom: '24px' }}
            onClick={() => setStageData(p => ({ ...p, passed: p.passed ? 0 : 1 }))}>
         <div className="checkbox-custom"></div>
         <div className="checklist-label">

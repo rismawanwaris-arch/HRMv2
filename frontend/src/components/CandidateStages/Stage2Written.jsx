@@ -5,8 +5,8 @@ function Stage2Written({ candidate, stageData, setStageData, handleStageSubmit, 
     <form onSubmit={(e) => { e.preventDefault(); handleStageSubmit(2, stageData); }}>
       <div className="eval-title">
         <span>Tahap 2: Tes Tertulis (Online / Manual)</span>
-        <span className={`badge \${stageData.passed ? 'badge-hired' : 'badge-active'}`}>
-          {stageData.passed ? `Lolos (Skor: \${stageData.total_score})` : 'Menunggu Hasil'}
+        <span className={`badge ${stageData.passed ? 'badge-hired' : 'badge-active'}`}>
+          {stageData.passed ? `Lolos (Skor: ${stageData.total_score})` : 'Menunggu Hasil'}
         </span>
       </div>
 
@@ -27,7 +27,7 @@ function Stage2Written({ candidate, stageData, setStageData, handleStageSubmit, 
               <h4 style={{ color: 'white' }}>Ujian Selesai Dikerjakan Kandidat</h4>
               <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>Waktu Selesai: {new Date(stageData.test_completed_at).toLocaleString('id-ID')}</p>
             </div>
-            <div className={`score-badge-large \${stageData.passed ? 'passed' : 'failed'}`}>
+            <div className={`score-badge-large ${stageData.passed ? 'passed' : 'failed'}`}>
               {stageData.total_score}
             </div>
           </div>
@@ -115,7 +115,7 @@ function Stage2Written({ candidate, stageData, setStageData, handleStageSubmit, 
                           <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Tipe: {t.type}</div>
                         </td>
                         <td style={{ fontWeight: '600', color: 'white' }}>
-                          {t.type === 'likert' ? `Poin Rating: \${t.answer} / 5` : `Pilihan: Opsi \${t.answer}`}
+                          {t.type === 'likert' ? `Poin Rating: ${t.answer} / 5` : `Pilihan: Opsi ${t.answer}`}
                         </td>
                       </tr>
                     ));
@@ -194,7 +194,7 @@ function Stage2Written({ candidate, stageData, setStageData, handleStageSubmit, 
             </div>
           </div>
 
-          <div className={`checklist-item \${stageData.passed ? 'checked' : ''}`} style={{ border: '1px dashed var(--border-color)', marginTop: '24px', marginBottom: '24px' }}
+          <div className={`checklist-item ${stageData.passed ? 'checked' : ''}`} style={{ border: '1px dashed var(--border-color)', marginTop: '24px', marginBottom: '24px' }}
                onClick={() => setStageData(p => ({ ...p, passed: p.passed ? 0 : 1 }))}>
             <div className="checkbox-custom"></div>
             <div className="checklist-label">

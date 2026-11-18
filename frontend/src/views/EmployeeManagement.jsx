@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { staffApi, branchApi, employeeApi } from '../services/api';
+import EmployeeCardModal from '../components/Employee/EmployeeCardModal';
 
 const fmt = (n) => n ? new Intl.NumberFormat('id-ID').format(n) : '0';
 
@@ -75,6 +76,7 @@ export default function EmployeeManagement() {
   const [showPromoteModal, setShowPromoteModal] = useState(false);
   const [hiredCandidates, setHiredCandidates] = useState([]);
   const [promoteForm, setPromoteForm] = useState({ candidateId: null, employee_type: 'Frontliner', position: '' });
+  const [selectedCardEmp, setSelectedCardEmp] = useState(null);
 
   const importRef = useRef(null);
   const [importing, setImporting] = useState(false);
@@ -111,8 +113,19 @@ export default function EmployeeManagement() {
     setEditingId(emp.id);
     const res = await staffApi.getById(emp.id);
     if (res.success) {
-      const d = res.data;
-      setForm({ ...EMPTY_FORM, ...d, salary: d.salary || '', allowance: d.allowance || '', height: d.height || '', weight: d.weight || '', dependents: d.dependents || 0 });
+      const d = res.data || {};
+      const cleaned = { ...EMPTY_FORM };
+      Object.keys(EMPTY_FORM).forEach((k) => {
+        if (d[k] !== null && d[k] !== undefined) {
+          cleaned[k] = d[k];
+        }
+      });
+      cleaned.salary = d.salary || '';
+      cleaned.allowance = d.allowance || '';
+      cleaned.height = d.height || '';
+      cleaned.weight = d.weight || '';
+      cleaned.dependents = d.dependents || 0;
+      setForm(cleaned);
     }
     setActiveTab('pekerjaan');
     setFormError('');
@@ -276,27 +289,41 @@ export default function EmployeeManagement() {
       </div>
 
       {/* Filters */}
-      <div className="glass-panel" style={{ padding: '16px 20px', marginBottom: '20px', display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
-        <input
-          style={{ ...inputStyle, width: '220px' }} placeholder="Cari nama, NIK, HP..."
-          value={filters.search}
-          onChange={e => setFilters(p => ({ ...p, search: e.target.value }))}
-        />
-        <select style={{ ...inputStyle, width: '160px' }} value={filters.branch_id} onChange={e => setFilters(p => ({ ...p, branch_id: e.target.value }))}>
-          <option value="">Semua Cabang</option>
-          {activeBranches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-        </select>
-        <select style={{ ...inputStyle, width: '140px' }} value={filters.employee_type} onChange={e => setFilters(p => ({ ...p, employee_type: e.target.value }))}>
-          <option value="">Semua Tipe</option>
-          <option value="Frontliner">Frontliner</option>
-          <option value="Staff">Staff</option>
-        </select>
-        <select style={{ ...inputStyle, width: '130px' }} value={filters.status} onChange={e => setFilters(p => ({ ...p, status: e.target.value }))}>
-          <option value="">Semua Status</option>
-          <option value="Active">Aktif</option>
-          <option value="Resign">Resign</option>
-          <option value="Terminated">Terminated</option>
-        </select>
+      <div className="glass-panel" style={{ padding: '16px 20px', marginBottom: '20px', display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
+          <input
+            style={{ ...inputStyle, width: '240px' }} placeholder="Cari nama, NIK, HP, cabang..."
+            value={filters.search}
+            onChange={e => setFilters(p => ({ ...p, search: e.target.value }))}
+          />
+          <select style={{ ...inputStyle, width: '170px' }} value={filters.branch_id} onChange={e => setFilters(p => ({ ...p, branch_id: e.target.value }))}>
+            <option value="">Semua Cabang</option>
+            {activeBranches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+          <select style={{ ...inputStyle, width: '140px' }} value={filters.employee_type} onChange={e => setFilters(p => ({ ...p, employee_type: e.target.value }))}>
+            <option value="">Semua Tipe</option>
+            <option value="Frontliner">Frontliner</option>
+            <option value="Staff">Staff</option>
+          </select>
+          <select style={{ ...inputStyle, width: '140px' }} value={filters.status} onChange={e => setFilters(p => ({ ...p, status: e.target.value }))}>
+            <option value="">Semua Status</option>
+            <option value="Active">Aktif</option>
+            <option value="Resign">Resign</option>
+            <option value="Terminated">Terminated</option>
+          </select>
+          {(filters.search || filters.branch_id || filters.employee_type || filters.status !== 'Active') && (
+            <button
+              className="btn btn-secondary"
+              style={{ padding: '8px 14px', fontSize: '12px' }}
+              onClick={() => setFilters({ search: '', branch_id: '', employee_type: '', status: 'Active' })}
+            >
+              Reset Filter
+            </button>
+          )}
+        </div>
+        <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: 600 }}>
+          Menampilkan <strong style={{ color: 'var(--text-primary)' }}>{employees.length}</strong> karyawan
+        </div>
       </div>
 
       {/* Table */}
@@ -332,7 +359,13 @@ export default function EmployeeManagement() {
                   return (
                     <tr key={emp.id}>
                       <td>
-                        <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{emp.name}</div>
+                        <div
+                          onClick={() => setSelectedCardEmp(emp)}
+                          style={{ fontWeight: 600, color: 'var(--text-primary)', cursor: 'pointer', display: 'inline-block' }}
+                          title="Klik untuk melihat Kartu Biodata & PDF"
+                        >
+                          {emp.name}
+                        </div>
                         <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{emp.phone || '-'}</div>
                       </td>
                       <td style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>{emp.position || '-'}</td>
@@ -350,16 +383,36 @@ export default function EmployeeManagement() {
                         <span style={{ background: statusStyle.bg, color: statusStyle.color, padding: '3px 10px', borderRadius: '20px', fontSize: '12px', fontWeight: 600 }}>
                           {statusStyle.label}
                         </span>
+                        {emp.status !== 'Active' && emp.resign_reason && (
+                          <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '3px' }}>
+                            {emp.resign_reason}
+                          </div>
+                        )}
                       </td>
                       <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
+                        <button onClick={() => setSelectedCardEmp(emp)}
+                          style={{ background: 'rgba(139,92,246,0.12)', border: '1px solid rgba(139,92,246,0.25)', color: '#a78bfa', padding: '5px 10px', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: 600, marginRight: '6px' }}
+                          title="Lihat Kartu Biodata & Export PDF">
+                          Kartu
+                        </button>
                         <button onClick={() => openEdit(emp)}
                           style={{ background: 'rgba(59,130,246,0.12)', border: '1px solid rgba(59,130,246,0.25)', color: '#3b82f6', padding: '5px 12px', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: 600, marginRight: '6px' }}>
                           Edit
                         </button>
-                        {emp.status === 'Active' && (
+                        {emp.status === 'Active' ? (
                           <button onClick={() => { setDeactivatingEmployee(emp); setDeactivateForm({ status: 'Resign', resign_date: new Date().toISOString().slice(0, 10), resign_reason: 'Pindah Kerja / Karir Baru', resign_notes: '' }); setShowDeactivateModal(true); }}
                             style={{ background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.25)', color: '#f59e0b', padding: '5px 12px', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>
                             Nonaktifkan
+                          </button>
+                        ) : (
+                          <button
+                            onClick={async () => {
+                              if (!window.confirm(`Aktifkan kembali "${emp.name}"?`)) return;
+                              const res = await staffApi.deactivate(emp.id, { status: 'Active' });
+                              if (res.success) fetchEmployees();
+                            }}
+                            style={{ background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.25)', color: '#10b981', padding: '5px 12px', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>
+                            Aktifkan
                           </button>
                         )}
                       </td>
@@ -371,6 +424,11 @@ export default function EmployeeManagement() {
           </div>
         )}
       </div>
+
+      {/* Employee Biodata Card Modal */}
+      {selectedCardEmp && (
+        <EmployeeCardModal emp={selectedCardEmp} onClose={() => setSelectedCardEmp(null)} />
+      )}
 
       {/* Form Modal (Add/Edit) */}
       {showFormModal && createPortal(

@@ -5,7 +5,7 @@ function Stage7Offering({ candidate, stageData, setStageData, handleStageSubmit 
     <form onSubmit={(e) => { e.preventDefault(); handleStageSubmit(7, stageData); }}>
       <div className="eval-title">
         <span>Tahap 7: Offering & Kontrak Kerja</span>
-        <span className={`badge \${stageData.offering_status === 'Accepted' ? 'badge-hired' : 'badge-active'}`}>
+        <span className={`badge ${stageData.offering_status === 'Accepted' ? 'badge-hired' : 'badge-active'}`}>
           {stageData.offering_status}
         </span>
       </div>
@@ -70,7 +70,7 @@ function Stage7Offering({ candidate, stageData, setStageData, handleStageSubmit 
         </div>
       </div>
 
-      <div className={`checklist-item \${stageData.passed ? 'checked' : ''}`} style={{ border: '1px dashed var(--border-color)', marginBottom: '24px' }}
+      <div className={`checklist-item ${stageData.passed ? 'checked' : ''}`} style={{ border: '1px dashed var(--border-color)', marginBottom: '24px' }}
            onClick={() => setStageData(p => ({ ...p, passed: p.passed ? 0 : 1 }))}>
         <div className="checkbox-custom"></div>
         <div className="checklist-label">
