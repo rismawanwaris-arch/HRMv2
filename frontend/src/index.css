@@ -1095,22 +1095,22 @@ textarea:focus {
 @keyframes pageEnter {
   0% {
     opacity: 0;
-    transform: translateY(14px) scale(0.992);
+    transform: translateY(12px);
   }
   100% {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: none;
   }
 }
 
 @keyframes cardReveal {
   0% {
     opacity: 0;
-    transform: translateY(18px);
+    transform: translateY(14px);
   }
   100% {
     opacity: 1;
-    transform: translateY(0);
+    transform: none;
   }
 }
 
@@ -1172,10 +1172,9 @@ textarea:focus {
   }
 }
 
-/* View Transition Wrapper */
+/* View Transition Wrapper (no persistent transform/will-change so position:fixed modals stay viewport-relative) */
 .view-transition-wrapper {
-  animation: pageEnter 0.38s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-  will-change: transform, opacity;
+  animation: pageEnter 0.32s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 /* Live Radar Pulse Dot */
@@ -1273,7 +1272,7 @@ textarea:focus {
   padding: 18px 20px;
   box-shadow: 0 8px 28px -8px rgba(0, 0, 0, 0.35), inset 0 1px 0 0 rgba(255, 255, 255, 0.05);
   transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.25s ease, box-shadow 0.25s ease;
-  animation: cardReveal 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: cardReveal 0.36s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .card:hover {

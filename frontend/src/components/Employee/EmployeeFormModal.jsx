@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 
 // ─── Reusable Form Field Components ───────────────────────────────────────────
 const FormSection = ({ title, color = 'var(--color-primary)', children }) => (
@@ -44,17 +45,18 @@ const inp = {
 function EmployeeFormModal({ editEmployeeId, addError, submitting, handleAddManual, addForm, setAddForm, setShowAddModal, setEditEmployeeId, setAddError, emptyForm, branches }) {
   const f = (key) => (e) => setAddForm(p => ({ ...p, [key]: e.target.value }));
 
-  return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', zIndex: 1000, padding: '20px', backdropFilter: 'blur(6px)', overflowY: 'auto' }}>
+  return createPortal(
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px', backdropFilter: 'blur(6px)' }}>
       <div style={{
-        width: '100%', maxWidth: '720px', margin: '20px auto',
+        width: '100%', maxWidth: '720px', maxHeight: '90vh', overflowY: 'auto',
         background: 'var(--bg-surface-opaque)',
         border: '1px solid var(--border-color)', borderRadius: '24px',
-        boxShadow: '0 32px 64px rgba(0,0,0,0.25)'
+        boxShadow: '0 32px 64px rgba(0,0,0,0.35)'
       }}>
         {/* Modal Header */}
         <div style={{
-          padding: '28px 32px 24px',
+          position: 'sticky', top: 0, zIndex: 2, background: 'var(--bg-surface-opaque)',
+          padding: '24px 32px 20px',
           borderBottom: '1px solid var(--border-color)',
           display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start'
         }}>
@@ -274,7 +276,8 @@ function EmployeeFormModal({ editEmployeeId, addError, submitting, handleAddManu
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 

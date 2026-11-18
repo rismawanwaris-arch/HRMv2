@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { staffApi, branchApi } from '../services/api';
 
 const RESIGN_REASONS = [
@@ -505,12 +506,12 @@ export default function ResignedEmployees() {
       </div>
 
       {/* Modal: Catat Karyawan Resign / Dikeluarkan dari Data Karyawan Aktif */}
-      {showRecordModal && (
+      {showRecordModal && createPortal(
         <div
           style={{
             position: 'fixed',
             inset: 0,
-            background: 'rgba(0,0,0,0.6)',
+            background: 'rgba(0,0,0,0.65)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -669,16 +670,17 @@ export default function ResignedEmployees() {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Modal: Edit Alasan / Status Keluar */}
-      {editingEmp && (
+      {editingEmp && createPortal(
         <div
           style={{
             position: 'fixed',
             inset: 0,
-            background: 'rgba(0,0,0,0.6)',
+            background: 'rgba(0,0,0,0.65)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -798,7 +800,8 @@ export default function ResignedEmployees() {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
