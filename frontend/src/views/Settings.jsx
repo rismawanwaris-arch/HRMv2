@@ -1,5 +1,24 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { settingsApi, adminApi } from '../services/api';
+
+function CopyIconSwap({ isCopied }) {
+  return (
+    <span className="icon-swap-grid" style={{ marginRight: '6px' }}>
+      <span className={`icon-swap-layer ${isCopied ? 'is-shown' : 'is-hidden'}`}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="20 6 9 17 4 12" />
+        </svg>
+      </span>
+      <span className={`icon-swap-layer ${!isCopied ? 'is-shown' : 'is-hidden'}`}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+        </svg>
+      </span>
+    </span>
+  );
+}
 
 const fmt = (n) => new Intl.NumberFormat('id-ID').format(n || 0);
 
@@ -507,8 +526,8 @@ export default function Settings({ currentRole = 'master' }) {
       </div>
 
       {/* Rule Modal */}
-      {showRuleModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(6px)' }}>
+      {showRuleModal && createPortal(
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(6px)', padding: '16px' }}>
           <div style={{ width: '100%', maxWidth: '420px', background: 'var(--bg-surface-opaque)', border: '1px solid var(--border-color)', borderRadius: '20px', boxShadow: '0 24px 48px rgba(0,0,0,0.3)' }}>
             <div style={{ padding: '24px 28px 20px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)' }}>
@@ -566,7 +585,8 @@ export default function Settings({ currentRole = 'master' }) {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* ── PENGATURAN API MOBILE & FLUTTER ── */}
@@ -719,7 +739,11 @@ export default function Settings({ currentRole = 'master' }) {
               type="button"
               onClick={() => handleCopy(mobileConfig?.recommended_base_url || '', 'wifi')}
               style={{
-                padding: '9px 16px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                paddingBlock: '9px',
+                paddingInlineStart: '14px',
+                paddingInlineEnd: '16px',
                 borderRadius: '10px',
                 border: '1px solid var(--border-color)',
                 background: copiedKey === 'wifi' ? '#10b981' : 'var(--bg-surface)',
@@ -727,11 +751,11 @@ export default function Settings({ currentRole = 'master' }) {
                 fontSize: '12.5px',
                 fontWeight: 700,
                 cursor: 'pointer',
-                transition: 'all 0.22s cubic-bezier(0.16, 1, 0.3, 1)',
-                transform: copiedKey === 'wifi' ? 'scale(1.04)' : 'scale(1)'
+                transition: 'background-color 150ms ease-out, color 150ms ease-out, border-color 150ms ease-out, scale 150ms ease-out',
               }}
             >
-              {copiedKey === 'wifi' ? '✓ URL Tersalin!' : '📋 Salin URL'}
+              <CopyIconSwap isCopied={copiedKey === 'wifi'} />
+              {copiedKey === 'wifi' ? 'URL Tersalin!' : 'Salin URL'}
             </button>
           </div>
 
@@ -752,7 +776,11 @@ export default function Settings({ currentRole = 'master' }) {
               type="button"
               onClick={() => handleCopy(mobileConfig?.emulator_base_url || '', 'emu')}
               style={{
-                padding: '9px 16px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                paddingBlock: '9px',
+                paddingInlineStart: '14px',
+                paddingInlineEnd: '16px',
                 borderRadius: '10px',
                 border: '1px solid var(--border-color)',
                 background: copiedKey === 'emu' ? '#10b981' : 'var(--bg-surface)',
@@ -760,11 +788,11 @@ export default function Settings({ currentRole = 'master' }) {
                 fontSize: '12.5px',
                 fontWeight: 700,
                 cursor: 'pointer',
-                transition: 'all 0.22s cubic-bezier(0.16, 1, 0.3, 1)',
-                transform: copiedKey === 'emu' ? 'scale(1.04)' : 'scale(1)'
+                transition: 'background-color 150ms ease-out, color 150ms ease-out, border-color 150ms ease-out, scale 150ms ease-out',
               }}
             >
-              {copiedKey === 'emu' ? '✓ URL Tersalin!' : '📋 Salin URL'}
+              <CopyIconSwap isCopied={copiedKey === 'emu'} />
+              {copiedKey === 'emu' ? 'URL Tersalin!' : 'Salin URL'}
             </button>
           </div>
 
@@ -803,17 +831,23 @@ export default function Settings({ currentRole = 'master' }) {
                 type="button"
                 onClick={() => handleCopy(customBaseUrl || '', 'custom')}
                 style={{
-                  padding: '10px 14px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  paddingBlock: '10px',
+                  paddingInlineStart: '12px',
+                  paddingInlineEnd: '14px',
                   borderRadius: '10px',
                   border: '1px solid var(--border-color)',
                   background: copiedKey === 'custom' ? '#10b981' : 'var(--bg-surface)',
                   color: copiedKey === 'custom' ? '#fff' : 'var(--text-primary)',
                   fontSize: '12.5px',
                   fontWeight: 600,
-                  cursor: 'pointer'
+                  cursor: 'pointer',
+                  transition: 'background-color 150ms ease-out, color 150ms ease-out, border-color 150ms ease-out, scale 150ms ease-out',
                 }}
               >
-                {copiedKey === 'custom' ? '✓ Tersalin' : '📋 Salin'}
+                <CopyIconSwap isCopied={copiedKey === 'custom'} />
+                {copiedKey === 'custom' ? 'Tersalin' : 'Salin'}
               </button>
               <button
                 type="submit"

@@ -112,7 +112,19 @@ function App() {
   }, []);
 
   const toggleTheme = () => {
-    setTheme(prev => prev === 'dark' ? 'light' : 'dark');
+    const style = document.createElement('style');
+    style.append(document.createTextNode('*,*::before,*::after{transition:none !important}'));
+    document.head.append(style);
+    setTheme(prev => {
+      const next = prev === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      localStorage.setItem('app_theme', next);
+      return next;
+    });
+    void document.body.offsetHeight;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => style.remove());
+    });
   };
 
   const handleLogin = (token, username, role = 'master') => {
@@ -579,7 +591,7 @@ function App() {
 
             <button
               onClick={() => { setShowProfileModal(true); setPwError(''); setPwSuccess(''); setOldPassword(''); setNewPassword(''); }}
-              style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '6px 8px', borderRadius: '7px', transition: 'all 0.2s', width: '100%', textAlign: 'left', fontSize: '11px' }}
+              style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '6px 8px', borderRadius: '7px', transition: 'background-color 150ms ease-out, color 150ms ease-out, scale 150ms ease-out', width: '100%', textAlign: 'left', fontSize: '11px' }}
               onMouseOver={e => e.currentTarget.style.background = 'var(--bg-hover)'}
               onMouseOut={e => e.currentTarget.style.background = 'transparent'}
             >
@@ -589,21 +601,24 @@ function App() {
 
             <button
               onClick={toggleTheme}
-              style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '6px 8px', borderRadius: '7px', transition: 'all 0.2s', width: '100%', textAlign: 'left', fontSize: '11px' }}
+              style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '6px 8px', borderRadius: '7px', transition: 'background-color 150ms ease-out, color 150ms ease-out, scale 150ms ease-out', width: '100%', textAlign: 'left', fontSize: '11px' }}
               onMouseOver={e => e.currentTarget.style.background = 'var(--bg-hover)'}
               onMouseOut={e => e.currentTarget.style.background = 'transparent'}
             >
-              {theme === 'dark' ? (
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
-              ) : (
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
-              )}
+              <span className="icon-swap-grid">
+                <span className={`icon-swap-layer ${theme === 'dark' ? 'is-shown' : 'is-hidden'}`}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+                </span>
+                <span className={`icon-swap-layer ${theme === 'light' ? 'is-shown' : 'is-hidden'}`}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+                </span>
+              </span>
               {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
             </button>
 
             <button
               onClick={handleLogout}
-              style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '6px 8px', borderRadius: '7px', transition: 'all 0.2s', width: '100%', textAlign: 'left', fontSize: '11px' }}
+              style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '6px 8px', borderRadius: '7px', transition: 'background-color 150ms ease-out, color 150ms ease-out, scale 150ms ease-out', width: '100%', textAlign: 'left', fontSize: '11px' }}
               onMouseOver={e => e.currentTarget.style.background = 'rgba(239,68,68,0.1)'}
               onMouseOut={e => e.currentTarget.style.background = 'transparent'}
             >
