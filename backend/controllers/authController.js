@@ -88,7 +88,8 @@ exports.listAdmins = async (req, res) => {
 exports.createAdmin = async (req, res) => {
   try {
     const { username, password, role } = req.body;
-    if (!username || !password || !role) {
+    const cleanUsername = String(username || '').trim();
+    if (!cleanUsername || !password || !role) {
       return res.status(400).json({ success: false, message: 'Username, password, dan role wajib diisi.' });
     }
     if (!VALID_ROLES.includes(role)) {
@@ -97,16 +98,16 @@ exports.createAdmin = async (req, res) => {
     if (String(password).length < MIN_PASSWORD_LENGTH) {
       return res.status(400).json({ success: false, message: `Password minimal ${MIN_PASSWORD_LENGTH} karakter.` });
     }
-    const existing = await query.get('SELECT id FROM admins WHERE username = ?', [username]);
+    const existing = await query.get('SELECT id FROM admins WHERE username = ?', [cleanUsername]);
     if (existing) {
       return res.status(409).json({ success: false, message: 'Username sudah digunakan.' });
     }
     const hashed = hashPassword(password);
     const result = await query.run(
       'INSERT INTO admins (username, password, role) VALUES (?, ?, ?)',
-      [username.trim(), hashed, role]
+      [cleanUsername, hashed, role]
     );
-    res.json({ success: true, data: { id: result.id, username: username.trim(), role }, message: 'Akun admin berhasil dibuat.' });
+    res.json({ success: true, data: { id: result.id, username: cleanUsername, role }, message: 'Akun admin berhasil dibuat.' });
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: 'Server error.' });
@@ -119,6 +120,10 @@ exports.updateAdminRole = async (req, res) => {
     const { role } = req.body;
     if (!VALID_ROLES.includes(role)) {
       return res.status(400).json({ success: false, message: 'Role tidak valid.' });
+    }
+    const target = await query.get('SELECT id FROM admins WHERE id = ?', [id]);
+    if (!target) {
+      return res.status(404).json({ success: false, message: 'Akun admin tidak ditemukan.' });
     }
     // Prevent demoting yourself
     const self = await query.get('SELECT id FROM admins WHERE username = ?', [req.user.username]);
@@ -136,14 +141,17 @@ exports.updateAdminRole = async (req, res) => {
 exports.deleteAdmin = async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
+    const target = await query.get('SELECT id, role FROM admins WHERE id = ?', [id]);
+    if (!target) {
+      return res.status(404).json({ success: false, message: 'Akun admin tidak ditemukan.' });
+    }
     // Prevent deleting yourself
     const self = await query.get('SELECT id FROM admins WHERE username = ?', [req.user.username]);
     if (self && self.id === id) {
       return res.status(400).json({ success: false, message: 'Tidak bisa menghapus akun Anda sendiri.' });
     }
     // Ensure at least one master remains
-    const target = await query.get('SELECT role FROM admins WHERE id = ?', [id]);
-    if (target && target.role === 'master') {
+    if (target.role === 'master') {
       const masterCount = await query.get("SELECT COUNT(*) as cnt FROM admins WHERE role = 'master'");
       if (masterCount.cnt <= 1) {
         return res.status(400).json({ success: false, message: 'Harus ada minimal satu akun master.' });

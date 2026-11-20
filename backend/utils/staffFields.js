@@ -22,7 +22,8 @@ const STAFF_BIODATA_FIELDS = [
   'father_name', 'mother_name', 'spouse_name', 'children_data',
   'education_level', 'education_institution', 'education_major', 'education_years', 'education_grade',
   'work_experience', 'npwp', 'bank_name', 'bank_account', 'bpjs_health', 'bpjs_employment',
-  'bpjs_active', 'uniform_size', 'health_history', 'allergies', 'medications', 'color_blind_test',
+  'bpjs_active', 'uniform_size', 'height', 'weight', 'physical_condition',
+  'health_history', 'allergies', 'medications', 'color_blind_test',
 ];
 
 const STAFF_WORK_FIELDS = [

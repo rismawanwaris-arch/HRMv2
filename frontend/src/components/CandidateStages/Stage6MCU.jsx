@@ -1,8 +1,18 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 
-function Stage6MCU({ candidate, stageData, setStageData, handleStageSubmit, trainingStatements }) {
+function Stage6MCU({ candidate, stageId = 6, stageData, setStageData, handleStageSubmit, trainingStatements = [], submitting = false }) {
+  const [draftScore, setDraftScore] = useState(null);
+
+  useEffect(() => {
+    setDraftScore(null);
+  }, [candidate?.id]);
+
+  const numericDisplayScore = stageData.score_training
+    ? parseFloat((stageData.score_training / 10).toFixed(1))
+    : 0;
+
   return (
-    <form onSubmit={(e) => { e.preventDefault(); handleStageSubmit(6, stageData); }}>
+    <form onSubmit={(e) => { e.preventDefault(); handleStageSubmit(stageId, stageData); }}>
       <div className="eval-title">
         <span>Tahap 6: Evaluasi & Tes Pasca Training</span>
         <span className={`badge ${stageData.passed ? 'badge-hired' : 'badge-active'}`}>
@@ -11,19 +21,19 @@ function Stage6MCU({ candidate, stageData, setStageData, handleStageSubmit, trai
       </div>
 
       {stageData.test_completed_at ? (
-        <div className="glass-panel" style={{ padding: '24px', marginBottom: '32px', border: '1px solid var(--border-color)', borderRadius: '12px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-            <h3 style={{ fontSize: '16px', color: 'white', margin: 0 }}>Hasil Evaluasi Kompetensi Training</h3>
+        <div className="glass-panel" style={{ padding: '24px', marginBottom: '32px', border: '1px solid var(--border-color)', borderRadius: '12px', background: 'var(--bg-secondary)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
+            <h3 style={{ fontSize: '16px', color: 'var(--text-primary)', margin: 0 }}>Hasil Evaluasi Kompetensi Training</h3>
             <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
               Dinilai pada: {new Date(stageData.test_completed_at).toLocaleString('id-ID', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })} WIB
             </span>
           </div>
-          <div style={{ display: 'flex', gap: '24px', alignItems: 'center', marginBottom: '24px' }}>
+          <div style={{ display: 'flex', gap: '24px', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap' }}>
             <div style={{ fontSize: '36px', fontWeight: '800', color: stageData.passed ? 'var(--color-success)' : 'var(--color-danger)' }}>
-              {parseFloat((stageData.score_training / 10).toFixed(1))} / 10
+              {numericDisplayScore} / 10
             </div>
             <div>
-              <div style={{ fontWeight: '600', color: 'white' }}>
+              <div style={{ fontWeight: '600', color: 'var(--text-primary)' }}>
                 {stageData.passed ? 'LOLOS TRAINING (Memenuhi Passing Grade)' : 'TIDAK LULUS TRAINING (Di bawah Passing Grade)'}
               </div>
               <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '4px' }}>
@@ -32,22 +42,23 @@ function Stage6MCU({ candidate, stageData, setStageData, handleStageSubmit, trai
             </div>
           </div>
 
-          {/* Render statement details */}
-          <h4 style={{ fontSize: '14px', color: 'white', marginBottom: '12px' }}>Rincian Skor Per Indikator:</h4>
+          <h4 style={{ fontSize: '14px', color: 'var(--text-primary)', marginBottom: '12px' }}>Rincian Skor Per Indikator:</h4>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             {(() => {
               try {
-                const details = JSON.parse(stageData.training_details || '{}');
+                const details = typeof stageData.training_details === 'string'
+                  ? JSON.parse(stageData.training_details || '{}')
+                  : (stageData.training_details || {});
                 return trainingStatements.map((stmt, idx) => {
-                  const rating = details[stmt.id] || '-';
+                  const rating = details[stmt.id] ?? '-';
                   return (
-                    <div key={stmt.id} style={{ display: 'flex', justifyContent: 'space-between', background: 'rgba(255,255,255,0.02)', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', fontSize: '13px' }}>
+                    <div key={stmt.id} style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', background: 'var(--bg-surface)', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', fontSize: '13px' }}>
                       <span style={{ color: 'var(--text-secondary)' }}>{idx + 1}. {stmt.statement_text}</span>
-                      <strong style={{ color: 'white' }}>{rating} / 10</strong>
+                      <strong style={{ color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>{rating} / 10</strong>
                     </div>
                   );
                 });
-              } catch (e) {
+              } catch {
                 return <p style={{ color: 'var(--text-muted)', fontSize: '12px' }}>Format rincian nilai tidak didukung.</p>;
               }
             })()}
@@ -63,15 +74,25 @@ function Stage6MCU({ candidate, stageData, setStageData, handleStageSubmit, trai
           <h3 style={{ fontSize: '16px', marginBottom: '16px' }}>Input Hasil Manual (Offline)</h3>
           <div className="form-grid" style={{ marginBottom: '24px' }}>
             <div className="form-group">
-              <label>Skor Rata-rata Uji Pasca Training (Skala 1 - 10)</label>
-              <input 
-                type="number" 
-                value={stageData.score_training ? parseFloat((stageData.score_training / 10).toFixed(1)) : 0}
+              <label>Skor Rata-rata Uji Pasca Training (Skala 0 - 10)</label>
+              <input
+                type="number"
+                value={draftScore !== null ? draftScore : numericDisplayScore}
                 onChange={(e) => {
-                  const val = parseFloat(e.target.value) || 0;
-                  const pct = Math.round(val * 10);
-                  setStageData(p => ({ ...p, score_training: pct, passed: val >= 6.5 ? 1 : 0 }));
+                  const raw = e.target.value;
+                  setDraftScore(raw);
+                  if (raw === '') {
+                    setStageData(p => ({ ...p, score_training: 0, passed: 0 }));
+                    return;
+                  }
+                  const parsed = parseFloat(raw);
+                  if (!Number.isNaN(parsed)) {
+                    const clamped = Math.min(10, Math.max(0, parsed));
+                    const pct = Math.round(clamped * 10);
+                    setStageData(p => ({ ...p, score_training: pct, passed: clamped >= 6.5 ? 1 : 0 }));
+                  }
                 }}
+                onBlur={() => setDraftScore(null)}
                 min="0" max="10" step="0.1"
               />
             </div>
@@ -81,7 +102,7 @@ function Stage6MCU({ candidate, stageData, setStageData, handleStageSubmit, trai
 
       <div className="form-group form-group-full" style={{ marginBottom: '24px' }}>
         <label>Catatan & Umpan Balik Hasil Evaluasi Training</label>
-        <textarea 
+        <textarea
           value={stageData.ref_check_notes || ''}
           onChange={(e) => setStageData(p => ({ ...p, ref_check_notes: e.target.value }))}
           placeholder="Masukkan catatan kelebihan/kekurangan praktik kerja kandidat di sini..."
@@ -99,7 +120,9 @@ function Stage6MCU({ candidate, stageData, setStageData, handleStageSubmit, trai
       </div>
 
       {candidate.status === 'Active' && (
-        <button type="submit" className="btn btn-primary">Simpan Hasil Tahap 6</button>
+        <button type="submit" className="btn btn-primary" disabled={submitting}>
+          {submitting ? 'Menyimpan...' : 'Simpan Hasil Tahap 6'}
+        </button>
       )}
     </form>
   );

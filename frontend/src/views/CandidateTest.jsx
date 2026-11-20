@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import API_BASE from '../config';
 
 function CandidateTest({ onExit }) {
@@ -15,9 +15,10 @@ function CandidateTest({ onExit }) {
   const [timeLeft, setTimeLeft] = useState(3600); // 60 minutes in seconds
   const [examSubmitted, setExamSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [scoreResult, setScoreResult] = useState(null);
 
   const timerRef = useRef(null);
+  const answersRef = useRef({});
+  const hasSubmittedRef = useRef(false);
 
   const handleResetPortal = () => {
     setAccessCode('');
@@ -28,10 +29,11 @@ function CandidateTest({ onExit }) {
     setQuestions([]);
     setCurrentQuestionIndex(0);
     setAnswers({});
+    answersRef.current = {};
+    hasSubmittedRef.current = false;
     setTimeLeft(3600);
     setExamSubmitted(false);
     setSubmitting(false);
-    setScoreResult(null);
     if (timerRef.current) clearInterval(timerRef.current);
     // Clear query params so it doesn't auto-fill on refresh
     window.history.replaceState({}, document.title, window.location.pathname);
@@ -40,6 +42,7 @@ function CandidateTest({ onExit }) {
   const handleBackToDashboard = () => {
     const pin = window.prompt("Masukkan PIN HRD untuk kembali ke Dashboard Admin:");
     if (pin === "2512") {
+      window.history.replaceState({}, document.title, window.location.pathname);
       onExit();
     } else if (pin !== null) {
       alert("PIN salah! Akses ke Dashboard ditolak.");
@@ -57,18 +60,16 @@ function CandidateTest({ onExit }) {
 
   // Timer Effect
   useEffect(() => {
-    if (examStarted && !examSubmitted) {
-      timerRef.current = setInterval(() => {
-        setTimeLeft(prev => {
-          if (prev <= 1) {
-            clearInterval(timerRef.current);
-            autoSubmitExam();
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-    }
+    if (!examStarted || examSubmitted) return;
+    timerRef.current = setInterval(() => {
+      setTimeLeft(prev => {
+        if (prev <= 1) {
+          clearInterval(timerRef.current);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
     return () => clearInterval(timerRef.current);
   }, [examStarted, examSubmitted]);
 
@@ -79,11 +80,16 @@ function CandidateTest({ onExit }) {
     try {
       setValidationError('');
       const res = await fetch(`${API_BASE}/test/validate/${accessCode.trim().toUpperCase()}`);
-      const data = await res.json();
+      let data = {};
+      try { data = await res.json(); } catch { /* ignore */ }
 
-      if (data.isValid) {
+      if (res.ok && data.isValid) {
         setCandidateInfo(data.candidate);
         setIsValidated(true);
+        setAnswers({});
+        answersRef.current = {};
+        hasSubmittedRef.current = false;
+        setCurrentQuestionIndex(0);
         if (data.candidate.current_stage === 6) {
           setTimeLeft(1800); // 30 minutes for training
         } else {
@@ -102,10 +108,20 @@ function CandidateTest({ onExit }) {
     try {
       setValidationError('');
       const res = await fetch(`${API_BASE}/test/questions/${accessCode.trim().toUpperCase()}`);
-      const data = await res.json();
+      let data = {};
+      try { data = await res.json(); } catch { /* ignore */ }
 
-      if (data.success) {
+      if (res.ok && data.success) {
+        if (!Array.isArray(data.questions) || data.questions.length === 0) {
+          setValidationError('Belum ada soal ujian yang tersedia saat ini. Silakan hubungi HRD.');
+          return;
+        }
         setQuestions(data.questions);
+        setCurrentQuestionIndex(0);
+        setAnswers({});
+        answersRef.current = {};
+        hasSubmittedRef.current = false;
+        setExamSubmitted(false);
         setExamStarted(true);
       } else {
         setValidationError(data.message || 'Gagal memuat soal ujian.');
@@ -116,34 +132,21 @@ function CandidateTest({ onExit }) {
     }
   };
 
+  const isAnsweredValue = (val) => (
+    val !== undefined && val !== null && (typeof val === 'string' ? val.trim().length > 0 : true)
+  );
+
   const handleSelectOption = (questionId, option) => {
-    setAnswers(prev => ({
-      ...prev,
-      [questionId]: option
-    }));
+    setAnswers(prev => {
+      const next = { ...prev, [questionId]: option };
+      answersRef.current = next;
+      return next;
+    });
   };
 
-  const handleSubmitExam = async () => {
-    const totalQuestions = questions.length;
-    const answeredCount = Object.keys(answers).length;
-
-    if (answeredCount < totalQuestions) {
-      const confirmSubmit = window.confirm(`Anda baru menjawab ${answeredCount} dari ${totalQuestions} soal. Apakah Anda yakin ingin menyelesaikan ujian sekarang?`);
-      if (!confirmSubmit) return;
-    } else {
-      const confirmSubmit = window.confirm('Apakah Anda yakin ingin mengirimkan lembar jawaban sekarang?');
-      if (!confirmSubmit) return;
-    }
-
-    submitAnswers();
-  };
-
-  const autoSubmitExam = () => {
-    alert('Waktu ujian telah habis! Jawaban Anda akan dikirim secara otomatis.');
-    submitAnswers();
-  };
-
-  const submitAnswers = async () => {
+  const submitAnswers = useCallback(async (isAuto = false) => {
+    if (hasSubmittedRef.current) return;
+    hasSubmittedRef.current = true;
     try {
       setSubmitting(true);
       clearInterval(timerRef.current);
@@ -153,23 +156,48 @@ function CandidateTest({ onExit }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           code: accessCode.trim().toUpperCase(),
-          answers
+          answers: answersRef.current
         })
       });
-      const data = await res.json();
+      let data = {};
+      try { data = await res.json(); } catch { /* ignore */ }
 
-      if (data.success) {
-        setScoreResult(data.results);
+      if (res.ok && data.success) {
         setExamSubmitted(true);
       } else {
-        alert(data.message || 'Gagal mengirimkan jawaban.');
+        hasSubmittedRef.current = false;
+        alert(data.message || (isAuto ? 'Gagal mengirim jawaban otomatis. Silakan klik Selesai & Kirim.' : 'Gagal mengirimkan jawaban.'));
       }
     } catch (err) {
       console.error('Submit exam error:', err);
+      hasSubmittedRef.current = false;
       alert('Kesalahan jaringan saat mengirim jawaban.');
     } finally {
       setSubmitting(false);
     }
+  }, [accessCode]);
+
+  useEffect(() => {
+    if (examStarted && !examSubmitted && timeLeft === 0 && !hasSubmittedRef.current) {
+      alert('Waktu ujian telah habis! Jawaban Anda akan dikirim secara otomatis.');
+      submitAnswers(true);
+    }
+  }, [examStarted, examSubmitted, timeLeft, submitAnswers]);
+
+  const handleSubmitExam = async () => {
+    if (submitting || hasSubmittedRef.current) return;
+    const totalQuestions = questions.length;
+    const answeredCount = Object.values(answersRef.current).filter(isAnsweredValue).length;
+
+    if (answeredCount < totalQuestions) {
+      const confirmSubmit = window.confirm(`Anda baru menjawab ${answeredCount} dari ${totalQuestions} soal. Apakah Anda yakin ingin menyelesaikan ujian sekarang?`);
+      if (!confirmSubmit) return;
+    } else {
+      const confirmSubmit = window.confirm('Apakah Anda yakin ingin mengirimkan lembar jawaban sekarang?');
+      if (!confirmSubmit) return;
+    }
+
+    submitAnswers(false);
   };
 
   // Helper to format seconds to MM:SS
@@ -186,7 +214,7 @@ function CandidateTest({ onExit }) {
         <div className="glass-panel" style={{ width: '100%', maxWidth: '450px', padding: '40px' }}>
           <div style={{ textAlign: 'center', marginBottom: '32px' }}>
             <div className="sidebar-logo-icon" style={{ margin: '0 auto 16px auto', width: '48px', height: '48px', fontSize: '24px' }}>T</div>
-            <h1 style={{ fontSize: '24px', fontWeight: '800', color: 'white' }}>Portal Ujian Online</h1>
+            <h1 style={{ fontSize: '24px', fontWeight: '800', color: 'var(--text-primary)' }}>Portal Ujian Online</h1>
             <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '6px' }}>Masukkan kode akses unik dari HRD untuk memulai ujian.</p>
           </div>
 
@@ -227,12 +255,12 @@ function CandidateTest({ onExit }) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh', padding: '20px' }}>
         <div className="glass-panel" style={{ width: '100%', maxWidth: '600px', padding: '40px' }}>
-          <h2 style={{ fontSize: '22px', fontWeight: '800', color: 'white', marginBottom: '8px' }}>Instruksi Pengerjaan Ujian</h2>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '14px', marginBottom: '24px' }}>Selamat datang, <strong style={{ color: 'white' }}>{candidateInfo.name}</strong>.</p>
+          <h2 style={{ fontSize: '22px', fontWeight: '800', color: 'var(--text-primary)', marginBottom: '8px' }}>Instruksi Pengerjaan Ujian</h2>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '14px', marginBottom: '24px' }}>Selamat datang, <strong style={{ color: 'var(--text-primary)' }}>{candidateInfo?.name}</strong>.</p>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', background: 'rgba(255,255,255,0.02)', padding: '20px', borderRadius: '12px', border: '1px solid var(--border-color)', marginBottom: '32px', fontSize: '13px', lineHeight: '1.6' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', background: 'var(--bg-secondary)', padding: '20px', borderRadius: '12px', border: '1px solid var(--border-color)', marginBottom: '24px', fontSize: '13px', lineHeight: '1.6', color: 'var(--text-primary)' }}>
             <p><strong>Silakan baca ketentuan berikut sebelum memulai:</strong></p>
-            {candidateInfo.current_stage === 6 ? (
+            {candidateInfo?.current_stage === 6 ? (
               <ul style={{ paddingLeft: '20px' }}>
                 <li>Durasi waktu pengerjaan adalah <strong>30 menit</strong>.</li>
                 <li>Ujian terdiri dari evaluasi materi: <strong>Tes Pasca Training</strong>.</li>
@@ -253,11 +281,17 @@ function CandidateTest({ onExit }) {
             )}
           </div>
 
+          {validationError && (
+            <div style={{ color: 'var(--color-danger)', fontSize: '13px', textAlign: 'center', background: 'var(--color-danger-bg)', padding: '10px', borderRadius: '8px', border: '1px solid rgba(239, 68, 68, 0.25)', marginBottom: '20px' }}>
+              {validationError}
+            </div>
+          )}
+
           <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
-            <button className="btn btn-secondary" onClick={() => setIsValidated(false)}>
+            <button type="button" className="btn btn-secondary" onClick={() => { setIsValidated(false); setValidationError(''); }}>
               Batal
             </button>
-            <button className="btn btn-primary" onClick={handleStartExam}>
+            <button type="button" className="btn btn-primary" onClick={handleStartExam}>
               Mulai Ujian Sekarang
             </button>
           </div>
@@ -274,12 +308,12 @@ function CandidateTest({ onExit }) {
           <div style={{ width: '64px', height: '64px', borderRadius: '50%', background: 'var(--color-success-bg)', border: '2px solid var(--color-success)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 24px auto' }}>
             <span style={{ color: 'var(--color-success)', fontSize: '32px', fontWeight: 'bold' }}>✓</span>
           </div>
-          <h2 style={{ fontSize: '24px', fontWeight: '800', color: 'white', marginBottom: '12px' }}>Ujian Selesai Dikirimkan</h2>
+          <h2 style={{ fontSize: '24px', fontWeight: '800', color: 'var(--text-primary)', marginBottom: '12px' }}>Ujian Selesai Dikirimkan</h2>
           <p style={{ color: 'var(--text-secondary)', fontSize: '14px', lineHeight: '1.6', marginBottom: '32px' }}>
-            Terima kasih <strong style={{ color: 'white' }}>{candidateInfo.name}</strong>, lembar jawaban Anda telah sukses kami terima. Hasil ujian kognitif Anda akan otomatis diproses oleh sistem rekrutmen. Silakan hubungi tim HRD untuk tahapan seleksi berikutnya.
+            Terima kasih <strong style={{ color: 'var(--text-primary)' }}>{candidateInfo?.name}</strong>, lembar jawaban Anda telah sukses kami terima. Hasil ujian kognitif Anda akan otomatis diproses oleh sistem rekrutmen. Silakan hubungi tim HRD untuk tahapan seleksi berikutnya.
           </p>
 
-          <button className="btn btn-secondary" style={{ margin: '0 auto' }} onClick={handleResetPortal}>
+          <button type="button" className="btn btn-secondary" style={{ margin: '0 auto' }} onClick={handleResetPortal}>
             Keluar Portal Ujian
           </button>
         </div>
@@ -298,8 +332,8 @@ function CandidateTest({ onExit }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <div className="sidebar-logo-icon" style={{ width: '32px', height: '32px', fontSize: '16px' }}>T</div>
           <div>
-            <span style={{ fontWeight: '700', color: 'white', fontSize: '15px' }}>Ujian Online Frontliner</span>
-            <span style={{ fontSize: '12px', color: 'var(--text-secondary)', marginLeft: '12px' }}>Kandidat: {candidateInfo.name}</span>
+            <span style={{ fontWeight: '700', color: 'var(--text-primary)', fontSize: '15px' }}>Ujian Online Frontliner</span>
+            <span style={{ fontSize: '12px', color: 'var(--text-secondary)', marginLeft: '12px' }}>Kandidat: {candidateInfo?.name}</span>
           </div>
         </div>
 
@@ -307,7 +341,7 @@ function CandidateTest({ onExit }) {
           <div className="exam-timer">
             Sisa Waktu: {formatTime(timeLeft)}
           </div>
-          <button className="btn btn-primary" onClick={handleSubmitExam} disabled={submitting}>
+          <button type="button" className="btn btn-primary" onClick={handleSubmitExam} disabled={submitting}>
             {submitting ? 'Mengirim...' : 'Selesai & Kirim Ujian'}
           </button>
         </div>
@@ -323,12 +357,13 @@ function CandidateTest({ onExit }) {
               let btnClass = 'qn-btn';
               if (currentQuestionIndex === idx) {
                 btnClass += ' active';
-              } else if (answers[q.id] !== undefined) {
+              } else if (isAnsweredValue(answers[q.id])) {
                 btnClass += ' answered';
               }
 
               return (
                 <button
+                  type="button"
                   key={q.id}
                   className={btnClass}
                   onClick={() => setCurrentQuestionIndex(idx)}
@@ -359,7 +394,7 @@ function CandidateTest({ onExit }) {
         <section className="glass-panel exam-question-box">
           <div>
             <span className="badge badge-active" style={{ marginBottom: '16px' }}>
-              Subtes: {activeQuestion.subtest.toUpperCase()} (Soal {currentQuestionIndex + 1} dari {questions.length})
+              Subtes: {(activeQuestion.subtest || 'UMUM').toUpperCase()} (Soal {currentQuestionIndex + 1} dari {questions.length})
             </span>
             <div className="exam-question-text">
               {activeQuestion.question_text}
@@ -381,7 +416,7 @@ function CandidateTest({ onExit }) {
                   onClick={() => handleSelectOption(activeQuestion.id, opt.letter)}
                 >
                   <div className="option-letter">{opt.letter}</div>
-                  <div style={{ fontSize: '14px', color: 'white' }}>{opt.text}</div>
+                  <div style={{ fontSize: '14px', color: 'var(--text-primary)' }}>{opt.text}</div>
                 </div>
               ))}
             </div>
@@ -416,14 +451,14 @@ function CandidateTest({ onExit }) {
                 onClick={() => handleSelectOption(activeQuestion.id, 'P')}
               >
                 <div className="forced-choice-letter">P</div>
-                <div style={{ fontSize: '14px', color: 'white', lineHeight: '1.4' }}>{activeQuestion.option_p}</div>
+                <div style={{ fontSize: '14px', color: 'var(--text-primary)', lineHeight: '1.4' }}>{activeQuestion.option_p}</div>
               </div>
               <div
                 className={`forced-choice-card ${answers[activeQuestion.id] === 'Q' ? 'selected' : ''}`}
                 onClick={() => handleSelectOption(activeQuestion.id, 'Q')}
               >
                 <div className="forced-choice-letter">Q</div>
-                <div style={{ fontSize: '14px', color: 'white', lineHeight: '1.4' }}>{activeQuestion.option_q}</div>
+                <div style={{ fontSize: '14px', color: 'var(--text-primary)', lineHeight: '1.4' }}>{activeQuestion.option_q}</div>
               </div>
             </div>
           )}
@@ -436,12 +471,11 @@ function CandidateTest({ onExit }) {
               </label>
               <input
                 type="text"
-                className="input-custom"
                 style={{
                   width: '100%',
-                  background: 'rgba(255,255,255,0.02)',
+                  background: 'var(--bg-input)',
                   border: '1px solid var(--border-color)',
-                  color: 'white',
+                  color: 'var(--text-primary)',
                   fontSize: '15px',
                   padding: '12px 16px',
                   borderRadius: '8px'
@@ -459,6 +493,7 @@ function CandidateTest({ onExit }) {
           {/* Next/Prev control buttons */}
           <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '30px', borderTop: '1px solid var(--border-color)', paddingTop: '20px' }}>
             <button
+              type="button"
               className="btn btn-secondary"
               onClick={() => setCurrentQuestionIndex(prev => Math.max(0, prev - 1))}
               disabled={currentQuestionIndex === 0}
@@ -467,13 +502,14 @@ function CandidateTest({ onExit }) {
             </button>
             {currentQuestionIndex < questions.length - 1 ? (
               <button
+                type="button"
                 className="btn btn-secondary"
                 onClick={() => setCurrentQuestionIndex(prev => Math.min(questions.length - 1, prev + 1))}
               >
                 Soal Berikutnya →
               </button>
             ) : (
-              <button className="btn btn-primary" onClick={handleSubmitExam} disabled={submitting}>
+              <button type="button" className="btn btn-primary" onClick={handleSubmitExam} disabled={submitting}>
                 {submitting ? 'Mengirim...' : 'Selesai & Kirim'}
               </button>
             )}

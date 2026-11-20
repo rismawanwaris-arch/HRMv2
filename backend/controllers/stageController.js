@@ -48,6 +48,9 @@ exports.addStage = async (req, res) => {
       data: { id: result.id, name, code: stageCode, order_num: orderNum, is_active: 1 }
     });
   } catch (error) {
+    if (error.message && /UNIQUE constraint failed/.test(error.message)) {
+      return res.status(400).json({ success: false, message: 'Kode stage sudah digunakan.' });
+    }
     console.error('API Error (add stage):', error);
     res.status(500).json({ success: false, message: 'Server error adding stage' });
   }

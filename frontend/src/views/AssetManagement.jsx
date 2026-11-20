@@ -1,19 +1,28 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { assetApi, branchApi } from '../services/api';
 
 const fmtRp = (n) =>
   new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(n || 0);
+
+const getTodayStr = () => {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
 
 export default function AssetManagement() {
   const [activeTab, setActiveTab] = useState('list'); // 'list' | 'logs' | 'by-branch'
 
   // Master Data
   const [branches, setBranches] = useState([]);
-  const [branchesLoading, setBranchesLoading] = useState(false);
 
   // Asset List State
   const [assets, setAssets] = useState([]);
   const [assetsLoading, setAssetsLoading] = useState(false);
+  const [assetsError, setAssetsError] = useState('');
   const [stats, setStats] = useState(null);
 
   // Filters
@@ -22,30 +31,36 @@ export default function AssetManagement() {
   const [filterCondition, setFilterCondition] = useState('');
   const [filterStatus, setFilterStatus] = useState('Aktif');
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
 
   // Logs State
   const [logs, setLogs] = useState([]);
   const [logsLoading, setLogsLoading] = useState(false);
   const [filterLogType, setFilterLogType] = useState('');
 
-  // By-Branch Explorer State
+  // By-Branch Explorer State (independent of List tab filters)
   const [selectedBranchId, setSelectedBranchId] = useState('');
+  const [branchAssets, setBranchAssets] = useState([]);
+  const [branchAssetsLoading, setBranchAssetsLoading] = useState(false);
 
   // Notification Toast
   const [toastMsg, setToastMsg] = useState('');
-  const showToast = (msg) => {
-    setToastMsg(msg);
-    setTimeout(() => setToastMsg(''), 3000);
-  };
+  const toastTimerRef = useRef(null);
 
-  // Date helper
-  const getTodayStr = () => {
-    const d = new Date();
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  };
+  useEffect(() => () => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+  }, []);
+
+  const showToast = useCallback((msg) => {
+    setToastMsg(msg);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToastMsg(''), 3000);
+  }, []);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(searchQuery), 300);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
 
   // Modals state
   const [showAddModal, setShowAddModal] = useState(false);
@@ -55,6 +70,22 @@ export default function AssetManagement() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    const anyModal = showAddModal || showReplaceModal || showMutateModal || showServiceModal || showEditModal;
+    if (!anyModal) return;
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape' && !isSubmitting) {
+        setShowAddModal(false);
+        setShowReplaceModal(false);
+        setShowMutateModal(false);
+        setShowServiceModal(false);
+        setShowEditModal(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [showAddModal, showReplaceModal, showMutateModal, showServiceModal, showEditModal, isSubmitting]);
 
   // Add Asset Form
   const [addForm, setAddForm] = useState({
@@ -106,84 +137,105 @@ export default function AssetManagement() {
     notes: '',
   });
 
-  // Load branches
+  // Load active branches
   useEffect(() => {
-    setBranchesLoading(true);
     branchApi.getAll()
       .then(res => {
         if (res.success && Array.isArray(res.data)) {
-          setBranches(res.data);
-          if (res.data.length > 0) {
-            setSelectedBranchId(String(res.data[0].id));
-            setAddForm(prev => ({ ...prev, branch_id: String(res.data[0].id) }));
+          const activeBranches = res.data.filter(b => b.status === 'Active');
+          setBranches(activeBranches);
+          if (activeBranches.length > 0) {
+            setSelectedBranchId(String(activeBranches[0].id));
+            setAddForm(prev => ({ ...prev, branch_id: String(activeBranches[0].id) }));
           }
         }
       })
-      .catch(err => console.error('Error loading branches:', err))
-      .finally(() => setBranchesLoading(false));
+      .catch(err => console.error('Error loading branches:', err));
   }, []);
 
   // Fetch Stats
-  const fetchStats = async () => {
+  const fetchStats = useCallback(async () => {
     try {
       const res = await assetApi.getStats();
       if (res.success) setStats(res.data);
     } catch (err) {
       console.error('Error fetching stats:', err);
     }
-  };
+  }, []);
 
   // Fetch Assets
-  const fetchAssets = async () => {
+  const fetchAssets = useCallback(async () => {
     setAssetsLoading(true);
+    setAssetsError('');
     try {
       const params = {};
       if (filterBranch) params.branch_id = filterBranch;
       if (filterCategory) params.category = filterCategory;
       if (filterCondition) params.condition = filterCondition;
       if (filterStatus) params.status = filterStatus;
-      if (searchQuery) params.search = searchQuery;
+      if (debouncedSearch.trim()) params.search = debouncedSearch.trim();
 
       const res = await assetApi.getAll(params);
-      if (res.success) setAssets(res.data);
+      if (res.success) setAssets(res.data || []);
+      else setAssetsError(res.message || 'Gagal memuat daftar aset.');
     } catch (err) {
       console.error('Error loading assets:', err);
+      setAssetsError(err.message || 'Gagal memuat daftar aset.');
     } finally {
       setAssetsLoading(false);
     }
-  };
+  }, [filterBranch, filterCategory, filterCondition, filterStatus, debouncedSearch]);
 
   // Fetch Logs
-  const fetchLogs = async () => {
+  const fetchLogs = useCallback(async () => {
     setLogsLoading(true);
     try {
       const params = {};
       if (filterLogType) params.log_type = filterLogType;
       const res = await assetApi.getLogs(params);
-      if (res.success) setLogs(res.data);
+      if (res.success) setLogs(res.data || []);
     } catch (err) {
       console.error('Error loading asset logs:', err);
     } finally {
       setLogsLoading(false);
     }
-  };
+  }, [filterLogType]);
+
+  // Fetch By-Branch Explorer Assets independently
+  const fetchBranchAssets = useCallback(async (bId) => {
+    if (!bId) {
+      setBranchAssets([]);
+      return;
+    }
+    setBranchAssetsLoading(true);
+    try {
+      const res = await assetApi.getAll({ branch_id: bId });
+      if (res.success) setBranchAssets(res.data || []);
+    } catch (err) {
+      console.error('Error loading branch assets:', err);
+    } finally {
+      setBranchAssetsLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     fetchStats();
-  }, []);
+  }, [fetchStats]);
 
   useEffect(() => {
     if (activeTab === 'list') {
       fetchAssets();
     } else if (activeTab === 'logs') {
       fetchLogs();
+    } else if (activeTab === 'by-branch') {
+      fetchBranchAssets(selectedBranchId);
     }
-  }, [activeTab, filterBranch, filterCategory, filterCondition, filterStatus, searchQuery, filterLogType]);
+  }, [activeTab, fetchAssets, fetchLogs, fetchBranchAssets, selectedBranchId]);
 
   // Handle Add Asset Submit
   const handleAddSubmit = async (e) => {
     e.preventDefault();
-    if (!addForm.name || !addForm.branch_id || !addForm.category) {
+    if (!addForm.name.trim() || !addForm.branch_id || !addForm.category) {
       alert('Nama aset, cabang, dan kategori wajib diisi.');
       return;
     }
@@ -217,6 +269,7 @@ export default function AssetManagement() {
       });
       fetchAssets();
       fetchStats();
+      if (activeTab === 'by-branch' && selectedBranchId) fetchBranchAssets(selectedBranchId);
     } catch (err) {
       alert(err.message || 'Gagal menambahkan aset.');
     } finally {
@@ -228,7 +281,7 @@ export default function AssetManagement() {
   const handleReplaceSubmit = async (e) => {
     e.preventDefault();
     if (!selectedAsset) return;
-    if (!replaceForm.replacement_asset_name || !replaceForm.reason) {
+    if (!replaceForm.replacement_asset_name.trim() || !replaceForm.reason.trim()) {
       alert('Nama barang pengganti dan alasan penggantian wajib diisi.');
       return;
     }
@@ -251,6 +304,7 @@ export default function AssetManagement() {
       fetchAssets();
       fetchStats();
       if (activeTab === 'logs') fetchLogs();
+      if (activeTab === 'by-branch' && selectedBranchId) fetchBranchAssets(selectedBranchId);
     } catch (err) {
       alert(err.message || 'Gagal menyimpan penggantian aset.');
     } finally {
@@ -274,6 +328,8 @@ export default function AssetManagement() {
       setSelectedAsset(null);
       fetchAssets();
       fetchStats();
+      if (activeTab === 'logs') fetchLogs();
+      if (activeTab === 'by-branch' && selectedBranchId) fetchBranchAssets(selectedBranchId);
     } catch (err) {
       alert(err.message || 'Gagal mutasi aset.');
     } finally {
@@ -294,6 +350,8 @@ export default function AssetManagement() {
       setSelectedAsset(null);
       fetchAssets();
       fetchStats();
+      if (activeTab === 'logs') fetchLogs();
+      if (activeTab === 'by-branch' && selectedBranchId) fetchBranchAssets(selectedBranchId);
     } catch (err) {
       alert(err.message || 'Gagal menyimpan catatan servis.');
     } finally {
@@ -305,16 +363,46 @@ export default function AssetManagement() {
   const handleEditSubmit = async (e) => {
     e.preventDefault();
     if (!selectedAsset) return;
+    const trimmedName = (selectedAsset.name || '').trim();
+    if (!trimmedName) {
+      alert('Nama aset wajib diisi.');
+      return;
+    }
 
     setIsSubmitting(true);
     try {
-      const res = await assetApi.update(selectedAsset.id, selectedAsset);
+      const payload = {
+        name: trimmedName,
+        condition: selectedAsset.condition,
+        status: selectedAsset.status,
+        notes: selectedAsset.notes || '',
+      };
+      const res = await assetApi.update(selectedAsset.id, payload);
       showToast(res.message || 'Aset berhasil diperbarui!');
       setShowEditModal(false);
       setSelectedAsset(null);
       fetchAssets();
+      fetchStats();
+      if (activeTab === 'by-branch' && selectedBranchId) fetchBranchAssets(selectedBranchId);
     } catch (err) {
       alert(err.message || 'Gagal memperbarui aset.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDeleteAsset = async (asset) => {
+    if (isSubmitting) return;
+    if (!window.confirm(`Hapus aset "${asset.name}" (${asset.asset_code})?`)) return;
+    setIsSubmitting(true);
+    try {
+      await assetApi.delete(asset.id);
+      showToast('Aset berhasil dihapus.');
+      fetchAssets();
+      fetchStats();
+      if (activeTab === 'by-branch' && selectedBranchId) fetchBranchAssets(selectedBranchId);
+    } catch (err) {
+      alert(err.message || 'Gagal menghapus aset.');
     } finally {
       setIsSubmitting(false);
     }
@@ -333,12 +421,12 @@ export default function AssetManagement() {
   return (
     <div style={{ maxWidth: '1200px', margin: '0 auto', paddingBottom: '60px' }}>
       {/* Toast */}
-      {toastMsg && (
+      {toastMsg && createPortal(
         <div style={{
           position: 'fixed',
           bottom: '24px',
           right: '24px',
-          zIndex: 9999,
+          zIndex: 3100,
           background: 'linear-gradient(135deg, #10b981, #059669)',
           color: '#fff',
           padding: '12px 20px',
@@ -351,7 +439,8 @@ export default function AssetManagement() {
         }}>
           <span>✅</span>
           <span>{toastMsg}</span>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Header Banner */}
@@ -633,6 +722,13 @@ export default function AssetManagement() {
             </select>
           </div>
 
+          {assetsError && (
+            <div className="card" style={{ marginBottom: '16px', padding: '12px 16px', border: '1px solid rgba(239,68,68,0.35)', background: 'var(--color-danger-bg)', color: 'var(--color-danger)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '13px', fontWeight: 600 }}>⚠ {assetsError}</span>
+              <button type="button" onClick={fetchAssets} className="btn btn-secondary" style={{ fontSize: '12px', padding: '6px 12px' }}>Coba Lagi</button>
+            </div>
+          )}
+
           {/* Asset Cards List */}
           {assetsLoading ? (
             <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>Memuat data aset...</div>
@@ -660,8 +756,8 @@ export default function AssetManagement() {
                           fontWeight: 800,
                           padding: '2px 8px',
                           borderRadius: '6px',
-                          background: 'rgba(59, 130, 246, 0.15)',
-                          color: '#3b82f6'
+                          background: 'var(--color-info-bg)',
+                          color: 'var(--color-info)'
                         }}>
                           {asset.branch_name} ({asset.branch_code})
                         </span>
@@ -687,11 +783,11 @@ export default function AssetManagement() {
                           padding: '2px 8px',
                           borderRadius: '4px',
                           background:
-                            asset.condition === 'Baik' ? 'rgba(16, 185, 129, 0.15)' :
-                            asset.condition === 'Rusak Ringan' ? 'rgba(245, 158, 11, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                            asset.condition === 'Baik' ? 'var(--color-success-bg)' :
+                            asset.condition === 'Rusak Ringan' ? 'var(--color-warning-bg)' : 'var(--color-danger-bg)',
                           color:
-                            asset.condition === 'Baik' ? '#10b981' :
-                            asset.condition === 'Rusak Ringan' ? '#f59e0b' : '#ef4444'
+                            asset.condition === 'Baik' ? 'var(--color-success)' :
+                            asset.condition === 'Rusak Ringan' ? 'var(--color-warning)' : 'var(--color-danger)'
                         }}>
                           {asset.condition}
                         </span>
@@ -702,8 +798,9 @@ export default function AssetManagement() {
                             fontWeight: 800,
                             padding: '2px 8px',
                             borderRadius: '4px',
-                            background: 'rgba(148, 163, 184, 0.2)',
-                            color: '#94a3b8'
+                            background: 'var(--bg-secondary)',
+                            border: '1px solid var(--border-color)',
+                            color: 'var(--text-secondary)'
                           }}>
                             Status: {asset.status}
                           </span>
@@ -715,7 +812,7 @@ export default function AssetManagement() {
                       </div>
 
                       <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                        📅 Tanggal Beli: <strong>{asset.purchase_date || '-'}</strong> • Nilai: <strong style={{ color: '#10b981' }}>{fmtRp(asset.purchase_cost)}</strong>
+                        📅 Tanggal Beli: <strong>{asset.purchase_date || '-'}</strong> • Nilai: <strong style={{ color: 'var(--color-success)' }}>{fmtRp(asset.purchase_cost)}</strong>
                         {asset.serial_number && ` • SN/IMEI: ${asset.serial_number}`}
                         {asset.vendor_supplier && ` • Vendor: ${asset.vendor_supplier}`}
                       </div>
@@ -732,6 +829,7 @@ export default function AssetManagement() {
                       {/* Tombol Penggantian Aset */}
                       {asset.status === 'Aktif' && (
                         <button
+                          type="button"
                           onClick={() => {
                             setSelectedAsset(asset);
                             setReplaceForm({
@@ -771,6 +869,7 @@ export default function AssetManagement() {
                       {/* Tombol Mutasi Cabang */}
                       {asset.status === 'Aktif' && (
                         <button
+                          type="button"
                           onClick={() => {
                             setSelectedAsset(asset);
                             setMutateForm({
@@ -802,6 +901,7 @@ export default function AssetManagement() {
                       {/* Tombol Servis */}
                       {asset.status === 'Aktif' && (
                         <button
+                          type="button"
                           onClick={() => {
                             setSelectedAsset(asset);
                             setServiceForm({
@@ -833,6 +933,7 @@ export default function AssetManagement() {
 
                       {/* Edit */}
                       <button
+                        type="button"
                         onClick={() => {
                           setSelectedAsset({ ...asset });
                           setShowEditModal(true);
@@ -852,21 +953,17 @@ export default function AssetManagement() {
 
                       {/* Delete */}
                       <button
-                        onClick={async () => {
-                          if (confirm(`Hapus aset "${asset.name}" (${asset.asset_code})?`)) {
-                            await assetApi.delete(asset.id);
-                            showToast('Aset berhasil dihapus.');
-                            fetchAssets();
-                            fetchStats();
-                          }
-                        }}
+                        type="button"
+                        disabled={isSubmitting}
+                        onClick={() => handleDeleteAsset(asset)}
                         style={{
                           background: 'transparent',
                           border: 'none',
                           color: 'var(--text-muted)',
                           fontSize: '14px',
-                          cursor: 'pointer',
-                          padding: '6px'
+                          cursor: isSubmitting ? 'not-allowed' : 'pointer',
+                          padding: '6px',
+                          opacity: isSubmitting ? 0.5 : 1
                         }}
                         title="Hapus"
                       >
@@ -965,13 +1062,13 @@ export default function AssetManagement() {
                           padding: '2px 8px',
                           borderRadius: '6px',
                           background:
-                            log.log_type === 'Penggantian' ? 'rgba(245, 158, 11, 0.2)' :
-                            log.log_type === 'Penambahan' ? 'rgba(16, 185, 129, 0.2)' :
-                            log.log_type === 'Mutasi Cabang' ? 'rgba(59, 130, 246, 0.2)' : 'rgba(139, 92, 246, 0.2)',
+                            log.log_type === 'Penggantian' ? 'var(--color-warning-bg)' :
+                            log.log_type === 'Penambahan' ? 'var(--color-success-bg)' :
+                            log.log_type === 'Mutasi Cabang' ? 'var(--color-info-bg)' : 'rgba(139, 92, 246, 0.16)',
                           color:
-                            log.log_type === 'Penggantian' ? '#f59e0b' :
-                            log.log_type === 'Penambahan' ? '#10b981' :
-                            log.log_type === 'Mutasi Cabang' ? '#3b82f6' : '#8b5cf6'
+                            log.log_type === 'Penggantian' ? 'var(--color-warning)' :
+                            log.log_type === 'Penambahan' ? 'var(--color-success)' :
+                            log.log_type === 'Mutasi Cabang' ? 'var(--color-info)' : 'var(--color-primary)'
                         }}>
                           {log.log_type}
                         </span>
@@ -988,7 +1085,7 @@ export default function AssetManagement() {
                       {/* Details based on log type */}
                       {log.log_type === 'Penggantian' && (
                         <div style={{ marginTop: '6px', fontSize: '13px', color: 'var(--text-primary)' }}>
-                          ↳ <strong>Aset Pengganti Baru:</strong> <span style={{ color: '#10b981', fontWeight: 700 }}>{log.replacement_asset_name}</span>
+                          ↳ <strong>Aset Pengganti Baru:</strong> <span style={{ color: 'var(--color-success)', fontWeight: 700 }}>{log.replacement_asset_name}</span>
                           {log.cost > 0 && ` (Biaya: ${fmtRp(log.cost)})`}
                         </div>
                       )}
@@ -1047,8 +1144,9 @@ export default function AssetManagement() {
           </div>
 
           {/* Branch Assets List */}
-          {(() => {
-            const branchAssets = assets.filter(a => String(a.branch_id) === String(selectedBranchId));
+          {branchAssetsLoading ? (
+            <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>Memuat inventaris cabang...</div>
+          ) : (() => {
             const activeBranchAssets = branchAssets.filter(a => a.status === 'Aktif');
             const totalBranchValue = activeBranchAssets.reduce((acc, curr) => acc + (curr.purchase_cost || 0), 0);
 
@@ -1068,7 +1166,7 @@ export default function AssetManagement() {
                   </div>
                   <div className="card" style={{ padding: '14px' }}>
                     <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>TOTAL NILAI ASET CABANG</div>
-                    <div style={{ fontSize: '20px', fontWeight: 800, color: '#10b981', marginTop: '4px' }}>
+                    <div style={{ fontSize: '20px', fontWeight: 800, color: 'var(--color-success)', marginTop: '4px' }}>
                       {fmtRp(totalBranchValue)}
                     </div>
                   </div>
@@ -1081,13 +1179,13 @@ export default function AssetManagement() {
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                     {activeBranchAssets.map(a => (
-                      <div key={a.id} className="card" style={{ padding: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div key={a.id} className="card" style={{ padding: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
                         <div>
                           <div style={{ fontWeight: 800, color: 'var(--text-primary)', fontSize: '14px' }}>
                             {a.name} <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>({a.asset_code})</span>
                           </div>
                           <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                            {a.category} • Kondisi: <strong style={{ color: a.condition === 'Baik' ? '#10b981' : '#f59e0b' }}>{a.condition}</strong> • Nilai: {fmtRp(a.purchase_cost)}
+                            {a.category} • Kondisi: <strong style={{ color: a.condition === 'Baik' ? 'var(--color-success)' : 'var(--color-warning)' }}>{a.condition}</strong> • Nilai: {fmtRp(a.purchase_cost)}
                           </div>
                         </div>
 
@@ -1107,18 +1205,25 @@ export default function AssetManagement() {
       {/* ─────────────────────────────────────────────────────────────
           MODAL: TAMBAH ASET BARU
       ─────────────────────────────────────────────────────────────── */}
-      {showAddModal && (
-        <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)',
-          backdropFilter: 'blur(4px)', display: 'flex', justifyContent: 'center',
-          alignItems: 'center', zIndex: 2000, padding: '16px'
-        }}>
-          <div className="card" style={{ width: '100%', maxWidth: '600px', maxHeight: '90vh', overflowY: 'auto' }}>
+      {showAddModal && createPortal(
+        <div
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)',
+            backdropFilter: 'blur(4px)', display: 'flex', justifyContent: 'center',
+            alignItems: 'center', zIndex: 3000, padding: '16px', overscrollBehavior: 'contain'
+          }}
+          onClick={() => !isSubmitting && setShowAddModal(false)}
+        >
+          <div
+            className="card"
+            style={{ width: '100%', maxWidth: '600px', maxHeight: '90vh', overflowY: 'auto', background: 'var(--bg-surface-opaque)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <h2 style={{ fontSize: '18px', fontWeight: 800, margin: 0, color: 'var(--text-primary)' }}>
                 ➕ Pendaftaran / Penambahan Aset Baru
               </h2>
-              <button onClick={() => setShowAddModal(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '20px', cursor: 'pointer' }}>✕</button>
+              <button type="button" disabled={isSubmitting} onClick={() => setShowAddModal(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '20px', cursor: 'pointer' }}>✕</button>
             </div>
 
             <form onSubmit={handleAddSubmit}>
@@ -1249,16 +1354,21 @@ export default function AssetManagement() {
                   type="file"
                   accept="image/*"
                   multiple
-                  capture="environment"
                   onChange={(e) => {
                     if (e.target.files) setAddPhotos(Array.from(e.target.files));
+                    e.target.value = '';
                   }}
                   style={{ width: '100%', padding: '8px', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px dashed var(--border-color)', color: 'var(--text-primary)', fontSize: '12px' }}
                 />
+                {addPhotos.length > 0 && (
+                  <div style={{ fontSize: '11px', color: 'var(--color-success)', marginTop: '4px' }}>
+                    ✓ {addPhotos.length} foto siap diunggah
+                  </div>
+                )}
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-                <button type="button" onClick={() => setShowAddModal(false)} style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer' }}>
+                <button type="button" disabled={isSubmitting} onClick={() => setShowAddModal(false)} style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer' }}>
                   Batal
                 </button>
                 <button type="submit" disabled={isSubmitting} style={{ background: 'var(--primary)', border: 'none', color: '#fff', padding: '8px 20px', borderRadius: '8px', cursor: 'pointer', fontWeight: 700 }}>
@@ -1267,28 +1377,36 @@ export default function AssetManagement() {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* ─────────────────────────────────────────────────────────────
           MODAL: PENGGANTIAN ASET (REPLACE ASSET)
       ─────────────────────────────────────────────────────────────── */}
-      {showReplaceModal && selectedAsset && (
-        <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)',
-          backdropFilter: 'blur(4px)', display: 'flex', justifyContent: 'center',
-          alignItems: 'center', zIndex: 2000, padding: '16px'
-        }}>
-          <div className="card" style={{ width: '100%', maxWidth: '580px', maxHeight: '90vh', overflowY: 'auto' }}>
+      {showReplaceModal && selectedAsset && createPortal(
+        <div
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)',
+            backdropFilter: 'blur(4px)', display: 'flex', justifyContent: 'center',
+            alignItems: 'center', zIndex: 3000, padding: '16px', overscrollBehavior: 'contain'
+          }}
+          onClick={() => !isSubmitting && setShowReplaceModal(false)}
+        >
+          <div
+            className="card"
+            style={{ width: '100%', maxWidth: '580px', maxHeight: '90vh', overflowY: 'auto', background: 'var(--bg-surface-opaque)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <h2 style={{ fontSize: '18px', fontWeight: 800, margin: 0, color: '#f59e0b' }}>
                 🔄 Penggantian Aset ({selectedAsset.name})
               </h2>
-              <button onClick={() => setShowReplaceModal(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '20px', cursor: 'pointer' }}>✕</button>
+              <button type="button" disabled={isSubmitting} onClick={() => setShowReplaceModal(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '20px', cursor: 'pointer' }}>✕</button>
             </div>
 
             <div style={{
-              background: 'rgba(245, 158, 11, 0.1)',
+              background: 'var(--color-warning-bg)',
               border: '1px solid rgba(245, 158, 11, 0.3)',
               borderRadius: '8px',
               padding: '12px',
@@ -1395,16 +1513,21 @@ export default function AssetManagement() {
                   type="file"
                   accept="image/*"
                   multiple
-                  capture="environment"
                   onChange={(e) => {
                     if (e.target.files) setReplacePhotos(Array.from(e.target.files));
+                    e.target.value = '';
                   }}
                   style={{ width: '100%', padding: '8px', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px dashed var(--border-color)', color: 'var(--text-primary)', fontSize: '12px' }}
                 />
+                {replacePhotos.length > 0 && (
+                  <div style={{ fontSize: '11px', color: 'var(--color-success)', marginTop: '4px' }}>
+                    ✓ {replacePhotos.length} foto bukti siap diunggah
+                  </div>
+                )}
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-                <button type="button" onClick={() => setShowReplaceModal(false)} style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer' }}>
+                <button type="button" disabled={isSubmitting} onClick={() => setShowReplaceModal(false)} style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer' }}>
                   Batal
                 </button>
                 <button type="submit" disabled={isSubmitting} style={{ background: 'linear-gradient(135deg, #f59e0b, #d97706)', border: 'none', color: '#fff', padding: '8px 20px', borderRadius: '8px', cursor: 'pointer', fontWeight: 700 }}>
@@ -1413,24 +1536,32 @@ export default function AssetManagement() {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* ─────────────────────────────────────────────────────────────
           MODAL: MUTASI CABANG
       ─────────────────────────────────────────────────────────────── */}
-      {showMutateModal && selectedAsset && (
-        <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)',
-          backdropFilter: 'blur(4px)', display: 'flex', justifyContent: 'center',
-          alignItems: 'center', zIndex: 2000, padding: '16px'
-        }}>
-          <div className="card" style={{ width: '100%', maxWidth: '480px' }}>
+      {showMutateModal && selectedAsset && createPortal(
+        <div
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)',
+            backdropFilter: 'blur(4px)', display: 'flex', justifyContent: 'center',
+            alignItems: 'center', zIndex: 3000, padding: '16px', overscrollBehavior: 'contain'
+          }}
+          onClick={() => !isSubmitting && setShowMutateModal(false)}
+        >
+          <div
+            className="card"
+            style={{ width: '100%', maxWidth: '480px', maxHeight: '90vh', overflowY: 'auto', background: 'var(--bg-surface-opaque)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <h2 style={{ fontSize: '16px', fontWeight: 800, margin: 0, color: '#3b82f6' }}>
                 🚚 Mutasi Aset Antar Cabang
               </h2>
-              <button onClick={() => setShowMutateModal(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '18px', cursor: 'pointer' }}>✕</button>
+              <button type="button" disabled={isSubmitting} onClick={() => setShowMutateModal(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '18px', cursor: 'pointer' }}>✕</button>
             </div>
 
             <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '14px' }}>
@@ -1469,7 +1600,7 @@ export default function AssetManagement() {
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-                <button type="button" onClick={() => setShowMutateModal(false)} style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer' }}>
+                <button type="button" disabled={isSubmitting} onClick={() => setShowMutateModal(false)} style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer' }}>
                   Batal
                 </button>
                 <button type="submit" disabled={isSubmitting} style={{ background: '#3b82f6', border: 'none', color: '#fff', padding: '8px 20px', borderRadius: '8px', cursor: 'pointer', fontWeight: 700 }}>
@@ -1478,24 +1609,32 @@ export default function AssetManagement() {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* ─────────────────────────────────────────────────────────────
           MODAL: SERVIS / PERBAIKAN ASET
       ─────────────────────────────────────────────────────────────── */}
-      {showServiceModal && selectedAsset && (
-        <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)',
-          backdropFilter: 'blur(4px)', display: 'flex', justifyContent: 'center',
-          alignItems: 'center', zIndex: 2000, padding: '16px'
-        }}>
-          <div className="card" style={{ width: '100%', maxWidth: '480px' }}>
+      {showServiceModal && selectedAsset && createPortal(
+        <div
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)',
+            backdropFilter: 'blur(4px)', display: 'flex', justifyContent: 'center',
+            alignItems: 'center', zIndex: 3000, padding: '16px', overscrollBehavior: 'contain'
+          }}
+          onClick={() => !isSubmitting && setShowServiceModal(false)}
+        >
+          <div
+            className="card"
+            style={{ width: '100%', maxWidth: '480px', maxHeight: '90vh', overflowY: 'auto', background: 'var(--bg-surface-opaque)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <h2 style={{ fontSize: '16px', fontWeight: 800, margin: 0, color: '#8b5cf6' }}>
                 🛠️ Servis / Perbaikan Aset
               </h2>
-              <button onClick={() => setShowServiceModal(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '18px', cursor: 'pointer' }}>✕</button>
+              <button type="button" disabled={isSubmitting} onClick={() => setShowServiceModal(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '18px', cursor: 'pointer' }}>✕</button>
             </div>
 
             <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '14px' }}>
@@ -1545,7 +1684,7 @@ export default function AssetManagement() {
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-                <button type="button" onClick={() => setShowServiceModal(false)} style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer' }}>
+                <button type="button" disabled={isSubmitting} onClick={() => setShowServiceModal(false)} style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer' }}>
                   Batal
                 </button>
                 <button type="submit" disabled={isSubmitting} style={{ background: '#8b5cf6', border: 'none', color: '#fff', padding: '8px 20px', borderRadius: '8px', cursor: 'pointer', fontWeight: 700 }}>
@@ -1554,31 +1693,40 @@ export default function AssetManagement() {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* ─────────────────────────────────────────────────────────────
           MODAL: EDIT ASET
       ─────────────────────────────────────────────────────────────── */}
-      {showEditModal && selectedAsset && (
-        <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)',
-          backdropFilter: 'blur(4px)', display: 'flex', justifyContent: 'center',
-          alignItems: 'center', zIndex: 2000, padding: '16px'
-        }}>
-          <div className="card" style={{ width: '100%', maxWidth: '500px' }}>
+      {showEditModal && selectedAsset && createPortal(
+        <div
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)',
+            backdropFilter: 'blur(4px)', display: 'flex', justifyContent: 'center',
+            alignItems: 'center', zIndex: 3000, padding: '16px', overscrollBehavior: 'contain'
+          }}
+          onClick={() => !isSubmitting && setShowEditModal(false)}
+        >
+          <div
+            className="card"
+            style={{ width: '100%', maxWidth: '500px', maxHeight: '90vh', overflowY: 'auto', background: 'var(--bg-surface-opaque)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <h2 style={{ fontSize: '16px', fontWeight: 800, margin: 0, color: 'var(--text-primary)' }}>
                 ✏️ Edit Informasi Aset
               </h2>
-              <button onClick={() => setShowEditModal(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '18px', cursor: 'pointer' }}>✕</button>
+              <button type="button" disabled={isSubmitting} onClick={() => setShowEditModal(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '18px', cursor: 'pointer' }}>✕</button>
             </div>
 
             <form onSubmit={handleEditSubmit}>
               <div style={{ marginBottom: '12px' }}>
-                <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>Nama Aset</label>
+                <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>Nama Aset *</label>
                 <input
                   type="text"
+                  required
                   value={selectedAsset.name}
                   onChange={(e) => setSelectedAsset({ ...selectedAsset, name: e.target.value })}
                   style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}
@@ -1625,7 +1773,7 @@ export default function AssetManagement() {
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-                <button type="button" onClick={() => setShowEditModal(false)} style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer' }}>
+                <button type="button" disabled={isSubmitting} onClick={() => setShowEditModal(false)} style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer' }}>
                   Batal
                 </button>
                 <button type="submit" disabled={isSubmitting} style={{ background: 'var(--primary)', border: 'none', color: '#fff', padding: '8px 20px', borderRadius: '8px', cursor: 'pointer', fontWeight: 700 }}>
@@ -1634,7 +1782,8 @@ export default function AssetManagement() {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

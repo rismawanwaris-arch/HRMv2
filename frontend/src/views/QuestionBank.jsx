@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import API_BASE from '../config';
+import { createPortal } from 'react-dom';
+import { adminTestApi } from '../services/api';
 
-function QuestionBank() {
+function QuestionBank({ currentRole }) {
   const [questions, setQuestions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  
+  const [submitting, setSubmitting] = useState(false);
+
   // Category tabs
-  const [activeTab, setActiveTab] = useState('numerik'); // 'numerik', 'situasional', 'produk', 'kepribadian'
+  const [activeTab, setActiveTab] = useState('numerik');
 
   // Modal states
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -40,17 +42,27 @@ function QuestionBank() {
     fetchQuestions();
   }, []);
 
+  useEffect(() => {
+    if (!isModalOpen) return undefined;
+    const onKey = (e) => {
+      if (e.key === 'Escape') setIsModalOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isModalOpen]);
+
   const fetchQuestions = async () => {
     try {
       setLoading(true);
-      const res = await fetch(`${API_BASE}/admin/questions`);
-      const data = await res.json();
+      setError(null);
+      const data = await adminTestApi.getQuestions();
       if (data.success) {
-        setQuestions(data.questions);
+        setQuestions(data.questions || []);
+      } else {
+        setError(data.message || 'Gagal memuat bank soal.');
       }
     } catch (err) {
-      console.error('Error fetching questions:', err);
-      setError('Gagal memuat bank soal.');
+      setError(err.message || 'Gagal memuat bank soal.');
     } finally {
       setLoading(false);
     }
@@ -58,6 +70,15 @@ function QuestionBank() {
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
+    if (name === 'subtest') {
+      setFormData(prev => {
+        const nextType = value === 'kepribadian'
+          ? (['likert', 'forced-choice'].includes(prev.question_type) ? prev.question_type : 'likert')
+          : (['multiple-choice', 'essay'].includes(prev.question_type) ? prev.question_type : 'multiple-choice');
+        return { ...prev, subtest: value, question_type: nextType };
+      });
+      return;
+    }
     setFormData(prev => ({
       ...prev,
       [name]: value
@@ -108,20 +129,11 @@ function QuestionBank() {
       return;
     }
 
+    setSubmitting(true);
     try {
-      const url = editingQuestion 
-        ? `${API_BASE}/admin/questions/${editingQuestion.id}`
-        : `${API_BASE}/admin/questions`;
-      
-      const method = editingQuestion ? 'PUT' : 'POST';
-
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData)
-      });
-      
-      const data = await res.json();
+      const data = editingQuestion
+        ? await adminTestApi.updateQuestion(editingQuestion.id, formData)
+        : await adminTestApi.addQuestion(formData);
 
       if (data.success) {
         alert(editingQuestion ? 'Soal berhasil diperbarui.' : 'Soal baru berhasil disimpan.');
@@ -131,8 +143,9 @@ function QuestionBank() {
         alert(data.message || 'Gagal menyimpan data.');
       }
     } catch (err) {
-      console.error('Submit error:', err);
-      alert('Terjadi kesalahan koneksi.');
+      alert(err.message || 'Terjadi kesalahan koneksi.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -143,18 +156,14 @@ function QuestionBank() {
     }
 
     try {
-      const res = await fetch(`${API_BASE}/admin/questions/${id}`, {
-        method: 'DELETE'
-      });
-      const data = await res.json();
+      const data = await adminTestApi.deleteQuestion(id);
       if (data.success) {
         fetchQuestions();
       } else {
         alert(data.message || 'Gagal menghapus soal.');
       }
     } catch (err) {
-      console.error('Delete question error:', err);
-      alert('Koneksi gagal.');
+      alert(err.message || 'Koneksi gagal.');
     }
   };
 
@@ -170,8 +179,8 @@ function QuestionBank() {
           <h1 className="page-title">Manajemen Bank Soal</h1>
           <p className="page-subtitle">Kelola instrumen soal ujian online untuk penyeleksian kandidat.</p>
         </div>
-        <button className="btn btn-primary" onClick={handleOpenAddModal}>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{marginRight: '6px'}}><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+        <button type="button" className="btn btn-primary" onClick={handleOpenAddModal}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
           Tambah Soal Baru
         </button>
       </div>
@@ -196,7 +205,10 @@ function QuestionBank() {
         {loading ? (
           <div className="loading-spinner"></div>
         ) : error ? (
-          <div style={{ color: 'var(--color-danger)', textAlign: 'center' }}>{error}</div>
+          <div style={{ color: 'var(--color-danger)', textAlign: 'center', padding: '20px' }}>
+            <p style={{ marginBottom: '12px' }}>{error}</p>
+            <button type="button" className="btn btn-secondary" onClick={fetchQuestions}>Coba Lagi</button>
+          </div>
         ) : getFilteredQuestions().length === 0 ? (
           <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--text-secondary)' }}>
             Belum ada soal pada kategori ini. Klik "Tambah Soal Baru" di atas untuk menambahkan.
@@ -204,12 +216,12 @@ function QuestionBank() {
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
             {getFilteredQuestions().map((q, idx) => (
-              <div 
-                key={q.id} 
-                style={{ 
-                  background: 'rgba(255, 255, 255, 0.01)', 
-                  border: '1px solid var(--border-color)', 
-                  borderRadius: '12px', 
+              <div
+                key={q.id}
+                style={{
+                  background: 'var(--bg-secondary)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '12px',
                   padding: '20px',
                   position: 'relative'
                 }}
@@ -219,13 +231,13 @@ function QuestionBank() {
                   <span className="badge badge-active" style={{ fontSize: '10px' }}>
                     No. {idx + 1} | ID: {q.id}
                   </span>
-                  
-                  <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+
+                  <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
                     <span style={{ fontSize: '11px', color: 'var(--text-secondary)', background: 'var(--bg-hover)', padding: '2px 8px', borderRadius: '4px' }}>
-                      Tipe: {q.question_type.toUpperCase()}
+                      Tipe: {(q.question_type || '-').toUpperCase()}
                     </span>
                     {q.dimension && (
-                      <span style={{ fontSize: '11px', color: 'var(--secondary)', background: 'rgba(147, 51, 234, 0.1)', padding: '2px 8px', borderRadius: '4px' }}>
+                      <span style={{ fontSize: '11px', color: 'var(--secondary)', background: 'rgba(147, 51, 234, 0.12)', padding: '2px 8px', borderRadius: '4px' }}>
                         Dimensi: {q.dimension}
                       </span>
                     )}
@@ -233,13 +245,13 @@ function QuestionBank() {
                 </div>
 
                 {/* Question Text */}
-                <div style={{ fontSize: '15px', color: 'white', fontWeight: '500', marginBottom: '16px', lineHeight: '1.5' }}>
+                <div style={{ fontSize: '15px', color: 'var(--text-primary)', fontWeight: '500', marginBottom: '16px', lineHeight: '1.5' }}>
                   {q.question_text}
                 </div>
 
                 {/* Options display */}
                 {q.question_type === 'multiple-choice' && (
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px', background: 'rgba(0,0,0,0.1)', padding: '12px', borderRadius: '8px', marginBottom: '12px' }}>
+                  <div className="responsive-grid-2" style={{ gap: '10px', background: 'var(--bg-surface)', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color)', marginBottom: '12px' }}>
                     <div style={{ fontSize: '13px', color: q.correct_option === 'A' ? 'var(--color-success)' : 'var(--text-secondary)' }}>
                       <strong>A.</strong> {q.option_a} {q.correct_option === 'A' && '✓'}
                     </div>
@@ -256,7 +268,7 @@ function QuestionBank() {
                 )}
 
                 {q.question_type === 'forced-choice' && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', background: 'rgba(0,0,0,0.1)', padding: '12px', borderRadius: '8px', marginBottom: '12px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', background: 'var(--bg-surface)', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color)', marginBottom: '12px' }}>
                     <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
                       <strong>Opsi P:</strong> {q.option_p}
                     </div>
@@ -273,7 +285,7 @@ function QuestionBank() {
                 )}
 
                 {q.question_type === 'essay' && (
-                  <div style={{ background: 'rgba(0,0,0,0.1)', padding: '12px', borderRadius: '8px', marginBottom: '12px' }}>
+                  <div style={{ background: 'var(--bg-surface)', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color)', marginBottom: '12px' }}>
                     <div style={{ fontSize: '13px', color: 'var(--color-success)' }}>
                       <strong>Kunci Jawaban Isian:</strong> {q.correct_option}
                     </div>
@@ -282,20 +294,24 @@ function QuestionBank() {
 
                 {/* Actions bottom alignment */}
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', borderTop: '1px solid var(--border-color)', paddingTop: '12px', marginTop: '12px' }}>
-                  <button 
-                    className="btn btn-secondary" 
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
                     style={{ padding: '6px 12px', fontSize: '12px' }}
                     onClick={() => handleOpenEditModal(q)}
                   >
                     Edit Soal
                   </button>
-                  <button 
-                    className="btn btn-danger" 
-                    style={{ padding: '6px 12px', fontSize: '12px', background: 'rgba(239, 68, 68, 0.1)', color: 'var(--color-danger)', border: '1px solid rgba(239, 68, 68, 0.2)' }}
-                    onClick={(e) => handleDeleteQuestion(q.id, e)}
-                  >
-                    Hapus
-                  </button>
+                  {currentRole === 'master' && (
+                    <button
+                      type="button"
+                      className="btn btn-danger"
+                      style={{ padding: '6px 12px', fontSize: '12px', background: 'var(--color-danger-bg)', color: 'var(--color-danger)', border: '1px solid rgba(239, 68, 68, 0.25)' }}
+                      onClick={(e) => handleDeleteQuestion(q.id, e)}
+                    >
+                      Hapus
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
@@ -304,12 +320,20 @@ function QuestionBank() {
       </div>
 
       {/* Add / Edit Question Modal */}
-      {isModalOpen && (
-        <div className="modal-overlay">
-          <div className="glass-panel modal-content" style={{ maxWidth: '650px' }}>
+      {isModalOpen && createPortal(
+        <div
+          className="modal-overlay"
+          style={{ zIndex: 3000, overscrollBehavior: 'contain' }}
+          onClick={(e) => { if (e.target === e.currentTarget) setIsModalOpen(false); }}
+        >
+          <div
+            className="glass-panel modal-content"
+            style={{ maxWidth: '650px', background: 'var(--bg-surface-opaque)', overscrollBehavior: 'contain' }}
+            onClick={e => e.stopPropagation()}
+          >
             <div className="modal-header">
               <h2 className="modal-title">{editingQuestion ? 'Edit Soal Ujian' : 'Tambah Soal Ujian Baru'}</h2>
-              <button className="close-btn" onClick={() => setIsModalOpen(false)}>×</button>
+              <button type="button" className="close-btn" onClick={() => setIsModalOpen(false)}>×</button>
             </div>
 
             <form onSubmit={handleFormSubmit} className="form-grid">
@@ -343,10 +367,10 @@ function QuestionBank() {
 
               <div className="form-group form-group-full">
                 <label>Teks Soal / Pertanyaan *</label>
-                <textarea 
-                  name="question_text" 
-                  value={formData.question_text} 
-                  onChange={handleInputChange} 
+                <textarea
+                  name="question_text"
+                  value={formData.question_text}
+                  onChange={handleInputChange}
                   placeholder="Masukkan kalimat pertanyaan atau pernyataan soal..."
                   rows={3}
                   required
@@ -388,13 +412,13 @@ function QuestionBank() {
               {formData.question_type === 'essay' && (
                 <div className="form-group form-group-full">
                   <label>Kunci Jawaban Benar (Isian Singkat) *</label>
-                  <input 
-                    type="text" 
-                    name="correct_option" 
-                    value={formData.correct_option} 
-                    onChange={handleInputChange} 
-                    placeholder="Contoh: Rp. 1.550.000" 
-                    required 
+                  <input
+                    type="text"
+                    name="correct_option"
+                    value={formData.correct_option}
+                    onChange={handleInputChange}
+                    placeholder="Contoh: Rp. 1.550.000"
+                    required
                   />
                   <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
                     * Jawaban kandidat akan dianggap BENAR jika cocok (tidak sensitif huruf kapital dan spasi berlebih).
@@ -429,24 +453,26 @@ function QuestionBank() {
               )}
 
               {/* Form submit/cancel buttons */}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '20px', borderTop: '1px solid var(--border-color)', paddingTop: '20px', gridColumn: 'span 2' }}>
-                <button 
-                  type="button" 
-                  className="btn btn-secondary" 
+              <div className="form-group-full" style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '20px', borderTop: '1px solid var(--border-color)', paddingTop: '20px' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
                   onClick={() => setIsModalOpen(false)}
                 >
                   Batal
                 </button>
-                <button 
-                  type="submit" 
+                <button
+                  type="submit"
                   className="btn btn-primary"
+                  disabled={submitting}
                 >
-                  {editingQuestion ? 'Perbarui Soal' : 'Simpan Soal'}
+                  {submitting ? 'Menyimpan...' : editingQuestion ? 'Perbarui Soal' : 'Simpan Soal'}
                 </button>
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

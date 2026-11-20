@@ -32,12 +32,22 @@ exports.getOutletReport = async (req, res) => {
         [branch.id, period]
       );
 
+      const asbenRow = await query.get(
+        `SELECT COALESCE(SUM(ar.deduction_late), 0) AS total_asben
+         FROM attendance_records ar
+         JOIN employees e ON ar.employee_id = e.id
+         WHERE e.branch_id = ? AND ar.period = ?`,
+        [branch.id, period]
+      );
+
       const penjualan = fin ? (fin.penjualan || 0) : 0;
+      const pendapatan_asben = asbenRow ? (asbenRow.total_asben || 0) : 0;
+      const total_pendapatan = penjualan + pendapatan_asben;
       const operasional = fin ? (fin.operasional || 0) : 0;
       const sewa = branch.rent_amount || 0;
       const gaji = payrollRow ? (payrollRow.total_gaji || 0) : 0;
       const total_beban = gaji + sewa + operasional;
-      const laba_rugi = penjualan - total_beban;
+      const laba_rugi = total_pendapatan - total_beban;
 
       results.push({
         branch_id: branch.id,
@@ -45,6 +55,8 @@ exports.getOutletReport = async (req, res) => {
         branch_name: branch.name,
         period,
         penjualan,
+        pendapatan_asben,
+        total_pendapatan,
         gaji,
         sewa,
         operasional,
@@ -73,9 +85,21 @@ exports.upsertOutlet = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Format period harus YYYY-MM.' });
     }
 
+    const branchExists = await query.get('SELECT id FROM branches WHERE id = ?', [branchId]);
+    if (!branchExists) {
+      return res.status(404).json({ success: false, message: 'Cabang tidak ditemukan.' });
+    }
+
+    const existingFin = await query.get(
+      'SELECT notes FROM outlet_financials WHERE branch_id = ? AND period = ?',
+      [branchId, period]
+    );
+
     const penjualan = parseFloat(req.body.penjualan) || 0;
     const operasional = parseFloat(req.body.operasional) || 0;
-    const notes = req.body.notes !== undefined ? String(req.body.notes) : null;
+    const notes = req.body.notes !== undefined
+      ? (req.body.notes !== null ? String(req.body.notes) : null)
+      : (existingFin ? existingFin.notes : null);
 
     await query.run(
       `INSERT INTO outlet_financials (branch_id, period, penjualan, operasional, notes, updated_at)
@@ -208,6 +232,16 @@ exports.upsertWarehouse = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Format period harus YYYY-MM.' });
     }
 
+    const branchExists = await query.get('SELECT id FROM branches WHERE id = ?', [branchId]);
+    if (!branchExists) {
+      return res.status(404).json({ success: false, message: 'Cabang tidak ditemukan.' });
+    }
+
+    const existingWh = await query.get(
+      'SELECT notes FROM warehouse_reports WHERE branch_id = ? AND period = ?',
+      [branchId, period]
+    );
+
     const {
       penj_gudang = 0,
       pendapatan_lain = 0,
@@ -219,8 +253,11 @@ exports.upsertWarehouse = async (req, res) => {
       biaya_bonus_penjualan = 0,
       bagi_hasil_petshop = 0,
       penyusutan = 0,
-      notes = null
     } = req.body;
+
+    const finalNotes = req.body.notes !== undefined
+      ? (req.body.notes !== null && req.body.notes !== '' ? String(req.body.notes) : null)
+      : (existingWh ? existingWh.notes : null);
 
     await query.run(
       `INSERT INTO warehouse_reports (
@@ -253,7 +290,7 @@ exports.upsertWarehouse = async (req, res) => {
         parseFloat(biaya_bonus_penjualan) || 0,
         parseFloat(bagi_hasil_petshop) || 0,
         parseFloat(penyusutan) || 0,
-        notes ? String(notes) : null
+        finalNotes
       ]
     );
 

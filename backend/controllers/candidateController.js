@@ -1,14 +1,40 @@
 const { query, uploadsDir } = require('../db');
-const { generateAccessCode, getCandidateFolderName, upload } = require('../utils/helpers');
+const { generateAccessCode, getCandidateFolderName, upload, cleanupUploadedFiles } = require('../utils/helpers');
 const { CANDIDATE_FIELDS, buildInsert, buildUpdate } = require('../utils/candidateFields');
 const { decryptRow, blindIndex } = require('../utils/fieldCrypto');
+const { parseCvWithGemini } = require('../utils/geminiCvParser');
 const fs = require('fs');
 const path = require('path');
 const xlsx = require('xlsx');
 
-// Onboarding is tracked outside the configurable recruitment_stages pipeline
-// and is addressed by this sentinel stage number in the stage-update endpoint.
+// Onboarding is tracked outside the configurable recruitment_stages pipeline.
 const ONBOARDING_STAGE_NUM = 8;
+
+function collectUploadedFiles(files) {
+  if (!files) return [];
+  return Array.isArray(files) ? files : Object.values(files).flat();
+}
+
+function normalizeCandidateExcelDate(rawVal) {
+  if (rawVal === undefined || rawVal === null || rawVal === '') return '';
+  if (typeof rawVal === 'number' && rawVal > 10000 && rawVal < 80000) {
+    const utcDays = Math.floor(rawVal - 25569);
+    const d = new Date(utcDays * 86400 * 1000);
+    if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+  }
+  const s = rawVal.toString().trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const slashMatch = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+  if (slashMatch) {
+    const p1 = parseInt(slashMatch[1], 10);
+    const p2 = parseInt(slashMatch[2], 10);
+    const yr = slashMatch[3];
+    const day = p1 > 12 ? p1 : (p2 > 12 ? p2 : p1);
+    const mon = p1 > 12 ? p2 : (p2 > 12 ? p1 : p2);
+    return `${yr}-${String(mon).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  }
+  return s;
+}
 
 /**
  * Get list of candidates
@@ -153,20 +179,31 @@ exports.getCandidateDetail = async (req, res) => {
  */
 exports.updateCandidate = async (req, res) => {
   try {
-    const candidateId = parseInt(String(req.params.id));
+    const candidateId = parseInt(String(req.params.id), 10);
     const { status, current_stage } = req.body;
 
-    const existing = await query.get('SELECT id FROM candidates WHERE id = ?', [candidateId]);
+    const existing = await query.get('SELECT * FROM candidates WHERE id = ?', [candidateId]);
     if (!existing) return res.status(404).json({ success: false, message: 'Kandidat tidak ditemukan' });
 
-    const { assignments, values } = buildUpdate(CANDIDATE_FIELDS, req.body);
+    decryptRow(existing);
+    const mergedBody = { ...existing };
+    for (const [key, val] of Object.entries(req.body || {})) {
+      if (val !== undefined) mergedBody[key] = val;
+    }
+
+    const { assignments, values } = buildUpdate(CANDIDATE_FIELDS, mergedBody);
     const updateSql = `
       UPDATE candidates
       SET ${assignments}, status = ?, current_stage = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `;
 
-    await query.run(updateSql, [...values, status || 'Active', current_stage || 1, candidateId]);
+    await query.run(updateSql, [
+      ...values,
+      status !== undefined && status !== '' ? status : existing.status,
+      current_stage !== undefined && current_stage !== null && current_stage !== '' ? parseInt(String(current_stage), 10) : existing.current_stage,
+      candidateId,
+    ]);
     res.json({ success: true, message: 'Data kandidat berhasil diperbarui.' });
   } catch (error) {
     if (error instanceof Error && error.message.includes('UNIQUE constraint failed')) {
@@ -185,10 +222,28 @@ exports.updateCandidate = async (req, res) => {
  */
 exports.deleteCandidate = async (req, res) => {
   try {
-    const candidateId = parseInt(String(req.params.id));
+    const candidateId = parseInt(String(req.params.id), 10);
     const existing = await query.get('SELECT id FROM candidates WHERE id = ?', [candidateId]);
     if (!existing) return res.status(404).json({ success: false, message: 'Kandidat tidak ditemukan' });
-    await query.run('DELETE FROM candidates WHERE id = ?', [candidateId]);
+
+    const docs = await query.all('SELECT file_path FROM candidate_documents WHERE candidate_id = ?', [candidateId]);
+
+    await query.run('BEGIN TRANSACTION');
+    try {
+      await query.run('UPDATE employees SET candidate_id = NULL WHERE candidate_id = ?', [candidateId]);
+      await query.run('DELETE FROM candidates WHERE id = ?', [candidateId]);
+      await query.run('COMMIT');
+    } catch (txErr) {
+      await query.run('ROLLBACK').catch(() => {});
+      throw txErr;
+    }
+
+    for (const doc of docs) {
+      if (doc.file_path && fs.existsSync(doc.file_path)) {
+        try { fs.unlinkSync(doc.file_path); } catch {}
+      }
+    }
+
     res.json({ success: true, message: 'Kandidat berhasil dihapus' });
   } catch (error) {
     console.error('API Error (delete candidate):', error);
@@ -221,12 +276,14 @@ exports.getCandidateDocuments = async (req, res) => {
  */
 exports.downloadDocument = async (req, res) => {
   try {
-    const candidateId = parseInt(String(req.params.id));
-    const docId = parseInt(String(req.params.doc_id));
+    const candidateId = parseInt(String(req.params.id), 10);
+    const docId = parseInt(String(req.params.doc_id), 10);
     const doc = await query.get('SELECT * FROM candidate_documents WHERE id = ? AND candidate_id = ?', [docId, candidateId]);
     if (!doc || !fs.existsSync(doc.file_path)) return res.status(404).send('File tidak ditemukan');
+    const rawName = String(doc.original_name || 'document');
+    const safeAscii = rawName.replace(/[\r\n"\\]/g, '_').replace(/[^\x20-\x7E]/g, '_') || 'document';
     res.setHeader('Content-Type', doc.file_type || 'application/octet-stream');
-    res.setHeader('Content-Disposition', `inline; filename="${doc.original_name}"`);
+    res.setHeader('Content-Disposition', `inline; filename="${safeAscii}"; filename*=UTF-8''${encodeURIComponent(rawName.replace(/[\r\n]/g, '_'))}`);
     res.sendFile(path.resolve(doc.file_path));
   } catch (error) {
     console.error('API Error (serve document file):', error);
@@ -272,10 +329,18 @@ exports.uploadDocument = (req, res) => {
       return res.status(400).json({ success: false, message: err.message || 'Gagal mengunggah file.' });
     }
     try {
-      const candidateId = parseInt(String(req.params.id));
+      const candidateId = parseInt(String(req.params.id), 10);
       const { doc_type } = req.body;
       if (!req.file) return res.status(400).json({ success: false, message: 'File tidak ditemukan.' });
-      if (!doc_type) return res.status(400).json({ success: false, message: 'Tipe dokumen wajib diisi.' });
+      if (!doc_type || !String(doc_type).trim()) {
+        if (fs.existsSync(req.file.path)) { try { fs.unlinkSync(req.file.path); } catch {} }
+        return res.status(400).json({ success: false, message: 'Tipe dokumen wajib diisi.' });
+      }
+      const candExists = await query.get('SELECT id FROM candidates WHERE id = ?', [candidateId]);
+      if (!candExists) {
+        if (fs.existsSync(req.file.path)) { try { fs.unlinkSync(req.file.path); } catch {} }
+        return res.status(404).json({ success: false, message: 'Kandidat tidak ditemukan.' });
+      }
 
       const namedFolderName = await getCandidateFolderName(candidateId);
       const tempFolder = path.join(uploadsDir, `candidate_${candidateId}`);
@@ -307,6 +372,9 @@ exports.uploadDocument = (req, res) => {
       const updatedDocs = await query.all('SELECT * FROM candidate_documents WHERE candidate_id = ? ORDER BY id DESC', [candidateId]);
       res.json({ success: true, message: 'Berkas berhasil diunggah.', documents: updatedDocs });
     } catch (error) {
+      if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+        try { fs.unlinkSync(req.file.path); } catch {}
+      }
       console.error('API Error (upload document):', error);
       res.status(500).json({ success: false, message: 'Server error saving uploaded file' });
     }
@@ -322,17 +390,39 @@ exports.uploadDocument = (req, res) => {
  */
 exports.updateCandidateStage = async (req, res) => {
   try {
-    const candidateId = parseInt(String(req.params.id));
-    const stageNum = parseInt(String(req.params.stage_num));
-    const data = req.body;
+    const candidateId = parseInt(String(req.params.id), 10);
+    const rawStageParam = String(req.params.stage_num);
+    const isOnboardingExplicit = rawStageParam === 'onboarding';
+    const stageNum = isOnboardingExplicit ? ONBOARDING_STAGE_NUM : parseInt(rawStageParam, 10);
+    const data = req.body || {};
 
     const candidate = await query.get('SELECT current_stage, status FROM candidates WHERE id = ?', [candidateId]);
     if (!candidate) return res.status(404).json({ success: false, message: 'Kandidat tidak ditemukan' });
 
+    // Pure status rejection without stage evaluation fields must not wipe existing stage scores/checklists
+    const payloadKeys = Object.keys(data);
+    if (data.status === 'Rejected' && payloadKeys.every((k) => k === 'status' || k === 'notes')) {
+      await query.run(
+        "UPDATE candidates SET status = 'Rejected', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        [candidateId]
+      );
+      return res.json({
+        success: true,
+        message: 'Kandidat dinyatakan tidak lolos.',
+        currentStage: candidate.current_stage,
+        status: 'Rejected',
+      });
+    }
+
     let stage = null;
-    if (stageNum !== ONBOARDING_STAGE_NUM) {
+    let isOnboarding = isOnboardingExplicit;
+    if (!isOnboardingExplicit) {
       stage = await query.get('SELECT * FROM recruitment_stages WHERE id = ?', [stageNum]);
-      if (!stage) return res.status(404).json({ success: false, message: 'Tahap seleksi tidak ditemukan' });
+      if (!stage && stageNum === ONBOARDING_STAGE_NUM) {
+        isOnboarding = true;
+      } else if (!stage) {
+        return res.status(404).json({ success: false, message: 'Tahap seleksi tidak ditemukan' });
+      }
     }
 
     let updatedStage = candidate.current_stage;
@@ -342,46 +432,54 @@ exports.updateCandidateStage = async (req, res) => {
       const { berkas_lengkap, usia_sesuai, pendidikan_sesuai, skck_bersih, domisili_sesuai, phone_screen_notes, passed } = data;
       await query.run(
         `UPDATE stage1_admin SET berkas_lengkap = ?, usia_sesuai = ?, pendidikan_sesuai = ?, skck_bersih = ?, domisili_sesuai = ?, phone_screen_notes = ?, passed = ?, updated_at = CURRENT_TIMESTAMP WHERE candidate_id = ?`,
-        [berkas_lengkap ? 1 : 0, usia_sesuai ? 1 : 0, pendidikan_sesuai ? 1 : 0, skck_bersih ? 1 : 0, domisili_sesuai ? 1 : 0, phone_screen_notes, passed ? 1 : 0, candidateId]
+        [berkas_lengkap ? 1 : 0, usia_sesuai ? 1 : 0, pendidikan_sesuai ? 1 : 0, skck_bersih ? 1 : 0, domisili_sesuai ? 1 : 0, phone_screen_notes || '', passed ? 1 : 0, candidateId]
       );
     } else if (stage && stage.code === 'written') {
       const { score_numerik, score_situasional, score_pengetahuan, score_nominal, score_kepribadian, total_score, passed } = data;
+      const serializedKepribadian = typeof score_kepribadian === 'string'
+        ? score_kepribadian
+        : JSON.stringify(score_kepribadian ?? []);
       await query.run(
         `UPDATE stage2_written_test SET score_numerik = ?, score_situasional = ?, score_pengetahuan = ?, score_nominal = ?, score_kepribadian = ?, total_score = ?, passed = ?, updated_at = CURRENT_TIMESTAMP WHERE candidate_id = ?`,
-        [score_numerik, score_situasional, score_pengetahuan, score_nominal || 0, JSON.stringify(score_kepribadian), total_score, passed ? 1 : 0, candidateId]
+        [Number(score_numerik) || 0, Number(score_situasional) || 0, Number(score_pengetahuan) || 0, Number(score_nominal) || 0, serializedKepribadian, Number(total_score) || 0, passed ? 1 : 0, candidateId]
       );
     } else if (stage && stage.code === 'simulation') {
       const { score_upselling, score_complaint, score_queue, evaluator, notes, passed } = data;
       await query.run(
         `UPDATE stage3_simulation SET score_upselling = ?, score_complaint = ?, score_queue = ?, evaluator = ?, notes = ?, passed = ?, updated_at = CURRENT_TIMESTAMP WHERE candidate_id = ?`,
-        [score_upselling, score_complaint, score_queue, evaluator, notes, passed ? 1 : 0, candidateId]
+        [Number(score_upselling) || 0, Number(score_complaint) || 0, Number(score_queue) || 0, evaluator || '', notes || '', passed ? 1 : 0, candidateId]
       );
     } else if (stage && stage.code === 'interview_hrd') {
-      const { score_integritas, score_pelayanan, score_ketelitian, score_belajar, score_komunikasi, score_budaya, notes, passed } = data;
-      const total_weighted_score = (score_integritas * 0.25) + (score_pelayanan * 0.20) + (score_ketelitian * 0.20) + (score_belajar * 0.15) + (score_komunikasi * 0.10) + (score_budaya * 0.10);
+      const sInt = Number(data.score_integritas) || 0;
+      const sPel = Number(data.score_pelayanan) || 0;
+      const sKet = Number(data.score_ketelitian) || 0;
+      const sBel = Number(data.score_belajar) || 0;
+      const sKom = Number(data.score_komunikasi) || 0;
+      const sBud = Number(data.score_budaya) || 0;
+      const total_weighted_score = parseFloat(((sInt * 0.25) + (sPel * 0.20) + (sKet * 0.20) + (sBel * 0.15) + (sKom * 0.10) + (sBud * 0.10)).toFixed(2));
       await query.run(
         `UPDATE stage4_interview_hrd SET score_integritas = ?, score_pelayanan = ?, score_ketelitian = ?, score_belajar = ?, score_komunikasi = ?, score_budaya = ?, total_weighted_score = ?, notes = ?, passed = ?, updated_at = CURRENT_TIMESTAMP WHERE candidate_id = ?`,
-        [score_integritas, score_pelayanan, score_ketelitian, score_belajar, score_komunikasi, score_budaya, total_weighted_score, notes, passed ? 1 : 0, candidateId]
+        [sInt, sPel, sKet, sBel, sKom, sBud, total_weighted_score, data.notes || '', data.passed ? 1 : 0, candidateId]
       );
     } else if (stage && stage.code === 'interview_user') {
       const { decision, notes, passed } = data;
       await query.run(
         `UPDATE stage5_interview_user SET decision = ?, notes = ?, passed = ?, updated_at = CURRENT_TIMESTAMP WHERE candidate_id = ?`,
-        [decision, notes, passed ? 1 : 0, candidateId]
+        [decision || 'Pending', notes || '', passed ? 1 : 0, candidateId]
       );
     } else if (stage && stage.code === 'mcu_ref') {
       const { score_training, mcu_buta_warna, mcu_kesehatan_umum, mcu_bebas_narkoba, ref_check_verified, ref_check_notes, passed } = data;
       await query.run(
         `UPDATE stage6_mcu_ref SET score_training = ?, mcu_buta_warna = ?, mcu_kesehatan_umum = ?, mcu_bebas_narkoba = ?, ref_check_verified = ?, ref_check_notes = ?, passed = ?, updated_at = CURRENT_TIMESTAMP WHERE candidate_id = ?`,
-        [score_training || 0, mcu_buta_warna ? 1 : 0, mcu_kesehatan_umum ? 1 : 0, mcu_bebas_narkoba ? 1 : 0, ref_check_verified ? 1 : 0, ref_check_notes, passed ? 1 : 0, candidateId]
+        [Number(score_training) || 0, mcu_buta_warna ? 1 : 0, mcu_kesehatan_umum ? 1 : 0, mcu_bebas_narkoba ? 1 : 0, ref_check_verified ? 1 : 0, ref_check_notes || '', passed ? 1 : 0, candidateId]
       );
     } else if (stage && stage.code === 'offering') {
       const { contract_type, salary_offered, allowance, bonus_scheme, start_date, offering_status, passed } = data;
       await query.run(
         `UPDATE stage7_offering SET contract_type = ?, salary_offered = ?, allowance = ?, bonus_scheme = ?, start_date = ?, offering_status = ?, passed = ?, updated_at = CURRENT_TIMESTAMP WHERE candidate_id = ?`,
-        [contract_type, salary_offered, allowance, bonus_scheme, start_date, offering_status, passed ? 1 : 0, candidateId]
+        [contract_type || 'PKWT', Number(salary_offered) || 0, Number(allowance) || 0, bonus_scheme || '', start_date || null, offering_status || 'Pending', passed ? 1 : 0, candidateId]
       );
-    } else if (stageNum === ONBOARDING_STAGE_NUM) {
+    } else if (isOnboarding) {
       const { 
         day_30_status, day_30_score, day_30_notes,
         day_60_status, day_60_score, day_60_notes,
@@ -391,7 +489,7 @@ exports.updateCandidateStage = async (req, res) => {
       } = data;
       await query.run(
         `UPDATE onboarding SET day_30_status = ?, day_30_score = ?, day_30_notes = ?, day_60_status = ?, day_60_score = ?, day_60_notes = ?, day_90_status = ?, day_90_score = ?, day_90_notes = ?, kpi_akurasi_transaksi = ?, kpi_kehadiran = ?, kpi_penguasaan_produk = ?, kpi_kepuasan_pelanggan = ?, kpi_laporan_harian = ?, kpi_upselling = ?, updated_at = CURRENT_TIMESTAMP WHERE candidate_id = ?`,
-        [day_30_status, day_30_score, day_30_notes, day_60_status, day_60_score, day_60_notes, day_90_status, day_90_score, day_90_notes, kpi_akurasi_transaksi, kpi_kehadiran, kpi_penguasaan_produk, kpi_kepuasan_pelanggan, kpi_laporan_harian, kpi_upselling, candidateId]
+        [day_30_status || 'Pending', Number(day_30_score) || 0, day_30_notes || '', day_60_status || 'Pending', Number(day_60_score) || 0, day_60_notes || '', day_90_status || 'Pending', Number(day_90_score) || 0, day_90_notes || '', Number(kpi_akurasi_transaksi) || 0, Number(kpi_kehadiran) || 0, Number(kpi_penguasaan_produk) || 0, Number(kpi_kepuasan_pelanggan) || 0, Number(kpi_laporan_harian) || 0, Number(kpi_upselling) || 0, candidateId]
       );
     } else if (stage) {
       const { passed, notes } = data;
@@ -399,12 +497,12 @@ exports.updateCandidateStage = async (req, res) => {
       if (existingEval) {
         await query.run(
           'UPDATE stage_generic_evaluations SET passed = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE candidate_id = ? AND stage_id = ?',
-          [passed ? 1 : 0, notes, candidateId, stageNum]
+          [passed ? 1 : 0, notes || '', candidateId, stageNum]
         );
       } else {
         await query.run(
           'INSERT INTO stage_generic_evaluations (candidate_id, stage_id, passed, notes) VALUES (?, ?, ?, ?)',
-          [candidateId, stageNum, passed ? 1 : 0, notes]
+          [candidateId, stageNum, passed ? 1 : 0, notes || '']
         );
       }
     }
@@ -413,9 +511,10 @@ exports.updateCandidateStage = async (req, res) => {
     if (stage) {
       const activeStages = await query.all('SELECT * FROM recruitment_stages WHERE is_active = 1 ORDER BY order_num ASC');
       const currentIndex = activeStages.findIndex((/** @type {any} */ s) => s.id === stageNum);
-      const isPassed = data.passed || 
-                       (data.offering_status === 'Accepted') || 
-                       (stage.code === 'offering' && data.offering_status === 'Accepted');
+      const isOffering = stage.code === 'offering';
+      const isPassed = isOffering
+        ? (data.offering_status !== 'Declined' && (data.offering_status === 'Accepted' || (!!data.passed && data.offering_status !== 'Pending')))
+        : (Boolean(data.passed) || data.offering_status === 'Accepted');
 
       if (isPassed && candidate.current_stage === stageNum) {
         if (currentIndex !== -1 && currentIndex < activeStages.length - 1) {
@@ -430,7 +529,7 @@ exports.updateCandidateStage = async (req, res) => {
 
     await query.run('UPDATE candidates SET current_stage = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [updatedStage, updatedStatus, candidateId]);
 
-    res.json({ success: true, message: `Stage ${stageNum} updated successfully`, currentStage: updatedStage, status: updatedStatus });
+    res.json({ success: true, message: `Stage ${rawStageParam} updated successfully`, currentStage: updatedStage, status: updatedStatus });
   } catch (error) {
     console.error('API Error (stage update):', error);
     res.status(500).json({ success: false, message: 'Server error updating stage details' });
@@ -471,6 +570,7 @@ exports.addCandidateWithDocuments = async (req, res) => {
       }
     }
     if (!isUnique) {
+      cleanupUploadedFiles(collectUploadedFiles(req.files));
       return res.status(500).json({ success: false, message: 'Gagal membuat kode akses unik. Silakan coba lagi.' });
     }
 
@@ -506,13 +606,13 @@ exports.addCandidateWithDocuments = async (req, res) => {
       }
 
       const docTypeMapping = {
-        cv: 'CV / Resume',
-        ktp: 'KTP / Identitas',
-        foto: 'Pas Foto',
-        ijazah: 'Ijazah / Transkrip',
-        surat_lamaran: 'Surat Lamaran',
-        skck: 'SKCK',
-        other: 'Berkas Tambahan'
+        cv: 'cv',
+        ktp: 'ktp',
+        foto: 'pas_foto',
+        ijazah: 'ijazah',
+        surat_lamaran: 'surat_lamaran',
+        skck: 'skck',
+        other: 'lainnya'
       };
 
       const allFiles = Array.isArray(req.files) ? req.files : Object.values(req.files).flat();
@@ -577,6 +677,7 @@ exports.addCandidateWithDocuments = async (req, res) => {
       uploadedDocuments: uploadedDocs
     });
   } catch (error) {
+    cleanupUploadedFiles(collectUploadedFiles(req.files));
     console.error('API Error (addCandidateWithDocuments):', error);
     if (error instanceof Error && /UNIQUE constraint failed.*(candidates\.nik|nik_bidx)/.test(error.message)) {
       return res.status(400).json({ success: false, message: 'NIK pelamar sudah terdaftar di sistem.' });
@@ -597,14 +698,16 @@ exports.importCandidatesExcel = async (req, res) => {
     }
 
     const filePath = req.file.path;
-    const workbook = xlsx.readFile(filePath);
-    const sheetName = workbook.SheetNames[0];
-    const worksheet = workbook.Sheets[sheetName];
-    const rows = xlsx.utils.sheet_to_json(worksheet, { defval: '' });
-
-    // Clean up temporary excel file
-    if (fs.existsSync(filePath)) {
-      try { fs.unlinkSync(filePath); } catch (e) {}
+    let rows = [];
+    try {
+      const workbook = xlsx.readFile(filePath);
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+      rows = xlsx.utils.sheet_to_json(worksheet, { defval: '' });
+    } finally {
+      if (fs.existsSync(filePath)) {
+        try { fs.unlinkSync(filePath); } catch {}
+      }
     }
 
     if (!rows || rows.length === 0) {
@@ -629,8 +732,8 @@ exports.importCandidatesExcel = async (req, res) => {
       const lowerKeys = keys.map(k => k.toLowerCase());
       for (const [colName, val] of Object.entries(row)) {
         if (val !== undefined && val !== null && String(val).trim() !== '') {
-          const lowerCol = colName.toLowerCase();
-          if (lowerKeys.some(lk => lowerCol.includes(lk))) {
+          const lowerCol = colName.trim().toLowerCase();
+          if (lowerKeys.some(lk => lowerCol === lk || (lk.length > 4 && lowerCol.includes(lk)))) {
             return String(val).trim();
           }
         }
@@ -642,7 +745,7 @@ exports.importCandidatesExcel = async (req, res) => {
       const row = rows[i];
       const rowNum = i + 2; // header is row 1
 
-      const name = getVal(row, 'Nama Lengkap', 'Nama', 'name');
+      const name = getVal(row, 'Nama Lengkap', 'Full Name', 'Nama Pelamar', 'Nama', 'name');
       if (!name) {
         skippedCount++;
         continue;
@@ -653,7 +756,13 @@ exports.importCandidatesExcel = async (req, res) => {
       const phone = getVal(row, 'No. WhatsApp', 'WhatsApp', 'No HP', 'Nomor HP', 'Telepon', 'phone') || null;
       const gender = getVal(row, 'Jenis Kelamin', 'gender', 'Kelamin') || 'Laki-laki';
       const birth_place = getVal(row, 'Tempat Lahir', 'birth_place', 'Kota Lahir');
-      const birth_date = getVal(row, 'Tanggal Lahir', 'birth_date', 'Tgl Lahir');
+      const rawBirthDate = (() => {
+        for (const k of ['Tanggal Lahir', 'birth_date', 'Tgl Lahir']) {
+          if (row[k] !== undefined && row[k] !== null && String(row[k]).trim() !== '') return row[k];
+        }
+        return getVal(row, 'Tanggal Lahir', 'birth_date', 'Tgl Lahir');
+      })();
+      const birth_date = normalizeCandidateExcelDate(rawBirthDate);
       const religion = getVal(row, 'Agama', 'religion');
       const marital_status = getVal(row, 'Status Nikah', 'Status Perkawinan', 'marital_status') || 'Belum Kawin';
       const education_level = getVal(row, 'Pendidikan Terakhir', 'Pendidikan', 'education_level') || 'SMA / SMK';

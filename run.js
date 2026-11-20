@@ -19,14 +19,21 @@ const frontend = spawn('npm', ['run', 'dev'], {
   stdio: 'inherit'
 });
 
-// Handle termination signals
-const cleanup = () => {
+// Handle termination signals safely without re-entrant process.exit inside 'exit'
+let cleaned = false;
+const stopChildren = () => {
+  if (cleaned) return;
+  cleaned = true;
   console.log('\nStopping servers...');
-  backend.kill();
-  frontend.kill();
-  process.exit();
+  try { backend.kill(); } catch {}
+  try { frontend.kill(); } catch {}
 };
 
-process.on('SIGINT', cleanup);
-process.on('SIGTERM', cleanup);
-process.on('exit', cleanup);
+const handleSignal = () => {
+  stopChildren();
+  process.exit(0);
+};
+
+process.on('SIGINT', handleSignal);
+process.on('SIGTERM', handleSignal);
+process.on('exit', stopChildren);

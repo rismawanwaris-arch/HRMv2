@@ -3,16 +3,18 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.jsx'
 
-// Auto-inject Authorization header for all API fetches
+// Auto-inject Authorization header for all API fetches without mutating caller options
 const originalFetch = window.fetch;
 window.fetch = async (url, options = {}) => {
   const token = localStorage.getItem('auth_token');
-  if (token && url.toString().includes('/api/')) {
-    const headers = options.headers ? new Headers(options.headers) : new Headers();
+  const urlStr = typeof url === 'string' ? url : url instanceof URL ? url.href : url?.url || '';
+  if (token && urlStr.includes('/api/')) {
+    const baseHeaders = options.headers || (typeof Request !== 'undefined' && url instanceof Request ? url.headers : undefined);
+    const headers = new Headers(baseHeaders);
     if (!headers.has('Authorization')) {
       headers.set('Authorization', `Bearer ${token}`);
     }
-    options.headers = headers;
+    return originalFetch(url, { ...options, headers });
   }
   return originalFetch(url, options);
 };

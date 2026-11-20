@@ -4,6 +4,7 @@ const os = require('os');
 const multer = require('multer');
 const router = express.Router();
 const branchController = require('../controllers/branchController');
+const { requireRole } = require('../middleware/roleCheck');
 
 const upload = multer({
   dest: path.join(os.tmpdir(), 'hrmv2-imports'),
@@ -15,11 +16,11 @@ const upload = multer({
   }
 });
 
-router.get('/template', branchController.downloadTemplate);
-router.post('/import', upload.single('file'), branchController.importBranches);
 router.get('/', branchController.getAllBranches);
-router.post('/', branchController.createBranch);
-router.delete('/:id', branchController.deleteBranch);
-router.put('/:id', branchController.updateBranch);
+router.get('/template', requireRole('finance', 'master'), branchController.downloadTemplate);
+router.post('/import', requireRole('finance', 'master'), upload.single('file'), branchController.importBranches);
+router.post('/', requireRole('finance', 'master'), branchController.createBranch);
+router.delete('/:id', requireRole('finance', 'master'), branchController.deleteBranch);
+router.put('/:id', requireRole('finance', 'master'), branchController.updateBranch);
 
 module.exports = router;

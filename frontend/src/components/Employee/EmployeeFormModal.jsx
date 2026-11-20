@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { createPortal } from 'react-dom';
 
 // ─── Reusable Form Field Components ───────────────────────────────────────────
@@ -12,7 +12,7 @@ const FormSection = ({ title, color = 'var(--color-primary)', children }) => (
       <div style={{ width: '3px', height: '18px', background: color, borderRadius: '2px' }} />
       <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1.2px', color }}>{title}</span>
     </div>
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+    <div className="responsive-grid-2" style={{ gap: '14px' }}>
       {children}
     </div>
   </div>
@@ -38,44 +38,76 @@ const inp = {
   boxSizing: 'border-box',
   display: 'block',
   outline: 'none',
-  transition: 'border-color 0.2s, box-shadow 0.2s',
+  transition: 'border-color 150ms ease-out, box-shadow 150ms ease-out',
   fontFamily: 'inherit'
 };
 
-function EmployeeFormModal({ editEmployeeId, addError, submitting, handleAddManual, addForm, setAddForm, setShowAddModal, setEditEmployeeId, setAddError, emptyForm, branches }) {
+function withCurrentOption(presets, current) {
+  return current && !presets.includes(current) ? [...presets, current] : presets;
+}
+
+function EmployeeFormModal({ editEmployeeId, addError, submitting, handleAddManual, addForm, setAddForm, setShowAddModal, setEditEmployeeId, setAddError, emptyForm, branches = [] }) {
   const f = (key) => (e) => setAddForm(p => ({ ...p, [key]: e.target.value }));
 
+  const closeModal = () => {
+    setShowAddModal(false);
+    setEditEmployeeId(null);
+    setAddError('');
+    setAddForm(emptyForm);
+  };
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape') closeModal();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
   return createPortal(
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px', backdropFilter: 'blur(6px)' }}>
-      <div style={{
-        width: '100%', maxWidth: '720px', maxHeight: '90vh', overflowY: 'auto',
-        background: 'var(--bg-surface-opaque)',
-        border: '1px solid var(--border-color)', borderRadius: '24px',
-        boxShadow: '0 32px 64px rgba(0,0,0,0.35)'
-      }}>
+    <div
+      className="modal-overlay"
+      onClick={closeModal}
+      style={{ padding: '20px', zIndex: 3000 }}
+    >
+      <div
+        className="modal-content"
+        onClick={e => e.stopPropagation()}
+        style={{
+          width: '100%', maxWidth: '720px', maxHeight: '90vh', overflowY: 'auto',
+          overscrollBehavior: 'contain', padding: 0,
+          background: 'var(--bg-surface-opaque)',
+          border: '1px solid var(--border-color)', borderRadius: '24px',
+          boxShadow: '0 32px 64px rgba(0,0,0,0.35)'
+        }}
+      >
         {/* Modal Header */}
         <div style={{
           position: 'sticky', top: 0, zIndex: 2, background: 'var(--bg-surface-opaque)',
-          padding: '24px 32px 20px',
+          padding: '20px 24px 16px',
           borderBottom: '1px solid var(--border-color)',
           display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start'
         }}>
           <div>
-            <h2 style={{ margin: 0, fontSize: '22px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.3px' }}>{editEmployeeId ? 'Edit Data Karyawan' : 'Tambah Karyawan Lama'}</h2>
-            <p style={{ margin: '6px 0 0', fontSize: '13px', color: 'var(--text-secondary)' }}>{editEmployeeId ? 'Ubah informasi profil atau kontrak karyawan' : 'Data karyawan yang diterima sebelum sistem ini dibuat'}</p>
+            <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.3px' }}>{editEmployeeId ? 'Edit Data Karyawan' : 'Tambah Karyawan Lama'}</h2>
+            <p style={{ margin: '4px 0 0', fontSize: '13px', color: 'var(--text-secondary)' }}>{editEmployeeId ? 'Ubah informasi profil atau kontrak karyawan' : 'Data karyawan yang diterima sebelum sistem ini dibuat'}</p>
           </div>
-          <button onClick={() => { setShowAddModal(false); setEditEmployeeId(null); setAddError(''); setAddForm(emptyForm); }}
-            style={{ background: 'var(--bg-hover)', border: 'none', borderRadius: '10px', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '20px', width: '36px', height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
+          <button
+            type="button"
+            onClick={closeModal}
+            aria-label="Tutup"
+            style={{ background: 'var(--bg-hover)', border: 'none', borderRadius: '10px', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '20px', width: '36px', height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          >×</button>
         </div>
 
         {/* Error Banner */}
         {addError && (
-          <div style={{ margin: '0 32px', marginTop: '20px', background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '12px', padding: '12px 16px', color: '#f87171', fontSize: '14px' }}>
+          <div style={{ margin: '16px 24px 0', background: 'var(--color-danger-bg)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '12px', padding: '12px 16px', color: 'var(--color-danger)', fontSize: '14px' }}>
             ⚠️ {addError}
           </div>
         )}
 
-        <form onSubmit={handleAddManual} style={{ padding: '24px 32px 32px' }}>
+        <form onSubmit={handleAddManual} style={{ padding: '20px 24px 28px' }}>
 
           {/* ── IDENTITAS DIRI ────────────────────────── */}
           <FormSection title="Identitas Diri" color="#8b5cf6">
@@ -105,11 +137,9 @@ function EmployeeFormModal({ editEmployeeId, addError, submitting, handleAddManu
               </select>
             </Field>
             <Field label="Status Pernikahan">
-              <select style={inp} value={addForm.marital_status} onChange={f('marital_status')}>
+              <select style={inp} value={addForm.marital_status || ''} onChange={f('marital_status')}>
                 <option value="">Pilih</option>
-                <option value="Belum Menikah">Belum Menikah</option>
-                <option value="Menikah">Menikah</option>
-                <option value="Duda/Janda">Duda/Janda</option>
+                {withCurrentOption(['Belum Menikah', 'Menikah', 'Cerai', 'Duda/Janda'], addForm.marital_status).map(s => <option key={s} value={s}>{s}</option>)}
               </select>
             </Field>
             <Field label="Jumlah Tanggungan">
@@ -161,9 +191,9 @@ function EmployeeFormModal({ editEmployeeId, addError, submitting, handleAddManu
           {/* ── PENDIDIKAN ────────────────────────────── */}
           <FormSection title="Riwayat Pendidikan" color="#f59e0b">
             <Field label="Pendidikan Terakhir">
-              <select style={inp} value={addForm.education_level} onChange={f('education_level')}>
+              <select style={inp} value={addForm.education_level || ''} onChange={f('education_level')}>
                 <option value="">Pilih</option>
-                {['SMP / MTs','SMA / SMK','D1 / D2 / D3','S1 / D4','S2','S3'].map(e => <option key={e} value={e}>{e}</option>)}
+                {withCurrentOption(['SD', 'SMP', 'SMP / MTs', 'SMA / SMK', 'D1 / D2 / D3', 'D4 / S1', 'S1 / D4', 'S2', 'S3'], addForm.education_level).map(e => <option key={e} value={e}>{e}</option>)}
               </select>
             </Field>
             <Field label="Nama Institusi Pendidikan">
@@ -189,17 +219,13 @@ function EmployeeFormModal({ editEmployeeId, addError, submitting, handleAddManu
               <input type="number" style={inp} placeholder="kg" min="30" max="200" value={addForm.weight} onChange={f('weight')} />
             </Field>
             <Field label="Kondisi Fisik Umum">
-              <select style={inp} value={addForm.physical_condition} onChange={f('physical_condition')}>
-                <option value="Sehat">Sehat</option>
-                <option value="Memiliki Disabilitas Ringan">Memiliki Disabilitas Ringan</option>
-                <option value="Memerlukan Perhatian Medis">Memerlukan Perhatian Medis</option>
+              <select style={inp} value={addForm.physical_condition || 'Sehat'} onChange={f('physical_condition')}>
+                {withCurrentOption(['Sehat', 'Normal', 'Memiliki Disabilitas Ringan', 'Memerlukan Perhatian Medis'], addForm.physical_condition).map(v => <option key={v} value={v}>{v}</option>)}
               </select>
             </Field>
             <Field label="Tes Buta Warna">
-              <select style={inp} value={addForm.color_blind_test} onChange={f('color_blind_test')}>
-                <option value="Normal">Normal</option>
-                <option value="Buta Warna Parsial">Buta Warna Parsial</option>
-                <option value="Buta Warna Total">Buta Warna Total</option>
+              <select style={inp} value={addForm.color_blind_test || 'Normal'} onChange={f('color_blind_test')}>
+                {withCurrentOption(['Normal', 'Tidak', 'Buta Warna Parsial', 'Buta Warna Sebagian', 'Buta Warna Total'], addForm.color_blind_test).map(v => <option key={v} value={v}>{v}</option>)}
               </select>
             </Field>
             <Field label="Riwayat Penyakit" full>
@@ -222,9 +248,9 @@ function EmployeeFormModal({ editEmployeeId, addError, submitting, handleAddManu
               </select>
             </Field>
             <Field label="Nama Bank">
-              <select style={inp} value={addForm.bank_name} onChange={f('bank_name')}>
+              <select style={inp} value={addForm.bank_name || ''} onChange={f('bank_name')}>
                 <option value="">Pilih Bank</option>
-                {['BCA','BNI','BRI','Mandiri','BSI','CIMB Niaga','Danamon','Permata','BTN','Bank Lainnya'].map(b => <option key={b} value={b}>{b}</option>)}
+                {withCurrentOption(['BCA','BNI','BRI','Mandiri','BSI','CIMB Niaga','Danamon','Permata','BTN','Bank Lainnya'], addForm.bank_name).map(b => <option key={b} value={b}>{b}</option>)}
               </select>
             </Field>
             <Field label="No. Rekening">
@@ -250,9 +276,11 @@ function EmployeeFormModal({ editEmployeeId, addError, submitting, handleAddManu
               <input type="date" style={{ ...inp, borderColor: 'rgba(139,92,246,0.4)' }} value={addForm.hire_date} onChange={f('hire_date')} />
             </Field>
             <Field label="Tipe Kontrak">
-              <select style={inp} value={addForm.contract_type} onChange={f('contract_type')}>
+              <select style={inp} value={addForm.contract_type || 'PKWT'} onChange={f('contract_type')}>
                 <option value="PKWT">PKWT (Kontrak)</option>
                 <option value="PKWTT">PKWTT (Tetap)</option>
+                <option value="Freelance">Freelance</option>
+                <option value="Magang">Magang</option>
               </select>
             </Field>
             <Field label="Gaji Pokok (Rp)">
@@ -265,12 +293,13 @@ function EmployeeFormModal({ editEmployeeId, addError, submitting, handleAddManu
 
           {/* Buttons */}
           <div style={{ display: 'flex', gap: '12px', paddingTop: '8px', borderTop: '1px solid var(--border-color)' }}>
-            <button type="button" onClick={() => { setShowAddModal(false); setEditEmployeeId(null); setAddError(''); setAddForm(emptyForm); }}
+            <button type="button" onClick={closeModal}
               style={{ flex: 1, padding: '14px', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '12px', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '15px', fontWeight: 600 }}>
               Batal
             </button>
             <button type="submit" disabled={submitting}
-              style={{ flex: 2, padding: '14px', background: submitting ? 'rgba(139,92,246,0.4)' : 'linear-gradient(135deg, #7c3aed, #6d28d9)', border: 'none', borderRadius: '12px', color: 'white', cursor: submitting ? 'not-allowed' : 'pointer', fontSize: '15px', fontWeight: 700, boxShadow: submitting ? 'none' : '0 4px 14px rgba(109,40,217,0.4)', transition: 'all 0.2s' }}>
+              className="btn btn-primary"
+              style={{ flex: 2, padding: '14px', borderRadius: '12px', fontSize: '15px', fontWeight: 700, justifyContent: 'center' }}>
               {submitting ? 'Menyimpan...' : (editEmployeeId ? '✓ Simpan Perubahan' : '✓ Simpan ke Data Karyawan')}
             </button>
           </div>

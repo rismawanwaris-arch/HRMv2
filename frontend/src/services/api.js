@@ -28,31 +28,49 @@ async function fetchApi(endpoint, options = {}) {
 
   const token = localStorage.getItem('auth_token');
   const authHeader = token ? { Authorization: `Bearer ${token}` } : {};
+  const reqOptions = { ...options };
 
-  if (!(options.body instanceof FormData)) {
-    options.headers = {
+  if (!(reqOptions.body instanceof FormData)) {
+    reqOptions.headers = {
       'Content-Type': 'application/json',
       ...authHeader,
-      ...options.headers,
+      ...reqOptions.headers,
     };
   } else {
-    options.headers = { ...authHeader, ...options.headers };
+    reqOptions.headers = { ...authHeader, ...reqOptions.headers };
   }
 
-  const response = await fetch(url, options);
-  
-  // Handle non-JSON responses (like file downloads)
-  const contentType = response.headers.get('content-type');
-  if (contentType && !contentType.includes('application/json')) {
+  const response = await fetch(url, reqOptions);
+
+  if (response.status === 204) {
+    return null;
+  }
+
+  // Handle non-JSON responses (like file downloads or reverse proxy error pages)
+  const contentType = response.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
     if (!response.ok) {
-      throw new Error(await response.text());
+      throw new Error((await response.text()) || `HTTP ${response.status}`);
     }
     return response;
   }
 
-  const data = await response.json();
+  const text = await response.text();
+  let data = {};
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw new Error(response.ok ? 'Respons server bukan JSON yang valid.' : `HTTP ${response.status}: ${text.slice(0, 120)}`);
+    }
+  }
+
   if (!response.ok) {
-    if ((response.status === 401 || response.status === 403) && token) {
+    const isAuthEndpoint = endpoint.startsWith('/login') || endpoint.startsWith('/change-password');
+    const isExpiredToken =
+      (response.status === 401 && !isAuthEndpoint) ||
+      (response.status === 403 && data?.code !== 'FORBIDDEN_ROLE' && (data?.code === 'TOKEN_INVALID' || /token|kedaluwarsa|sesi/i.test(data?.message || '')));
+    if (isExpiredToken && token) {
       localStorage.removeItem('auth_token');
       localStorage.removeItem('auth_username');
       localStorage.removeItem('auth_role');
@@ -109,7 +127,7 @@ export const candidateApi = {
    */
   getAll: (params) => {
     const query = buildQueryString(params);
-    return api.get(`/candidates?${query}`);
+    return api.get(`/candidates${query ? `?${query}` : ''}`);
   },
 
   /**
@@ -156,10 +174,19 @@ export const candidateApi = {
   importExcel: (formData) => api.post('/candidates/import-excel', formData),
 
   /**
+   * Download the sample template Excel for bulk candidate import using Bearer auth.
+   * @returns {Promise<Response>} Resolves to binary fetch Response.
+   */
+  downloadTemplate: () => api.get('/candidates/template-excel'),
+
+  /**
    * Download the sample template Excel for bulk candidate import.
    * @returns {string} URL for direct download.
    */
-  getTemplateExcelUrl: () => `${API_BASE}/candidates/template-excel`,
+  getTemplateExcelUrl: () => {
+    const token = encodeURIComponent(localStorage.getItem('auth_token') || '');
+    return `${API_BASE}/candidates/template-excel?token=${token}`;
+  },
   
   /**
    * Retrieve documents uploaded for a candidate.
@@ -190,7 +217,10 @@ export const candidateApi = {
    * @param {number} docId - Document ID.
    * @returns {string} Download endpoint URL.
    */
-  getDocumentUrl: (id, docId) => `${API_BASE}/candidates/${id}/documents/${docId}/file`,
+  getDocumentUrl: (id, docId) => {
+    const token = encodeURIComponent(localStorage.getItem('auth_token') || '');
+    return `${API_BASE}/candidates/${id}/documents/${docId}/file?token=${token}`;
+  },
 
   /**
    * Update candidate evaluation stage details.
@@ -214,7 +244,7 @@ export const employeeApi = {
    */
   getAll: (params) => {
     const query = buildQueryString(params);
-    return api.get(`/employees?${query}`);
+    return api.get(`/employees${query ? `?${query}` : ''}`);
   },
 
   /**
@@ -298,7 +328,7 @@ export const branchApi = {
 
 export const disciplineApi = {
   getAll: (params) => {
-    const qs = new URLSearchParams(params || {}).toString();
+    const qs = buildQueryString(params);
     return api.get(`/discipline${qs ? '?' + qs : ''}`);
   },
   getStats: () => api.get('/discipline/stats'),
@@ -440,7 +470,7 @@ export const settingsApi = {
  */
 export const staffApi = {
   getAll: (params) => {
-    const qs = new URLSearchParams(params || {}).toString();
+    const qs = buildQueryString(params);
     return api.get(`/staff${qs ? '?' + qs : ''}`);
   },
   getById: (id) => api.get(`/staff/${id}`),
@@ -457,14 +487,14 @@ export const staffApi = {
 export const attendanceApi = {
   // Daily input
   getByDate: (params) => {
-    const qs = new URLSearchParams(params || {}).toString();
+    const qs = buildQueryString(params);
     return api.get(`/attendance/daily${qs ? '?' + qs : ''}`);
   },
   upsertDaily: (employeeId, date, data) => api.put(`/attendance/daily/${employeeId}/${date}`, data),
 
   // Monthly summary (aggregated from daily)
   getMonthlySummary: (params) => {
-    const qs = new URLSearchParams(params || {}).toString();
+    const qs = buildQueryString(params);
     return api.get(`/attendance/monthly${qs ? '?' + qs : ''}`);
   },
   getEmployeeDailyDetail: (employeeId, period) =>
@@ -479,7 +509,7 @@ export const attendanceApi = {
 
   // Branch-level ASBEN summary
   summary: (params) => {
-    const qs = new URLSearchParams(params || {}).toString();
+    const qs = buildQueryString(params);
     return api.get(`/attendance/summary${qs ? '?' + qs : ''}`);
   },
 };
@@ -491,7 +521,7 @@ export const payrollApi = {
   listPeriods: () => api.get('/payroll/periods'),
   generateEntries: (period) => api.post(`/payroll/periods/${period}/generate`, {}),
   getEntries: (period, params) => {
-    const qs = new URLSearchParams(params || {}).toString();
+    const qs = buildQueryString(params);
     return api.get(`/payroll/periods/${period}/entries${qs ? '?' + qs : ''}`);
   },
   getSummary: (period) => api.get(`/payroll/periods/${period}/summary`),
@@ -596,8 +626,8 @@ export const outletActivityApi = {
 
   getBranchHistory: (branchId) => api.get(`/outlet-activity/branches/${branchId}/history`),
   getPhotoUrl: (filename) => {
-    const token = localStorage.getItem('auth_token') || '';
-    return `${API_BASE}/outlet-activity/photos/${filename}?token=${token}`;
+    const token = encodeURIComponent(localStorage.getItem('auth_token') || '');
+    return `${API_BASE}/outlet-activity/photos/${encodeURIComponent(filename || '')}?token=${token}`;
   }
 };
 
@@ -623,7 +653,7 @@ export const assetApi = {
     return api.get(`/assets/logs/all${qs ? `?${qs}` : ''}`);
   },
   getPhotoUrl: (filename) => {
-    const token = localStorage.getItem('auth_token') || '';
-    return `${API_BASE}/outlet-activity/photos/${filename}?token=${token}`;
+    const token = encodeURIComponent(localStorage.getItem('auth_token') || '');
+    return `${API_BASE}/outlet-activity/photos/${encodeURIComponent(filename || '')}?token=${token}`;
   }
 };

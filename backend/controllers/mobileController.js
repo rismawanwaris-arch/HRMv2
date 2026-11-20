@@ -5,6 +5,18 @@ const {
   verifyImageMagicBytes
 } = require('../utils/helpers');
 const { EMPLOYEE_FIELDS, buildInsert } = require('../utils/candidateFields');
+const { STAFF_ALL_FIELDS, buildInsert: buildStaffInsert } = require('../utils/staffFields');
+
+function safeParseJsonArray(str) {
+  if (!str) return [];
+  if (Array.isArray(str)) return str;
+  try {
+    const parsed = JSON.parse(str);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
 
 const CLIENT_UUID_REGEX = /^[a-zA-Z0-9_-]{8,64}$/;
 
@@ -54,7 +66,7 @@ function clampPositiveMoney(val, maxVal = 1000000000) {
 exports.getMasterData = async (req, res) => {
   try {
     const rawBranches = await query.all(
-      'SELECT id, code, name, city, address, status FROM branches WHERE status = "Active" ORDER BY name ASC'
+      "SELECT id, code, name, city, address, status FROM branches WHERE status = 'Active' ORDER BY name ASC"
     );
 
     const branches = rawBranches.map(b => ({
@@ -214,7 +226,7 @@ exports.syncAsset = async (req, res) => {
       `INSERT INTO outlet_asset_logs (
         asset_id, log_type, log_date, from_branch_id, to_branch_id, cost,
         replacement_asset_name, reason, performed_by, photos, notes
-      ) VALUES (?, 'PENAMBAHAN', ?, NULL, ?, ?, NULL, ?, ?, ?, ?)`,
+      ) VALUES (?, 'Penambahan', ?, NULL, ?, ?, NULL, ?, ?, ?, ?)`,
       [
         newAssetId,
         date,
@@ -321,6 +333,16 @@ exports.syncVisit = async (req, res) => {
       photosList = req.files.map(f => f.filename);
     }
 
+    const sClean = clampScore(score_cleanliness);
+    const sSec = clampScore(score_security);
+    const sDisp = clampScore(score_display);
+    const sSop = clampScore(score_sop);
+    const nonZeroScores = [sClean, sSec, sDisp, sSop].filter((n) => n > 0);
+    const rawOverall = clampScore(overall_score);
+    const finalOverall = rawOverall > 0
+      ? rawOverall
+      : (nonZeroScores.length > 0 ? Math.round(nonZeroScores.reduce((a, b) => a + b, 0) / nonZeroScores.length) : 0);
+
     const insertSql = `
       INSERT INTO outlet_visits (
         client_uuid, branch_id, visit_date, visit_time, visitor_name, purpose,
@@ -336,11 +358,11 @@ exports.syncVisit = async (req, res) => {
       sanitizeText(visit_time, 10),
       cleanVisitor,
       cleanPurpose,
-      clampScore(score_cleanliness),
-      clampScore(score_security),
-      clampScore(score_display),
-      clampScore(score_sop),
-      clampScore(overall_score),
+      sClean,
+      sSec,
+      sDisp,
+      sSop,
+      finalOverall,
       sanitizeText(notes, 1000),
       sanitizeText(action_plan, 1000),
       sanitizeText(staff_present, 500),
@@ -582,6 +604,26 @@ exports.syncEmployee = async (req, res) => {
       ]
     );
 
+    // Mirror to employees table so mobile-registered staff appear immediately in EmployeeManagement/Attendance/Payroll
+    const staffPayload = {
+      ...sanitizedBody,
+      candidate_id: candidateId,
+      contract_type: safeContract,
+      salary: safeSalary,
+      allowance: safeAllowance,
+      hire_date: sanitizeText(hire_date, 20),
+      employee_type: req.body.employee_type || 'Frontliner',
+      position: req.body.position || 'Frontliner',
+    };
+    const { columns: sCols, placeholders: sPh, values: sVals } = buildStaffInsert(STAFF_ALL_FIELDS, staffPayload);
+    await query.run(
+      `INSERT INTO employees (${sCols}, candidate_id, status, created_at, updated_at)
+       VALUES (${sPh}, ?, 'Active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+      [...sVals, candidateId]
+    ).catch((err) => {
+      console.warn('[mobileController] Mirror insert into employees skipped:', err.message);
+    });
+
     res.status(201).json({
       success: true,
       message: 'Karyawan berhasil terdaftar di sistem.',
@@ -638,7 +680,7 @@ exports.getAssets = async (req, res) => {
       success: true,
       data: assets.map(a => ({
         ...a,
-        photos: a.photos ? JSON.parse(a.photos) : []
+        photos: safeParseJsonArray(a.photos)
       }))
     });
   } catch (error) {
@@ -649,32 +691,32 @@ exports.getAssets = async (req, res) => {
 
 /**
  * 7. GET /api/mobile/employees
- * Pencarian & daftar karyawan per cabang untuk mobile (PII-Minimized: Tanpa NIK, Gaji, Rekening, atau Alamat KTP)
+ * Pencarian & daftar karyawan aktif per cabang untuk mobile (PII-Minimized: Tanpa NIK, Gaji, Rekening, atau Alamat KTP)
  */
 exports.getEmployees = async (req, res) => {
   try {
     const { branch_id, search } = req.query;
     let sql = `
-      SELECT c.id, c.client_uuid, c.access_code, c.name, c.gender, c.branch_id,
-             c.hire_date, b.name as branch_name, s7.contract_type
-      FROM candidates c
-      LEFT JOIN branches b ON c.branch_id = b.id
-      LEFT JOIN stage7_offering s7 ON c.id = s7.candidate_id
-      WHERE c.status = 'Hired'
+      SELECT e.id, c.client_uuid, c.access_code, e.name, e.gender, e.branch_id,
+             e.hire_date, e.position, e.employee_type, b.name as branch_name, e.contract_type
+      FROM employees e
+      LEFT JOIN branches b ON e.branch_id = b.id
+      LEFT JOIN candidates c ON e.candidate_id = c.id
+      WHERE e.status = 'Active'
     `;
     const params = [];
 
     if (branch_id) {
-      sql += ' AND c.branch_id = ?';
+      sql += ' AND e.branch_id = ?';
       params.push(parseInt(branch_id, 10));
     }
     if (search && String(search).trim() !== '') {
       const q = `%${String(search).trim().slice(0, 100)}%`;
-      sql += ' AND (c.name LIKE ? OR c.access_code LIKE ?)';
+      sql += ' AND (e.name LIKE ? OR c.access_code LIKE ?)';
       params.push(q, q);
     }
 
-    sql += ' ORDER BY c.id DESC LIMIT 100';
+    sql += ' ORDER BY e.id DESC LIMIT 100';
 
     const employees = await query.all(sql, params);
     res.json({

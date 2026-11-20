@@ -899,6 +899,7 @@ async function initDb() {
 
   } catch (error) {
     console.error('Database initialization error:', error);
+    throw error;
   }
 }
 
@@ -975,27 +976,7 @@ async function migrateEmployeeEncryption() {
 
 async function syncHiredManualCandidatesToEmployees() {
   try {
-    // 1. Hapus duplikat baris manual entry yang memiliki nama persis sama (simpan ID terbaru)
-    await query.run(`
-      DELETE FROM candidates
-      WHERE is_manual_entry = 1 AND status = 'Hired'
-        AND id NOT IN (
-          SELECT MAX(id) FROM candidates
-          WHERE is_manual_entry = 1 AND status = 'Hired'
-          GROUP BY LOWER(TRIM(name))
-        )
-    `).catch(() => {});
-
-    // Hapus juga duplikat nama di tabel employees jika ada (simpan ID terbaru)
-    await query.run(`
-      DELETE FROM employees
-      WHERE id NOT IN (
-        SELECT MAX(id) FROM employees
-        GROUP BY LOWER(TRIM(name))
-      )
-    `).catch(() => {});
-
-    // 2. Sinkronkan kandidat Hired manual entry yang belum masuk ke tabel employees
+    // Additive-only: sinkronkan kandidat Hired manual entry yang belum masuk ke tabel employees
     const unpromoted = await query.all(`
       SELECT c.*, s7.contract_type, s7.salary_offered, s7.allowance, s7.start_date
       FROM candidates c
@@ -1025,12 +1006,16 @@ async function syncHiredManualCandidatesToEmployees() {
         position: 'Frontliner',
       };
       const { columns, placeholders, values } = buildInsert(STAFF_ALL_FIELDS, body);
-      await query.run(
-        `INSERT INTO employees (${columns}, candidate_id, status, created_at, updated_at)
-         VALUES (${placeholders}, ?, 'Active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-        [...values, cand.id]
-      ).catch(() => {});
-      synced++;
+      try {
+        await query.run(
+          `INSERT INTO employees (${columns}, candidate_id, status, created_at, updated_at)
+           VALUES (${placeholders}, ?, 'Active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+          [...values, cand.id]
+        );
+        synced++;
+      } catch (insertErr) {
+        console.error(`[db] Failed to sync manual Hired candidate ${cand.id} (${cand.name}) to employees:`, insertErr.message);
+      }
     }
     if (synced > 0) {
       console.log(`[db] Synced ${synced} manual Hired candidate(s) into employees table.`);

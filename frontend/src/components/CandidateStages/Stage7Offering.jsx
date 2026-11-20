@@ -1,19 +1,31 @@
 import React from 'react';
 
-function Stage7Offering({ candidate, stageData, setStageData, handleStageSubmit }) {
+function Stage7Offering({ candidate, stageId = 7, stageData, setStageData, handleStageSubmit, submitting = false }) {
+  const offeringStatus = stageData.offering_status || 'Pending';
+  const badgeClass = offeringStatus === 'Accepted'
+    ? 'badge-hired'
+    : offeringStatus === 'Declined'
+    ? 'badge-rejected'
+    : 'badge-active';
+  const badgeLabel = offeringStatus === 'Accepted'
+    ? 'Diterima (Accepted)'
+    : offeringStatus === 'Declined'
+    ? 'Ditolak Kandidat'
+    : 'Pending';
+
   return (
-    <form onSubmit={(e) => { e.preventDefault(); handleStageSubmit(7, stageData); }}>
+    <form onSubmit={(e) => { e.preventDefault(); handleStageSubmit(stageId, stageData); }}>
       <div className="eval-title">
         <span>Tahap 7: Offering & Kontrak Kerja</span>
-        <span className={`badge ${stageData.offering_status === 'Accepted' ? 'badge-hired' : 'badge-active'}`}>
-          {stageData.offering_status}
+        <span className={`badge ${badgeClass}`}>
+          {badgeLabel}
         </span>
       </div>
 
       <div className="form-grid" style={{ marginBottom: '24px' }}>
         <div className="form-group">
           <label>Tipe Kontrak Kerja</label>
-          <select name="contract_type" value={stageData.contract_type} 
+          <select name="contract_type" value={stageData.contract_type || 'PKWT'}
                   onChange={(e) => setStageData(p => ({ ...p, contract_type: e.target.value }))}>
             <option value="PKWT">PKWT (Kontrak / Masa Percobaan)</option>
             <option value="PKWTT">PKWTT (Pegawai Tetap)</option>
@@ -21,33 +33,41 @@ function Stage7Offering({ candidate, stageData, setStageData, handleStageSubmit 
         </div>
         <div className="form-group">
           <label>Tanggal Mulai Bekerja</label>
-          <input 
-            type="date" 
-            value={stageData.start_date || ''}
+          <input
+            type="date"
+            value={stageData.start_date ? String(stageData.start_date).slice(0, 10) : ''}
             onChange={(e) => setStageData(p => ({ ...p, start_date: e.target.value }))}
           />
         </div>
         <div className="form-group">
           <label>Gaji Pokok yang Ditawarkan (Rp)</label>
-          <input 
-            type="number" 
-            value={stageData.salary_offered}
-            onChange={(e) => setStageData(p => ({ ...p, salary_offered: parseFloat(e.target.value) || 0 }))}
+          <input
+            type="number"
+            min="0"
+            value={stageData.salary_offered ?? ''}
+            onChange={(e) => {
+              const raw = e.target.value;
+              setStageData(p => ({ ...p, salary_offered: raw === '' ? '' : (parseFloat(raw) || 0) }));
+            }}
             placeholder="Contoh: 2800000"
           />
         </div>
         <div className="form-group">
           <label>Tunjangan / Uang Makan (Rp)</label>
-          <input 
-            type="number" 
-            value={stageData.allowance}
-            onChange={(e) => setStageData(p => ({ ...p, allowance: parseFloat(e.target.value) || 0 }))}
+          <input
+            type="number"
+            min="0"
+            value={stageData.allowance ?? ''}
+            onChange={(e) => {
+              const raw = e.target.value;
+              setStageData(p => ({ ...p, allowance: raw === '' ? '' : (parseFloat(raw) || 0) }));
+            }}
             placeholder="Contoh: 500000"
           />
         </div>
         <div className="form-group form-group-full">
           <label>Skema Bonus & Insentif Penjualan</label>
-          <textarea 
+          <textarea
             value={stageData.bonus_scheme || ''}
             onChange={(e) => setStageData(p => ({ ...p, bonus_scheme: e.target.value }))}
             placeholder="Masukkan skema insentif jika berhasil upselling voucher / aksesoris..."
@@ -56,8 +76,8 @@ function Stage7Offering({ candidate, stageData, setStageData, handleStageSubmit 
         </div>
         <div className="form-group">
           <label>Status Penawaran (Offering Status)</label>
-          <select 
-            value={stageData.offering_status} 
+          <select
+            value={offeringStatus}
             onChange={(e) => {
               const s = e.target.value;
               setStageData(p => ({ ...p, offering_status: s, passed: s === 'Accepted' ? 1 : 0 }));
@@ -80,7 +100,9 @@ function Stage7Offering({ candidate, stageData, setStageData, handleStageSubmit 
       </div>
 
       {candidate.status === 'Active' && (
-        <button type="submit" className="btn btn-primary">Simpan Kelulusan Akhir</button>
+        <button type="submit" className="btn btn-primary" disabled={submitting}>
+          {submitting ? 'Menyimpan...' : 'Simpan Kelulusan Akhir'}
+        </button>
       )}
     </form>
   );

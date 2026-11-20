@@ -59,9 +59,9 @@ app.use('/api/audit-log',  authenticateToken, requireRole(...MASTER),  require('
 app.use('/api/employees',  authenticateToken, auditLog, requireRole(...FINANCE), require('./routes/employeeRoutes'));
 app.use('/api/candidates', authenticateToken, auditLog, requireRole('staff', 'master'), require('./routes/candidateRoutes'));
 app.use('/api/stages',     authenticateToken, auditLog, requireRole('staff', 'master'), require('./routes/stageRoutes'));
-app.use('/api/branches',   authenticateToken, auditLog, requireRole(...FINANCE), require('./routes/branchRoutes'));
+app.use('/api/branches',   authenticateToken, auditLog, requireRole(...STAFF),   require('./routes/branchRoutes'));
 app.use('/api/settings',   authenticateToken, auditLog, requireRole(...MASTER),  require('./routes/settingsRoutes'));
-app.use('/api/staff',      authenticateToken, auditLog, requireRole(...MASTER),  require('./routes/staffRoutes'));
+app.use('/api/staff',      authenticateToken, auditLog, requireRole(...FINANCE), require('./routes/staffRoutes'));
 app.use('/api/attendance', authenticateToken, auditLog, requireRole(...STAFF),   require('./routes/attendanceRoutes'));
 app.use('/api/payroll',    authenticateToken, auditLog, requireRole(...FINANCE), require('./routes/payrollRoutes'));
 app.use('/api/financial',  authenticateToken, auditLog, requireRole(...FINANCE), require('./routes/financialRoutes'));
@@ -80,7 +80,8 @@ app.all('/api/*', (req, res) => {
   });
 });
 
-// --- SERVE FRONTEND STATIC FILES IN PRODUCTION ---
+// --- SERVE DOCUMENTATION & FRONTEND STATIC FILES ---
+app.use('/docs', express.static(path.join(__dirname, '..', 'docs')));
 const frontendBuildPath = path.join(__dirname, '..', 'frontend', 'dist');
 app.use(express.static(frontendBuildPath));
 
@@ -97,13 +98,19 @@ app.use((err, req, res, next) => {
     if (err.code === 'LIMIT_FILE_SIZE') {
       return res.status(400).json({
         success: false,
-        message: 'Ukuran file foto melebihi batas maksimal (10MB per file).'
+        message: 'Ukuran file melebihi batas maksimal yang diizinkan.'
       });
     }
-    if (err.code === 'LIMIT_FILE_COUNT' || err.code === 'LIMIT_UNEXPECTED_FILE') {
+    if (err.code === 'LIMIT_FILE_COUNT') {
       return res.status(400).json({
         success: false,
-        message: 'Jumlah file foto melebihi batas maksimal (maks 5 foto).'
+        message: 'Jumlah file melebihi batas maksimal yang diizinkan.'
+      });
+    }
+    if (err.code === 'LIMIT_UNEXPECTED_FILE') {
+      return res.status(400).json({
+        success: false,
+        message: 'Field file yang diunggah tidak sesuai.'
       });
     }
     const status = err.status || (err.message && err.message.includes('Format file') ? 400 : 500);

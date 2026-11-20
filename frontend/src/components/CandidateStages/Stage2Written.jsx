@@ -1,12 +1,17 @@
 import React from 'react';
 
-function Stage2Written({ candidate, stageData, setStageData, handleStageSubmit, copyExamLink }) {
+function Stage2Written({ candidate, stageId = 2, stageData, setStageData, handleStageSubmit, copyExamLink, submitting = false }) {
+  const numScore = stageData.score_numerik ?? 0;
+  const sitScore = stageData.score_situasional ?? 0;
+  const penScore = stageData.score_pengetahuan ?? 0;
+  const nomScore = stageData.score_nominal ?? 0;
+
   return (
-    <form onSubmit={(e) => { e.preventDefault(); handleStageSubmit(2, stageData); }}>
+    <form onSubmit={(e) => { e.preventDefault(); handleStageSubmit(stageId, stageData); }}>
       <div className="eval-title">
         <span>Tahap 2: Tes Tertulis (Online / Manual)</span>
         <span className={`badge ${stageData.passed ? 'badge-hired' : 'badge-active'}`}>
-          {stageData.passed ? `Lolos (Skor: ${stageData.total_score})` : 'Menunggu Hasil'}
+          {stageData.passed ? `Lolos (Skor: ${stageData.total_score ?? 0})` : 'Menunggu Hasil'}
         </span>
       </div>
 
@@ -22,13 +27,13 @@ function Stage2Written({ candidate, stageData, setStageData, handleStageSubmit, 
 
       {stageData.test_completed_at ? (
         <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', background: 'rgba(255,255,255,0.02)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', background: 'var(--bg-secondary)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)', flexWrap: 'wrap', gap: '12px' }}>
             <div>
-              <h4 style={{ color: 'white' }}>Ujian Selesai Dikerjakan Kandidat</h4>
-              <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>Waktu Selesai: {new Date(stageData.test_completed_at).toLocaleString('id-ID')}</p>
+              <h4 style={{ color: 'var(--text-primary)', margin: 0 }}>Ujian Selesai Dikerjakan Kandidat</h4>
+              <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px', marginBottom: 0 }}>Waktu Selesai: {new Date(stageData.test_completed_at).toLocaleString('id-ID')}</p>
             </div>
             <div className={`score-badge-large ${stageData.passed ? 'passed' : 'failed'}`}>
-              {stageData.total_score}
+              {stageData.total_score ?? 0}
             </div>
           </div>
 
@@ -36,22 +41,22 @@ function Stage2Written({ candidate, stageData, setStageData, handleStageSubmit, 
           <div className="subtest-score-row">
             <div className="subtest-score-card">
               <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Numerik & Kasir</span>
-              <span className="subtest-score-val" style={{ color: stageData.score_numerik >= 65 ? 'var(--color-success)' : 'var(--color-danger)' }}>{stageData.score_numerik}%</span>
+              <span className="subtest-score-val" style={{ color: numScore >= 65 ? 'var(--color-success)' : 'var(--color-danger)' }}>{numScore}%</span>
               <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Bobot: 30%</span>
             </div>
             <div className="subtest-score-card">
               <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Situasional Servis</span>
-              <span className="subtest-score-val" style={{ color: stageData.score_situasional >= 65 ? 'var(--color-success)' : 'var(--color-danger)' }}>{stageData.score_situasional}%</span>
+              <span className="subtest-score-val" style={{ color: sitScore >= 65 ? 'var(--color-success)' : 'var(--color-danger)' }}>{sitScore}%</span>
               <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Bobot: 25%</span>
             </div>
             <div className="subtest-score-card">
               <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Produk & Teknologi</span>
-              <span className="subtest-score-val" style={{ color: stageData.score_pengetahuan >= 65 ? 'var(--color-success)' : 'var(--color-danger)' }}>{stageData.score_pengetahuan}%</span>
+              <span className="subtest-score-val" style={{ color: penScore >= 65 ? 'var(--color-success)' : 'var(--color-danger)' }}>{penScore}%</span>
               <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Bobot: 25%</span>
             </div>
             <div className="subtest-score-card">
               <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Penulisan Nominal</span>
-              <span className="subtest-score-val" style={{ color: stageData.score_nominal >= 65 ? 'var(--color-success)' : 'var(--color-danger)' }}>{stageData.score_nominal}%</span>
+              <span className="subtest-score-val" style={{ color: nomScore >= 65 ? 'var(--color-success)' : 'var(--color-danger)' }}>{nomScore}%</span>
               <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Bobot: 20%</span>
             </div>
           </div>
@@ -59,13 +64,15 @@ function Stage2Written({ candidate, stageData, setStageData, handleStageSubmit, 
           {(() => {
             try {
               if (!stageData.cognitive_details) return null;
-              const details = JSON.parse(stageData.cognitive_details);
-              if (!details || details.length === 0) return null;
-              
+              const details = typeof stageData.cognitive_details === 'string'
+                ? JSON.parse(stageData.cognitive_details)
+                : stageData.cognitive_details;
+              if (!Array.isArray(details) || details.length === 0) return null;
+
               return (
                 <div style={{ marginTop: '24px', marginBottom: '24px' }}>
-                  <h3 style={{ fontSize: '16px', marginBottom: '12px', color: '#ef4444' }}>Daftar Jawaban Salah (Cognitive)</h3>
-                  <div style={{ maxHeight: '300px', overflowY: 'auto', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '12px', background: 'rgba(239,68,68,0.02)' }}>
+                  <h3 style={{ fontSize: '16px', marginBottom: '12px', color: 'var(--color-danger)' }}>Daftar Jawaban Salah (Cognitive)</h3>
+                  <div style={{ maxHeight: '300px', overflowY: 'auto', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '12px', background: 'var(--color-danger-bg)' }}>
                     <table className="interview-scoring-table" style={{ margin: 0, width: '100%' }}>
                       <thead>
                         <tr>
@@ -80,8 +87,8 @@ function Stage2Written({ candidate, stageData, setStageData, handleStageSubmit, 
                           <tr key={idx}>
                             <td style={{ textTransform: 'capitalize', fontSize: '12px', color: 'var(--text-muted)' }}>{d.subtest}</td>
                             <td style={{ fontSize: '13px' }}>{d.question_text}</td>
-                            <td style={{ color: '#ef4444', fontWeight: '600' }}>{d.candidate_answer}</td>
-                            <td style={{ color: '#10b981', fontWeight: '600' }}>{d.correct_answer}</td>
+                            <td style={{ color: 'var(--color-danger)', fontWeight: '600' }}>{d.candidate_answer}</td>
+                            <td style={{ color: 'var(--color-success)', fontWeight: '600' }}>{d.correct_answer}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -89,7 +96,7 @@ function Stage2Written({ candidate, stageData, setStageData, handleStageSubmit, 
                   </div>
                 </div>
               );
-            } catch (e) {
+            } catch {
               return null;
             }
           })()}
@@ -106,20 +113,27 @@ function Stage2Written({ candidate, stageData, setStageData, handleStageSubmit, 
               <tbody>
                 {(() => {
                   try {
-                    const traits = JSON.parse(stageData.score_kepribadian);
-                    if (!traits || traits.length === 0) return <tr><td colSpan="2">Tidak ada data kepribadian.</td></tr>;
+                    if (!stageData.score_kepribadian) {
+                      return <tr><td colSpan="2">Tidak ada data kepribadian.</td></tr>;
+                    }
+                    const traits = typeof stageData.score_kepribadian === 'string'
+                      ? JSON.parse(stageData.score_kepribadian)
+                      : stageData.score_kepribadian;
+                    if (!Array.isArray(traits) || traits.length === 0) {
+                      return <tr><td colSpan="2">Tidak ada data kepribadian.</td></tr>;
+                    }
                     return traits.map((t, idx) => (
                       <tr key={idx}>
                         <td>
                           <strong>{t.dimension}</strong>
                           <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Tipe: {t.type}</div>
                         </td>
-                        <td style={{ fontWeight: '600', color: 'white' }}>
-                          {t.type === 'likert' ? `Poin Rating: ${t.answer} / 5` : `Pilihan: Opsi ${t.answer}`}
+                        <td style={{ fontWeight: '600', color: 'var(--text-primary)' }}>
+                          {t.type === 'likert' ? `Poin Rating: ${t.answer ?? 0} / 5` : `Pilihan: Opsi ${t.answer || '-'}`}
                         </td>
                       </tr>
                     ));
-                  } catch (e) {
+                  } catch {
                     return <tr><td colSpan="2">Format data kepribadian tidak valid.</td></tr>;
                   }
                 })()}
@@ -138,12 +152,12 @@ function Stage2Written({ candidate, stageData, setStageData, handleStageSubmit, 
           <div className="form-grid">
             <div className="form-group">
               <label>Skor Numerik & Kasir (0 - 100)</label>
-              <input 
-                type="number" 
-                value={stageData.score_numerik}
+              <input
+                type="number"
+                value={numScore}
                 onChange={(e) => {
-                  const val = parseInt(e.target.value) || 0;
-                  const avg = Math.round((val + stageData.score_situasional + stageData.score_pengetahuan + stageData.score_nominal) / 4);
+                  const val = Math.min(100, Math.max(0, parseInt(e.target.value, 10) || 0));
+                  const avg = Math.round((val + sitScore + penScore + nomScore) / 4);
                   setStageData(p => ({ ...p, score_numerik: val, total_score: avg, passed: avg >= 65 ? 1 : 0 }));
                 }}
                 min="0" max="100"
@@ -151,12 +165,12 @@ function Stage2Written({ candidate, stageData, setStageData, handleStageSubmit, 
             </div>
             <div className="form-group">
               <label>Skor Situasional Pelayanan (0 - 100)</label>
-              <input 
-                type="number" 
-                value={stageData.score_situasional}
+              <input
+                type="number"
+                value={sitScore}
                 onChange={(e) => {
-                  const val = parseInt(e.target.value) || 0;
-                  const avg = Math.round((stageData.score_numerik + val + stageData.score_pengetahuan + stageData.score_nominal) / 4);
+                  const val = Math.min(100, Math.max(0, parseInt(e.target.value, 10) || 0));
+                  const avg = Math.round((numScore + val + penScore + nomScore) / 4);
                   setStageData(p => ({ ...p, score_situasional: val, total_score: avg, passed: avg >= 65 ? 1 : 0 }));
                 }}
                 min="0" max="100"
@@ -164,12 +178,12 @@ function Stage2Written({ candidate, stageData, setStageData, handleStageSubmit, 
             </div>
             <div className="form-group">
               <label>Skor Produk & Teknologi (0 - 100)</label>
-              <input 
-                type="number" 
-                value={stageData.score_pengetahuan}
+              <input
+                type="number"
+                value={penScore}
                 onChange={(e) => {
-                  const val = parseInt(e.target.value) || 0;
-                  const avg = Math.round((stageData.score_numerik + stageData.score_situasional + val + stageData.score_nominal) / 4);
+                  const val = Math.min(100, Math.max(0, parseInt(e.target.value, 10) || 0));
+                  const avg = Math.round((numScore + sitScore + val + nomScore) / 4);
                   setStageData(p => ({ ...p, score_pengetahuan: val, total_score: avg, passed: avg >= 65 ? 1 : 0 }));
                 }}
                 min="0" max="100"
@@ -177,12 +191,12 @@ function Stage2Written({ candidate, stageData, setStageData, handleStageSubmit, 
             </div>
             <div className="form-group">
               <label>Skor Penulisan Nominal (0 - 100)</label>
-              <input 
-                type="number" 
-                value={stageData.score_nominal}
+              <input
+                type="number"
+                value={nomScore}
                 onChange={(e) => {
-                  const val = parseInt(e.target.value) || 0;
-                  const avg = Math.round((stageData.score_numerik + stageData.score_situasional + stageData.score_pengetahuan + val) / 4);
+                  const val = Math.min(100, Math.max(0, parseInt(e.target.value, 10) || 0));
+                  const avg = Math.round((numScore + sitScore + penScore + val) / 4);
                   setStageData(p => ({ ...p, score_nominal: val, total_score: avg, passed: avg >= 65 ? 1 : 0 }));
                 }}
                 min="0" max="100"
@@ -190,7 +204,7 @@ function Stage2Written({ candidate, stageData, setStageData, handleStageSubmit, 
             </div>
             <div className="form-group" style={{ gridColumn: 'span 2' }}>
               <label>Skor Rata-rata Akhir (Auto-graded)</label>
-              <input type="number" value={stageData.total_score} readOnly style={{ background: 'var(--bg-hover)', border: 'none' }} />
+              <input type="number" value={stageData.total_score ?? 0} readOnly style={{ background: 'var(--bg-hover)', border: 'none' }} />
             </div>
           </div>
 
@@ -206,7 +220,9 @@ function Stage2Written({ candidate, stageData, setStageData, handleStageSubmit, 
       )}
 
       {candidate.status === 'Active' && (
-        <button type="submit" className="btn btn-primary" style={{ marginTop: '24px' }}>Simpan Hasil Tahap 2</button>
+        <button type="submit" className="btn btn-primary" style={{ marginTop: '24px' }} disabled={submitting}>
+          {submitting ? 'Menyimpan...' : 'Simpan Hasil Tahap 2'}
+        </button>
       )}
     </form>
   );

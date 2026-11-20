@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import API_BASE from '../config';
+import { authApi } from '../services/api';
 
 function Login({ onLogin, setView }) {
   const [username, setUsername] = useState('');
@@ -11,27 +11,22 @@ function Login({ onLogin, setView }) {
     e.preventDefault();
     setError('');
 
-    if (!username.trim() || !password) {
+    const trimmedUser = username.trim();
+    if (!trimmedUser || !password) {
       setError('Username dan Password wajib diisi.');
       return;
     }
 
     try {
       setLoading(true);
-      const res = await fetch(`${API_BASE}/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
-      });
-      const data = await res.json();
-
+      const data = await authApi.login({ username: trimmedUser, password });
       if (data.success) {
         onLogin(data.token, data.username, data.role || 'master');
       } else {
         setError(data.message || 'Login gagal.');
       }
-    } catch {
-      setError('Gagal terhubung ke server.');
+    } catch (err) {
+      setError(err.message || 'Gagal terhubung ke server.');
     } finally {
       setLoading(false);
     }
@@ -128,15 +123,14 @@ function Login({ onLogin, setView }) {
         <div style={{ padding: '0 40px 32px' }}>
           {error && (
             <div style={{
-              background: 'rgba(239,68,68,0.1)',
+              background: 'var(--color-danger-bg)',
               border: '1px solid rgba(239,68,68,0.3)',
-              color: '#f87171',
+              color: 'var(--color-danger)',
               padding: '12px 16px',
               borderRadius: '12px',
               fontSize: '13px',
               marginBottom: '20px',
               textAlign: 'center',
-              animation: 'popIn 0.28s ease forwards'
             }}>
               {error}
             </div>
@@ -158,7 +152,7 @@ function Login({ onLogin, setView }) {
                   border: '1px solid var(--border-color)',
                   borderRadius: '12px', padding: '13px 16px',
                   color: 'var(--text-primary)', fontSize: '14px', outline: 'none',
-                  transition: 'all 0.25s ease'
+                  transition: 'border-color 150ms ease-out, box-shadow 150ms ease-out'
                 }}
                 onFocus={e => { e.target.style.borderColor = 'var(--primary)'; e.target.style.boxShadow = '0 0 0 3px rgba(79,70,229,0.15)'; }}
                 onBlur={e => { e.target.style.borderColor = 'var(--border-color)'; e.target.style.boxShadow = 'none'; }}
@@ -181,7 +175,7 @@ function Login({ onLogin, setView }) {
                   border: '1px solid var(--border-color)',
                   borderRadius: '12px', padding: '13px 16px',
                   color: 'var(--text-primary)', fontSize: '14px', outline: 'none',
-                  transition: 'all 0.25s ease'
+                  transition: 'border-color 150ms ease-out, box-shadow 150ms ease-out'
                 }}
                 onFocus={e => { e.target.style.borderColor = 'var(--primary)'; e.target.style.boxShadow = '0 0 0 3px rgba(79,70,229,0.15)'; }}
                 onBlur={e => { e.target.style.borderColor = 'var(--border-color)'; e.target.style.boxShadow = 'none'; }}
@@ -192,24 +186,15 @@ function Login({ onLogin, setView }) {
             <button
               type="submit"
               disabled={loading}
-              className="btn-primary"
+              className="btn btn-primary"
               style={{
                 marginTop: '8px',
                 width: '100%',
                 padding: '15px',
-                background: loading ? 'var(--primary-glow)' : 'linear-gradient(135deg, var(--primary), var(--secondary))',
-                color: 'white',
-                border: 'none',
                 borderRadius: '12px',
                 fontSize: '15px',
                 fontWeight: 700,
-                cursor: loading ? 'not-allowed' : 'pointer',
-                boxShadow: loading ? 'none' : '0 8px 24px var(--primary-glow)',
-                transition: 'all 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '8px'
+                justifyContent: 'center'
               }}
             >
               {loading ? 'Memverifikasi Sesi...' : 'Masuk ke Dashboard →'}
@@ -219,7 +204,7 @@ function Login({ onLogin, setView }) {
 
         {/* Portal Links */}
         <div style={{
-          background: 'rgba(11, 15, 25, 0.45)',
+          background: 'var(--bg-secondary)',
           padding: '22px 40px',
           borderTop: '1px solid var(--border-color)'
         }}>
@@ -230,17 +215,7 @@ function Login({ onLogin, setView }) {
             <button
               type="button"
               onClick={() => setView('test')}
-              style={{
-                width: '100%', padding: '11px 14px',
-                background: 'var(--bg-surface)',
-                border: '1px solid var(--border-color)',
-                borderRadius: '10px', color: 'var(--text-primary)',
-                fontSize: '13px', fontWeight: 600,
-                cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
-                transition: 'all 0.2s ease'
-              }}
-              onMouseOver={e => { e.currentTarget.style.background = 'var(--bg-hover)'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
-              onMouseOut={e => { e.currentTarget.style.background = 'var(--bg-surface)'; e.currentTarget.style.transform = 'translateY(0)'; }}
+              className="portal-link-btn"
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
               Portal Ujian Kandidat
@@ -248,17 +223,7 @@ function Login({ onLogin, setView }) {
             <button
               type="button"
               onClick={() => setView('training-portal')}
-              style={{
-                width: '100%', padding: '11px 14px',
-                background: 'var(--bg-surface)',
-                border: '1px solid var(--border-color)',
-                borderRadius: '10px', color: 'var(--text-primary)',
-                fontSize: '13px', fontWeight: 600,
-                cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
-                transition: 'all 0.2s ease'
-              }}
-              onMouseOver={e => { e.currentTarget.style.background = 'var(--bg-hover)'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
-              onMouseOut={e => { e.currentTarget.style.background = 'var(--bg-surface)'; e.currentTarget.style.transform = 'translateY(0)'; }}
+              className="portal-link-btn"
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"></path><path d="M12 6v6l4 2"></path></svg>
               Portal Ujian Training

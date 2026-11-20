@@ -19,34 +19,27 @@ function periodLabel(period) {
 export default function LaporanKonsolidasi({ setView }) {
   const [period, setPeriod] = useState(currentPeriod());
   const [items, setItems] = useState([]);
-  const [grandTotal, setGrandTotal] = useState({
-    total_pendapatan: 0,
-    total_hpp: 0,
-    laba_kotor: 0,
-    total_biaya: 0,
-    laba_bersih: 0,
-  });
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
   const [filterType, setFilterType] = useState('ALL'); // 'ALL' | 'Konter' | 'Gudang'
   const [search, setSearch] = useState('');
 
   const load = useCallback(async () => {
+    if (!period) return;
     setLoading(true);
+    setError('');
     try {
       const res = await financialApi.getConsolidatedReport(period);
       if (res.success) {
         setItems(res.data || []);
-        setGrandTotal(res.grand_total || {
-          total_pendapatan: 0,
-          total_hpp: 0,
-          laba_kotor: 0,
-          total_biaya: 0,
-          laba_bersih: 0,
-        });
+      } else {
+        setItems([]);
+        setError(res.message || 'Gagal memuat laporan konsolidasi.');
       }
     } catch (err) {
       console.error('Failed to load consolidated financial report:', err);
       setItems([]);
+      setError(err.message || 'Gagal memuat laporan konsolidasi.');
     } finally {
       setLoading(false);
     }
@@ -58,13 +51,27 @@ export default function LaporanKonsolidasi({ setView }) {
 
   const filteredItems = items.filter(item => {
     if (filterType !== 'ALL' && item.location_type !== filterType) return false;
-    if (search) {
+    if (search.trim()) {
       const q = search.toLowerCase();
-      const matchName = item.branch_name.toLowerCase().includes(q);
-      const matchCode = item.branch_code.toLowerCase().includes(q);
+      const matchName = (item.branch_name || '').toLowerCase().includes(q);
+      const matchCode = (item.branch_code || '').toLowerCase().includes(q);
       if (!matchName && !matchCode) return false;
     }
     return true;
+  });
+
+  const displayTotal = filteredItems.reduce((acc, row) => ({
+    total_pendapatan: acc.total_pendapatan + (row.total_pendapatan || 0),
+    total_hpp: acc.total_hpp + (row.total_hpp || 0),
+    laba_kotor: acc.laba_kotor + (row.laba_kotor || 0),
+    total_biaya: acc.total_biaya + (row.total_biaya || 0),
+    laba_bersih: acc.laba_bersih + (row.laba_bersih || 0),
+  }), {
+    total_pendapatan: 0,
+    total_hpp: 0,
+    laba_kotor: 0,
+    total_biaya: 0,
+    laba_bersih: 0,
   });
 
   const konterCount = items.filter(i => i.location_type === 'Konter').length;
@@ -75,15 +82,16 @@ export default function LaporanKonsolidasi({ setView }) {
   };
 
   return (
-    <div className="view-container">
+    <div>
       {/* Header */}
-      <div className="view-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+      <div className="page-header">
         <div>
-          <h1 className="view-title">Laporan Konsolidasi Semua Lokasi</h1>
-          <p className="view-subtitle">Ringkasan agregasi keuangan seluruh cabang konter dan gudang per periode</p>
+          <h1 className="page-title">Laporan Konsolidasi Semua Lokasi</h1>
+          <p className="page-subtitle">Ringkasan agregasi keuangan seluruh cabang konter dan gudang ({periodLabel(period)})</p>
         </div>
-        <div style={{ display: 'flex', gap: '10px' }}>
+        <div className="no-print" style={{ display: 'flex', gap: '10px' }}>
           <button
+            type="button"
             onClick={handlePrint}
             style={{
               padding: '9px 18px',
@@ -105,7 +113,7 @@ export default function LaporanKonsolidasi({ setView }) {
       </div>
 
       {/* Period & Filter Control Bar */}
-      <div className="card" style={{ marginBottom: '20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
+      <div className="card no-print" style={{ marginBottom: '20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
           <label style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '13px' }}>Periode:</label>
           <input
@@ -133,6 +141,7 @@ export default function LaporanKonsolidasi({ setView }) {
             {periodLabel(period)}
           </span>
           <button
+            type="button"
             onClick={load}
             style={{
               padding: '8px 14px',
@@ -165,10 +174,12 @@ export default function LaporanKonsolidasi({ setView }) {
               fontSize: '13px',
               outline: 'none',
               width: '180px',
+              maxWidth: '100%',
             }}
           />
           <div style={{ display: 'flex', background: 'var(--bg-secondary)', padding: '3px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
             <button
+              type="button"
               onClick={() => setFilterType('ALL')}
               style={{
                 padding: '6px 12px',
@@ -184,6 +195,7 @@ export default function LaporanKonsolidasi({ setView }) {
               Semua ({items.length})
             </button>
             <button
+              type="button"
               onClick={() => setFilterType('Konter')}
               style={{
                 padding: '6px 12px',
@@ -199,6 +211,7 @@ export default function LaporanKonsolidasi({ setView }) {
               Konter ({konterCount})
             </button>
             <button
+              type="button"
               onClick={() => setFilterType('Gudang')}
               style={{
                 padding: '6px 12px',
@@ -217,7 +230,14 @@ export default function LaporanKonsolidasi({ setView }) {
         </div>
       </div>
 
-      {/* KPI Cards: Grand Total Konsolidasi */}
+      {error && (
+        <div className="card no-print" style={{ marginBottom: '16px', padding: '12px 16px', border: '1px solid rgba(239,68,68,0.35)', background: 'var(--color-danger-bg)', color: 'var(--color-danger)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '13px', fontWeight: 600 }}>⚠ {error}</span>
+          <button type="button" onClick={load} className="btn btn-secondary" style={{ fontSize: '12px', padding: '6px 12px' }}>Coba Lagi</button>
+        </div>
+      )}
+
+      {/* KPI Cards: Filtered Konsolidasi Totals */}
       {!loading && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px', marginBottom: '24px' }}>
           <div className="card" style={{ padding: '16px', textAlign: 'center', borderLeft: '4px solid #3b82f6' }}>
@@ -225,7 +245,7 @@ export default function LaporanKonsolidasi({ setView }) {
               Total Pendapatan
             </div>
             <div style={{ fontSize: '17px', fontWeight: 800, color: '#3b82f6' }}>
-              {fmt(grandTotal.total_pendapatan)}
+              {fmt(displayTotal.total_pendapatan)}
             </div>
           </div>
 
@@ -234,16 +254,16 @@ export default function LaporanKonsolidasi({ setView }) {
               Total HPP
             </div>
             <div style={{ fontSize: '17px', fontWeight: 800, color: '#f59e0b' }}>
-              {fmt(grandTotal.total_hpp)}
+              {fmt(displayTotal.total_hpp)}
             </div>
           </div>
 
-          <div className="card" style={{ padding: '16px', textAlign: 'center', borderLeft: `4px solid ${grandTotal.laba_kotor >= 0 ? '#10b981' : '#ef4444'}` }}>
+          <div className="card" style={{ padding: '16px', textAlign: 'center', borderLeft: `4px solid ${displayTotal.laba_kotor >= 0 ? '#10b981' : '#ef4444'}` }}>
             <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase' }}>
               Total Laba Kotor
             </div>
-            <div style={{ fontSize: '17px', fontWeight: 800, color: grandTotal.laba_kotor >= 0 ? '#10b981' : '#ef4444' }}>
-              {fmt(grandTotal.laba_kotor)}
+            <div style={{ fontSize: '17px', fontWeight: 800, color: displayTotal.laba_kotor >= 0 ? 'var(--color-success)' : 'var(--color-danger)' }}>
+              {fmt(displayTotal.laba_kotor)}
             </div>
           </div>
 
@@ -251,17 +271,17 @@ export default function LaporanKonsolidasi({ setView }) {
             <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase' }}>
               Total Jumlah Biaya
             </div>
-            <div style={{ fontSize: '17px', fontWeight: 800, color: '#ef4444' }}>
-              {fmt(grandTotal.total_biaya)}
+            <div style={{ fontSize: '17px', fontWeight: 800, color: 'var(--color-danger)' }}>
+              {fmt(displayTotal.total_biaya)}
             </div>
           </div>
 
-          <div className="card" style={{ padding: '16px', textAlign: 'center', borderLeft: `4px solid ${grandTotal.laba_bersih >= 0 ? '#10b981' : '#ef4444'}`, background: grandTotal.laba_bersih >= 0 ? 'rgba(16,185,129,0.04)' : 'rgba(239,68,68,0.04)' }}>
+          <div className="card" style={{ padding: '16px', textAlign: 'center', borderLeft: `4px solid ${displayTotal.laba_bersih >= 0 ? '#10b981' : '#ef4444'}`, background: displayTotal.laba_bersih >= 0 ? 'rgba(16,185,129,0.04)' : 'rgba(239,68,68,0.04)' }}>
             <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '6px', fontWeight: 700, textTransform: 'uppercase' }}>
               Laba Bersih Konsolidasi
             </div>
-            <div style={{ fontSize: '18px', fontWeight: 900, color: grandTotal.laba_bersih >= 0 ? '#10b981' : '#ef4444' }}>
-              {fmt(grandTotal.laba_bersih)}
+            <div style={{ fontSize: '18px', fontWeight: 900, color: displayTotal.laba_bersih >= 0 ? 'var(--color-success)' : 'var(--color-danger)' }}>
+              {fmt(displayTotal.laba_bersih)}
             </div>
           </div>
         </div>
@@ -273,7 +293,7 @@ export default function LaporanKonsolidasi({ setView }) {
         </div>
       )}
 
-      {!loading && items.length === 0 && (
+      {!loading && !error && items.length === 0 && (
         <div className="card" style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
           Belum ada cabang outlet aktif.
         </div>
@@ -289,24 +309,25 @@ export default function LaporanKonsolidasi({ setView }) {
                   <th style={{ padding: '12px 14px', width: '40px' }}>No</th>
                   <th style={{ padding: '12px 14px' }}>Lokasi / Cabang</th>
                   <th style={{ padding: '12px 14px', width: '90px' }}>Tipe</th>
-                  <th style={{ padding: '12px 14px', textAlign: 'right' }}>Jml Pendapatan</th>
-                  <th style={{ padding: '12px 14px', textAlign: 'right' }}>Jml HPP</th>
-                  <th style={{ padding: '12px 14px', textAlign: 'right' }}>Laba Kotor</th>
-                  <th style={{ padding: '12px 14px', textAlign: 'right' }}>Jml Biaya</th>
-                  <th style={{ padding: '12px 14px', textAlign: 'right' }}>Laba Bersih</th>
-                  <th style={{ padding: '12px 14px', textAlign: 'center', width: '80px' }}>Aksi</th>
+                  <th style={{ padding: '12px 14px', textAlign: 'right', whiteSpace: 'nowrap' }}>Jml Pendapatan</th>
+                  <th style={{ padding: '12px 14px', textAlign: 'right', whiteSpace: 'nowrap' }}>Jml HPP</th>
+                  <th style={{ padding: '12px 14px', textAlign: 'right', whiteSpace: 'nowrap' }}>Laba Kotor</th>
+                  <th style={{ padding: '12px 14px', textAlign: 'right', whiteSpace: 'nowrap' }}>Jml Biaya</th>
+                  <th style={{ padding: '12px 14px', textAlign: 'right', whiteSpace: 'nowrap' }}>Laba Bersih</th>
+                  <th className="no-print" style={{ padding: '12px 14px', textAlign: 'center', width: '80px' }}>Aksi</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredItems.map((row, idx) => (
+                {filteredItems.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} style={{ padding: '32px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                      Tidak ada lokasi yang cocok dengan filter.
+                    </td>
+                  </tr>
+                ) : filteredItems.map((row, idx) => (
                   <tr
                     key={row.branch_id}
-                    style={{
-                      borderBottom: '1px solid var(--border-color)',
-                      transition: 'background 0.15s',
-                    }}
-                    onMouseOver={e => e.currentTarget.style.background = 'var(--bg-hover)'}
-                    onMouseOut={e => e.currentTarget.style.background = 'transparent'}
+                    style={{ borderBottom: '1px solid var(--border-color)' }}
                   >
                     <td style={{ padding: '12px 14px', color: 'var(--text-muted)' }}>{idx + 1}</td>
                     <td style={{ padding: '12px 14px' }}>
@@ -320,39 +341,40 @@ export default function LaporanKonsolidasi({ setView }) {
                         borderRadius: '6px',
                         fontSize: '11px',
                         fontWeight: 600,
-                        background: row.location_type === 'Gudang' ? 'rgba(139,92,246,0.15)' : 'rgba(6,182,212,0.15)',
-                        color: row.location_type === 'Gudang' ? '#a78bfa' : '#06b6d4',
+                        background: row.location_type === 'Gudang' ? 'rgba(139,92,246,0.14)' : 'var(--color-info-bg)',
+                        color: row.location_type === 'Gudang' ? 'var(--color-primary)' : 'var(--color-info)',
                       }}>
                         {row.location_type}
                       </span>
                     </td>
-                    <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 600, color: '#3b82f6' }}>
+                    <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 600, color: '#3b82f6', whiteSpace: 'nowrap' }}>
                       {fmt(row.total_pendapatan)}
                     </td>
-                    <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 500, color: '#f59e0b' }}>
+                    <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 500, color: 'var(--color-warning)', whiteSpace: 'nowrap' }}>
                       {fmt(row.total_hpp)}
                     </td>
-                    <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 600, color: row.laba_kotor >= 0 ? '#10b981' : '#ef4444' }}>
+                    <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 600, color: row.laba_kotor >= 0 ? 'var(--color-success)' : 'var(--color-danger)', whiteSpace: 'nowrap' }}>
                       {fmt(row.laba_kotor)}
                     </td>
-                    <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 500, color: '#ef4444' }}>
+                    <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 500, color: 'var(--color-danger)', whiteSpace: 'nowrap' }}>
                       {fmt(row.total_biaya)}
                     </td>
-                    <td style={{ padding: '12px 14px', textAlign: 'right' }}>
+                    <td style={{ padding: '12px 14px', textAlign: 'right', whiteSpace: 'nowrap' }}>
                       <span style={{
                         display: 'inline-block',
                         padding: '4px 10px',
                         borderRadius: '6px',
                         fontWeight: 700,
-                        background: row.laba_bersih >= 0 ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)',
-                        color: row.laba_bersih >= 0 ? '#10b981' : '#ef4444',
+                        background: row.laba_bersih >= 0 ? 'var(--color-success-bg)' : 'var(--color-danger-bg)',
+                        color: row.laba_bersih >= 0 ? 'var(--color-success)' : 'var(--color-danger)',
                       }}>
                         {fmt(row.laba_bersih)}
                       </span>
                     </td>
-                    <td style={{ padding: '12px 14px', textAlign: 'center' }}>
+                    <td className="no-print" style={{ padding: '12px 14px', textAlign: 'center' }}>
                       {setView && (
                         <button
+                          type="button"
                           onClick={() => setView(row.location_type === 'Gudang' ? 'laporan-gudang' : 'laporan-konter')}
                           title="Buka Laporan"
                           style={{
@@ -383,32 +405,32 @@ export default function LaporanKonsolidasi({ setView }) {
                   <td colSpan={3} style={{ padding: '14px', textAlign: 'center', color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: '1px' }}>
                     GRAND TOTAL KONSOLIDASI
                   </td>
-                  <td style={{ padding: '14px', textAlign: 'right', color: '#3b82f6' }}>
-                    {fmt(grandTotal.total_pendapatan)}
+                  <td style={{ padding: '14px', textAlign: 'right', color: '#3b82f6', whiteSpace: 'nowrap' }}>
+                    {fmt(displayTotal.total_pendapatan)}
                   </td>
-                  <td style={{ padding: '14px', textAlign: 'right', color: '#f59e0b' }}>
-                    {fmt(grandTotal.total_hpp)}
+                  <td style={{ padding: '14px', textAlign: 'right', color: 'var(--color-warning)', whiteSpace: 'nowrap' }}>
+                    {fmt(displayTotal.total_hpp)}
                   </td>
-                  <td style={{ padding: '14px', textAlign: 'right', color: grandTotal.laba_kotor >= 0 ? '#10b981' : '#ef4444' }}>
-                    {fmt(grandTotal.laba_kotor)}
+                  <td style={{ padding: '14px', textAlign: 'right', color: displayTotal.laba_kotor >= 0 ? 'var(--color-success)' : 'var(--color-danger)', whiteSpace: 'nowrap' }}>
+                    {fmt(displayTotal.laba_kotor)}
                   </td>
-                  <td style={{ padding: '14px', textAlign: 'right', color: '#ef4444' }}>
-                    {fmt(grandTotal.total_biaya)}
+                  <td style={{ padding: '14px', textAlign: 'right', color: 'var(--color-danger)', whiteSpace: 'nowrap' }}>
+                    {fmt(displayTotal.total_biaya)}
                   </td>
-                  <td style={{ padding: '14px', textAlign: 'right' }}>
+                  <td style={{ padding: '14px', textAlign: 'right', whiteSpace: 'nowrap' }}>
                     <span style={{
                       display: 'inline-block',
                       padding: '5px 12px',
                       borderRadius: '8px',
                       fontWeight: 900,
                       fontSize: '14px',
-                      background: grandTotal.laba_bersih >= 0 ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)',
-                      color: grandTotal.laba_bersih >= 0 ? '#10b981' : '#ef4444',
+                      background: displayTotal.laba_bersih >= 0 ? 'var(--color-success-bg)' : 'var(--color-danger-bg)',
+                      color: displayTotal.laba_bersih >= 0 ? 'var(--color-success)' : 'var(--color-danger)',
                     }}>
-                      {fmt(grandTotal.laba_bersih)}
+                      {fmt(displayTotal.laba_bersih)}
                     </span>
                   </td>
-                  <td style={{ padding: '14px' }}></td>
+                  <td className="no-print" style={{ padding: '14px' }}></td>
                 </tr>
               </tfoot>
             </table>

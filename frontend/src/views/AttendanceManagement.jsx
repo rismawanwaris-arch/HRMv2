@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { attendanceApi, branchApi } from '../services/api';
 
@@ -59,22 +59,32 @@ function InputHarian({ branches }) {
   const [branchId, setBranchId] = useState('');
   const [search, setSearch] = useState('');
   const [rows, setRows] = useState([]);
+  const [cutoffs, setCutoffs] = useState({ pagi: '06:30', siang: '14:30' });
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
   const [edits, setEdits] = useState({});
   const [saving, setSaving] = useState({});
   const [saved, setSaved] = useState({});
 
   const fetchRows = useCallback(async () => {
+    if (!date) return;
     setLoading(true);
+    setError('');
     setSaved({});
     try {
       const params = { date };
       if (branchId) params.branch_id = branchId;
       const res = await attendanceApi.getByDate(params);
       if (res.success) {
-        setRows(res.data);
+        setRows(res.data || []);
+        if (res.cutoffs) {
+          setCutoffs({
+            pagi: res.cutoffs.pagi || res.cutoffs.morning || '06:30',
+            siang: res.cutoffs.siang || res.cutoffs.afternoon || '14:30',
+          });
+        }
         const init = {};
-        for (const r of res.data) {
+        for (const r of (res.data || [])) {
           init[r.id] = {
             shift: r.shift || 'Pagi',
             check_in_time: r.check_in_time || '',
@@ -83,17 +93,40 @@ function InputHarian({ branches }) {
           };
         }
         setEdits(init);
+      } else {
+        setError(res.message || 'Gagal memuat data absensi.');
       }
-    } catch { /* silent */ }
-    setLoading(false);
+    } catch (err) {
+      setError(err.message || 'Gagal memuat data absensi.');
+    } finally {
+      setLoading(false);
+    }
   }, [date, branchId]);
 
   useEffect(() => { fetchRows(); }, [fetchRows]);
 
-  const set = (empId, field, val) =>
-    setEdits(p => ({ ...p, [empId]: { ...p[empId], [field]: val } }));
+  const set = (empId, field, val) => {
+    setSaved(p => {
+      if (!p[empId]) return p;
+      const next = { ...p };
+      delete next[empId];
+      return next;
+    });
+    setEdits(p => {
+      const cur = p[empId] || { shift: 'Pagi', check_in_time: '', status: 'Tidak Hadir', notes: '' };
+      const updated = { ...cur, [field]: val };
+      if (field === 'check_in_time' && !val && ['Hadir', 'Telat', 'Belum Absen'].includes(cur.status)) {
+        updated.status = 'Tidak Hadir';
+      }
+      return { ...p, [empId]: updated };
+    });
+  };
 
   const handleSave = async (emp) => {
+    if (!date) {
+      alert('Pilih tanggal terlebih dahulu.');
+      return;
+    }
     const d = edits[emp.id] || {};
     setSaving(p => ({ ...p, [emp.id]: true }));
     try {
@@ -101,14 +134,22 @@ function InputHarian({ branches }) {
       if (res.success) {
         setSaved(p => ({ ...p, [emp.id]: res.data.status }));
         setRows(prev => prev.map(r => r.id === emp.id
-          ? { ...r, ...res.data, record_id: res.data.id }
+          ? {
+              ...r,
+              ...res.data,
+              id: emp.id,
+              record_id: res.data.record_id ?? res.data.id ?? r.record_id,
+            }
           : r
         ));
       } else {
-        alert(res.message);
+        alert(res.message || 'Gagal menyimpan absensi.');
       }
-    } catch (err) { alert(err.message); }
-    setSaving(p => ({ ...p, [emp.id]: false }));
+    } catch (err) {
+      alert(err.message || 'Gagal menyimpan absensi.');
+    } finally {
+      setSaving(p => ({ ...p, [emp.id]: false }));
+    }
   };
 
   const filteredRows = rows.filter(r => {
@@ -128,12 +169,12 @@ function InputHarian({ branches }) {
   const renderRow = (emp) => {
     const e = edits[emp.id] || {};
     const savedStatus = saved[emp.id];
-    const isSaving = saving[emp.id];
+    const isSaving = !!saving[emp.id];
     const isBelum = !emp.record_id && !savedStatus;
 
     let previewStatus = e.status || 'Tidak Hadir';
     if (e.check_in_time) {
-      const cutoff = e.shift === 'Siang' ? '14:30' : '06:30';
+      const cutoff = e.shift === 'Siang' ? cutoffs.afternoon : cutoffs.morning;
       previewStatus = e.check_in_time > cutoff ? 'Telat' : 'Hadir';
     }
 
@@ -194,6 +235,7 @@ function InputHarian({ branches }) {
         </td>
         <td style={{ textAlign: 'center' }}>
           <button
+            type="button"
             disabled={isSaving}
             onClick={() => handleSave(emp)}
             style={{
@@ -229,11 +271,11 @@ function InputHarian({ branches }) {
       <div className="glass-panel" style={{ padding: '16px 20px', marginBottom: '16px', display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
         <div>
           <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', marginBottom: '4px' }}>Tanggal</label>
-          <input type="date" style={{ ...inputS, width: '180px', padding: '9px 12px' }} value={date} onChange={e => setDate(e.target.value)} />
+          <input type="date" style={{ ...inputS, width: '180px', maxWidth: '100%', padding: '9px 12px' }} value={date} onChange={e => setDate(e.target.value)} />
         </div>
         <div>
           <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', marginBottom: '4px' }}>Cabang</label>
-          <select style={{ ...inputS, width: '200px', padding: '9px 13px' }} value={branchId} onChange={e => setBranchId(e.target.value)}>
+          <select style={{ ...inputS, width: '200px', maxWidth: '100%', padding: '9px 13px' }} value={branchId} onChange={e => setBranchId(e.target.value)}>
             <option value="">Semua Cabang</option>
             {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
@@ -243,7 +285,7 @@ function InputHarian({ branches }) {
           <input
             type="text"
             placeholder="Ketik nama atau cabang..."
-            style={{ ...inputS, width: '210px', padding: '9px 12px' }}
+            style={{ ...inputS, width: '210px', maxWidth: '100%', padding: '9px 12px' }}
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
@@ -256,6 +298,13 @@ function InputHarian({ branches }) {
         </div>
       </div>
 
+      {error && (
+        <div className="glass-panel" style={{ padding: '12px 16px', marginBottom: '16px', border: '1px solid rgba(239,68,68,0.35)', background: 'var(--color-danger-bg)', color: 'var(--color-danger)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '13px', fontWeight: 600 }}>⚠ {error}</span>
+          <button type="button" onClick={fetchRows} className="btn btn-secondary" style={{ fontSize: '12px', padding: '6px 12px' }}>Coba Lagi</button>
+        </div>
+      )}
+
       {loading ? (
         <div className="glass-panel" style={{ textAlign: 'center', padding: '60px', color: 'var(--text-muted)' }}>
           <div className="loading-spinner" style={{ margin: '0 auto 12px' }} />Memuat data...
@@ -263,6 +312,10 @@ function InputHarian({ branches }) {
       ) : rows.length === 0 ? (
         <div className="glass-panel" style={{ textAlign: 'center', padding: '60px', color: 'var(--text-muted)' }}>
           Tidak ada karyawan aktif. Tambah karyawan di menu Data Karyawan.
+        </div>
+      ) : filteredRows.length === 0 ? (
+        <div className="glass-panel" style={{ textAlign: 'center', padding: '60px', color: 'var(--text-muted)' }}>
+          Tidak ada karyawan yang cocok dengan pencarian &quot;{search}&quot;.
         </div>
       ) : (
         <>
@@ -318,7 +371,7 @@ function InputHarian({ branches }) {
 
       {/* Shift cutoff info */}
       <div style={{ marginTop: '12px', fontSize: '12px', color: 'var(--text-muted)' }}>
-        Batas masuk: <strong>Shift Pagi 06:30</strong> · <strong>Shift Siang 14:30</strong>. Status Hadir/Telat dihitung otomatis dari jam masuk.
+        Batas masuk: <strong>Shift Pagi {cutoffs.morning}</strong> · <strong>Shift Siang {cutoffs.afternoon}</strong>. Status Hadir/Telat dihitung otomatis dari jam masuk.
       </div>
     </div>
   );
@@ -338,12 +391,33 @@ function formatDate(dateStr) {
 function DetailModal({ emp, period, onClose }) {
   const [details, setDetails] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   useEffect(() => {
-    attendanceApi.getEmployeeDailyDetail(emp.id, period).then(res => {
-      if (res.success) setDetails(res.data);
-      setLoading(false);
-    });
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError('');
+    attendanceApi.getEmployeeDailyDetail(emp.id, period)
+      .then(res => {
+        if (!active) return;
+        if (res.success) setDetails(res.data || []);
+        else setError(res.message || 'Gagal memuat detail absensi.');
+      })
+      .catch(err => {
+        if (active) setError(err.message || 'Gagal memuat detail absensi.');
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => { active = false; };
   }, [emp.id, period]);
 
   const ringkasan = {
@@ -356,9 +430,9 @@ function DetailModal({ emp, period, onClose }) {
 
   return createPortal(
     <div style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 1000,
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 3000,
       display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px',
-      backdropFilter: 'blur(4px)',
+      backdropFilter: 'blur(4px)', overscrollBehavior: 'contain',
     }} onClick={onClose}>
       <div style={{
         background: 'var(--bg-surface-opaque)', borderRadius: '16px',
@@ -376,7 +450,7 @@ function DetailModal({ emp, period, onClose }) {
                 {emp.branch_name || 'Tanpa Cabang'} · Periode {period}
               </p>
             </div>
-            <button onClick={onClose} style={{
+            <button type="button" onClick={onClose} style={{
               background: 'var(--bg-input)', border: '1px solid var(--border-color)',
               color: 'var(--text-muted)', fontSize: '14px', cursor: 'pointer',
               padding: '4px 10px', borderRadius: '8px', fontFamily: 'inherit', lineHeight: 1.5,
@@ -384,7 +458,7 @@ function DetailModal({ emp, period, onClose }) {
           </div>
 
           {/* Mini ringkasan */}
-          {!loading && details.length > 0 && (
+          {!loading && !error && details.length > 0 && (
             <div style={{ display: 'flex', gap: '12px', marginTop: '14px', flexWrap: 'wrap' }}>
               {[
                 ['Hadir', ringkasan.hadir, '#10b981'],
@@ -410,6 +484,10 @@ function DetailModal({ emp, period, onClose }) {
           {loading ? (
             <div style={{ textAlign: 'center', padding: '48px', color: 'var(--text-muted)' }}>
               <div className="loading-spinner" style={{ margin: '0 auto 10px' }} />Memuat data...
+            </div>
+          ) : error ? (
+            <div style={{ textAlign: 'center', padding: '48px', color: 'var(--color-danger)' }}>
+              ⚠ {error}
             </div>
           ) : details.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '48px', color: 'var(--text-muted)' }}>
@@ -459,32 +537,48 @@ function RekapBulanan({ branches }) {
   const [branchId, setBranchId] = useState('');
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
   const [syncing, setSyncing] = useState(false);
   const [kasbonEdits, setKasbonEdits] = useState({});
   const [kasbonSaving, setKasbonSaving] = useState({});
   const [kasbonSaved, setKasbonSaved] = useState({});
   const [detailEmp, setDetailEmp] = useState(null);
+  const timersRef = useRef({});
+
+  useEffect(() => {
+    const timers = timersRef.current;
+    return () => {
+      Object.values(timers).forEach(clearTimeout);
+    };
+  }, []);
 
   const fetchData = useCallback(async () => {
+    if (!period) return;
     setLoading(true);
+    setError('');
     setKasbonSaved({});
     try {
       const params = { period };
       if (branchId) params.branch_id = branchId;
       const res = await attendanceApi.getMonthlySummary(params);
       if (res.success) {
-        setRows(res.data);
+        setRows(res.data || []);
         const init = {};
-        for (const r of res.data) {
+        for (const r of (res.data || [])) {
           init[r.id] = {
-            cash_advance: r.cash_advance ?? 0,
-            fake_money: r.fake_money ?? 0,
+            cash_advance: String(r.cash_advance ?? 0),
+            fake_money: String(r.fake_money ?? 0),
           };
         }
         setKasbonEdits(init);
+      } else {
+        setError(res.message || 'Gagal memuat rekap absensi.');
       }
-    } catch { /* silent */ }
-    setLoading(false);
+    } catch (err) {
+      setError(err.message || 'Gagal memuat rekap absensi.');
+    } finally {
+      setLoading(false);
+    }
   }, [period, branchId]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
@@ -497,29 +591,50 @@ function RekapBulanan({ branches }) {
         alert(res.message);
         fetchData();
       } else {
-        alert(res.message);
+        alert(res.message || 'Gagal sinkronisasi.');
       }
-    } catch (err) { alert(err.message); }
+    } catch (err) { alert(err.message || 'Gagal sinkronisasi.'); }
     setSyncing(false);
   };
 
   const handleSaveKasbon = async (emp) => {
     const d = kasbonEdits[emp.id] || {};
+    const payload = {
+      cash_advance: parseFloat(d.cash_advance) || 0,
+      fake_money: parseFloat(d.fake_money) || 0,
+    };
     setKasbonSaving(p => ({ ...p, [emp.id]: true }));
     try {
-      const res = await attendanceApi.upsertRecord(emp.id, period, d);
+      const res = await attendanceApi.upsertRecord(emp.id, period, payload);
       if (res.success) {
+        setRows(prev => prev.map(r => r.id === emp.id
+          ? { ...r, ...(res.data || {}), cash_advance: payload.cash_advance, fake_money: payload.fake_money, id: emp.id }
+          : r
+        ));
         setKasbonSaved(p => ({ ...p, [emp.id]: true }));
-        setTimeout(() => setKasbonSaved(p => { const n = { ...p }; delete n[emp.id]; return n; }), 2500);
+        if (timersRef.current[emp.id]) clearTimeout(timersRef.current[emp.id]);
+        timersRef.current[emp.id] = setTimeout(() => {
+          setKasbonSaved(p => { const n = { ...p }; delete n[emp.id]; return n; });
+        }, 2500);
       } else {
-        alert(res.message);
+        alert(res.message || 'Gagal menyimpan kasbon.');
       }
-    } catch (err) { alert(err.message); }
-    setKasbonSaving(p => ({ ...p, [emp.id]: false }));
+    } catch (err) {
+      alert(err.message || 'Gagal menyimpan kasbon.');
+    } finally {
+      setKasbonSaving(p => ({ ...p, [emp.id]: false }));
+    }
   };
 
-  const setKasbon = (empId, field, val) =>
+  const setKasbon = (empId, field, val) => {
+    setKasbonSaved(p => {
+      if (!p[empId]) return p;
+      const n = { ...p };
+      delete n[empId];
+      return n;
+    });
     setKasbonEdits(p => ({ ...p, [empId]: { ...p[empId], [field]: val } }));
+  };
 
   const totalHadir = rows.reduce((s, r) => s + (r.days_hadir || 0), 0);
   const totalTelat = rows.reduce((s, r) => s + (r.days_telat || 0), 0);
@@ -532,18 +647,19 @@ function RekapBulanan({ branches }) {
       <div className="glass-panel" style={{ padding: '16px 20px', marginBottom: '16px', display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
         <div>
           <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', marginBottom: '4px' }}>Periode</label>
-          <select style={{ ...inputS, width: '160px', padding: '9px 13px' }} value={period} onChange={e => setPeriod(e.target.value)}>
+          <select style={{ ...inputS, width: '160px', maxWidth: '100%', padding: '9px 13px' }} value={period} onChange={e => setPeriod(e.target.value)}>
             {periodOptions().map(p => <option key={p} value={p}>{p}</option>)}
           </select>
         </div>
         <div>
           <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', marginBottom: '4px' }}>Cabang</label>
-          <select style={{ ...inputS, width: '200px', padding: '9px 13px' }} value={branchId} onChange={e => setBranchId(e.target.value)}>
+          <select style={{ ...inputS, width: '200px', maxWidth: '100%', padding: '9px 13px' }} value={branchId} onChange={e => setBranchId(e.target.value)}>
             <option value="">Semua Cabang</option>
             {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
         </div>
         <button
+          type="button"
           disabled={syncing}
           onClick={handleSyncPeriod}
           style={{
@@ -561,6 +677,13 @@ function RekapBulanan({ branches }) {
           ))}
         </div>
       </div>
+
+      {error && (
+        <div className="glass-panel" style={{ padding: '12px 16px', marginBottom: '16px', border: '1px solid rgba(239,68,68,0.35)', background: 'var(--color-danger-bg)', color: 'var(--color-danger)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '13px', fontWeight: 600 }}>⚠ {error}</span>
+          <button type="button" onClick={fetchData} className="btn btn-secondary" style={{ fontSize: '12px', padding: '6px 12px' }}>Coba Lagi</button>
+        </div>
+      )}
 
       <div className="glass-panel">
         {loading ? (
@@ -622,20 +745,21 @@ function RekapBulanan({ branches }) {
                         <input
                           type="number" min="0" step="1000"
                           style={{ ...inputS, width: '100%', textAlign: 'right' }}
-                          value={ke.cash_advance ?? 0}
-                          onChange={e => setKasbon(emp.id, 'cash_advance', parseFloat(e.target.value) || 0)}
+                          value={ke.cash_advance ?? '0'}
+                          onChange={e => setKasbon(emp.id, 'cash_advance', e.target.value)}
                         />
                       </td>
                       <td>
                         <input
                           type="number" min="0" step="1000"
                           style={{ ...inputS, width: '100%', textAlign: 'right' }}
-                          value={ke.fake_money ?? 0}
-                          onChange={e => setKasbon(emp.id, 'fake_money', parseFloat(e.target.value) || 0)}
+                          value={ke.fake_money ?? '0'}
+                          onChange={e => setKasbon(emp.id, 'fake_money', e.target.value)}
                         />
                       </td>
                       <td style={{ textAlign: 'center' }}>
                         <button
+                          type="button"
                           disabled={isSaving}
                           onClick={() => handleSaveKasbon(emp)}
                           style={{
@@ -651,6 +775,7 @@ function RekapBulanan({ branches }) {
                       </td>
                       <td style={{ textAlign: 'center' }}>
                         <button
+                          type="button"
                           onClick={() => setDetailEmp(emp)}
                           style={{
                             background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.25)',
@@ -692,9 +817,11 @@ export default function AttendanceManagement() {
   const [branches, setBranches] = useState([]);
 
   useEffect(() => {
-    branchApi.getAll().then(r => {
-      if (r.success) setBranches(r.data.filter(b => b.status === 'Active'));
-    });
+    branchApi.getAll()
+      .then(r => {
+        if (r.success) setBranches(r.data.filter(b => b.status === 'Active'));
+      })
+      .catch(() => {});
   }, []);
 
   return (
@@ -710,6 +837,7 @@ export default function AttendanceManagement() {
       <div style={{ display: 'flex', gap: '4px', marginBottom: '20px', background: 'var(--bg-input)', padding: '4px', borderRadius: '12px', width: 'fit-content' }}>
         {TABS.map(t => (
           <button
+            type="button"
             key={t.id}
             onClick={() => setActiveTab(t.id)}
             style={{

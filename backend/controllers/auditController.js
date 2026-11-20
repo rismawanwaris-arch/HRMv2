@@ -7,20 +7,26 @@ const { query } = require('../db');
 exports.getAuditLog = async (req, res) => {
   try {
     const { entity_type, entity_id, actor, action } = req.query;
-    const limit = Math.min(parseInt(String(req.query.limit), 10) || 50, 200);
-    const offset = parseInt(String(req.query.offset), 10) || 0;
+    const rawLimit = parseInt(String(req.query.limit), 10);
+    const rawOffset = parseInt(String(req.query.offset), 10);
+    const limit = Math.max(1, Math.min(Number.isNaN(rawLimit) ? 50 : rawLimit, 200));
+    const offset = Math.max(0, Number.isNaN(rawOffset) ? 0 : rawOffset);
 
-    let sql = 'SELECT * FROM audit_log WHERE 1=1';
-    const params = [];
-    if (entity_type) { sql += ' AND entity_type = ?'; params.push(entity_type); }
-    if (entity_id) { sql += ' AND entity_id = ?'; params.push(parseInt(String(entity_id), 10)); }
-    if (actor) { sql += ' AND actor = ?'; params.push(actor); }
-    if (action) { sql += ' AND action = ?'; params.push(action); }
-    sql += ' ORDER BY id DESC LIMIT ? OFFSET ?';
-    params.push(limit, offset);
+    let where = ' WHERE 1=1';
+    const filterParams = [];
+    if (entity_type) { where += ' AND entity_type = ?'; filterParams.push(entity_type); }
+    if (entity_id !== undefined && entity_id !== '' && /^\d+$/.test(String(entity_id))) {
+      where += ' AND entity_id = ?';
+      filterParams.push(parseInt(String(entity_id), 10));
+    }
+    if (actor) { where += ' AND actor = ?'; filterParams.push(actor); }
+    if (action) { where += ' AND action = ?'; filterParams.push(action); }
 
-    const rows = await query.all(sql, params);
-    const total = await query.get('SELECT COUNT(*) as count FROM audit_log');
+    const rows = await query.all(
+      `SELECT * FROM audit_log${where} ORDER BY id DESC LIMIT ? OFFSET ?`,
+      [...filterParams, limit, offset]
+    );
+    const total = await query.get(`SELECT COUNT(*) as count FROM audit_log${where}`, filterParams);
     res.json({ success: true, data: rows, total: total.count, limit, offset });
   } catch (error) {
     console.error('API Error (audit log):', error);

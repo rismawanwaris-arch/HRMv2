@@ -29,12 +29,29 @@ function periodOptions() {
 // ─── Slip Modal ──────────────────────────────────────────────────────────────
 function SlipModal({ slip, onClose }) {
   const printRef = useRef();
+
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
+
   const handlePrint = () => {
     const w = window.open('', '_blank');
+    if (!w) {
+      alert('Pop-up diblokir oleh browser. Izinkan pop-up untuk mencetak slip gaji.');
+      return;
+    }
+    const safeName = String(slip.employee_name || '').replace(/[<>&"']/g, c => (
+      { '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c]
+    ));
     w.document.write(`
-      <html><head><title>Slip Gaji — ${slip.employee_name}</title>
+      <html><head><title>Slip Gaji — ${safeName}</title>
       <style>
-        body { font-family: 'Courier New', monospace; font-size: 12px; margin: 0; padding: 20px; color: #000; }
+        :root { --text-primary: #111; --text-secondary: #333; --text-muted: #555; --border-color: #999; }
+        body { font-family: 'Courier New', monospace; font-size: 12px; margin: 0; padding: 20px; color: #000; background: #fff; }
         h2 { margin: 0 0 4px; font-size: 15px; } p { margin: 2px 0; }
         .divider { border-top: 1px dashed #333; margin: 8px 0; }
         .row { display: flex; justify-content: space-between; }
@@ -43,7 +60,7 @@ function SlipModal({ slip, onClose }) {
         .bold { font-weight: bold; }
         .total { background: #f0f0f0; padding: 4px 0; }
       </style></head>
-      <body>${printRef.current.innerHTML}</body></html>
+      <body>${printRef.current?.innerHTML || ''}</body></html>
     `);
     w.document.close();
     w.print();
@@ -54,13 +71,19 @@ function SlipModal({ slip, onClose }) {
   const totalPotongan = (slip.deduction_kasbon || 0) + (slip.deduction_absent || 0) + (slip.deduction_late || 0) + (slip.deduction_fake_money || 0);
 
   return createPortal(
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, backdropFilter: 'blur(6px)', padding: '24px' }}>
-      <div style={{ width: '100%', maxWidth: '520px', maxHeight: '90vh', overflowY: 'auto', background: 'var(--bg-surface-opaque)', border: '1px solid var(--border-color)', borderRadius: '20px', boxShadow: '0 32px 64px rgba(0,0,0,0.4)' }}>
+    <div
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3000, backdropFilter: 'blur(6px)', padding: '24px', overscrollBehavior: 'contain' }}
+      onClick={onClose}
+    >
+      <div
+        style={{ width: '100%', maxWidth: '520px', maxHeight: '90vh', overflowY: 'auto', background: 'var(--bg-surface-opaque)', border: '1px solid var(--border-color)', borderRadius: '20px', boxShadow: '0 32px 64px rgba(0,0,0,0.4)' }}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 700, color: 'var(--text-primary)' }}>Slip Gaji</h3>
           <div style={{ display: 'flex', gap: '10px' }}>
-            <button onClick={handlePrint} style={{ background: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.3)', color: '#10b981', padding: '7px 16px', borderRadius: '8px', cursor: 'pointer', fontWeight: 600, fontSize: '13px', fontFamily: 'inherit' }}>🖨 Cetak</button>
-            <button onClick={onClose} style={{ background: 'var(--bg-hover)', border: 'none', borderRadius: '8px', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '18px', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
+            <button type="button" onClick={handlePrint} style={{ background: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.3)', color: '#10b981', padding: '7px 16px', borderRadius: '8px', cursor: 'pointer', fontWeight: 600, fontSize: '13px', fontFamily: 'inherit' }}>🖨 Cetak</button>
+            <button type="button" onClick={onClose} style={{ background: 'var(--bg-hover)', border: 'none', borderRadius: '8px', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '18px', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
           </div>
         </div>
         <div style={{ padding: '20px 24px', fontFamily: 'monospace', fontSize: '13px' }} ref={printRef}>
@@ -123,29 +146,52 @@ function RowTotal({ label, value, red }) {
 }
 
 // ─── Bonus Edit Modal ─────────────────────────────────────────────────────────
-function BonusModal({ entry, onSave, onClose }) {
+function BonusModal({ entry, saving, onSave, onClose }) {
   const [form, setForm] = useState({
-    bonus_penjualan: entry.bonus_penjualan || 0,
-    bonus_tartun: entry.bonus_tartun || 0,
-    bonus_lain: entry.bonus_lain || 0,
+    bonus_penjualan: String(entry.bonus_penjualan ?? 0),
+    bonus_tartun: String(entry.bonus_tartun ?? 0),
+    bonus_lain: String(entry.bonus_lain ?? 0),
     bonus_lain_label: entry.bonus_lain_label || '',
-    bonus_ditahan: entry.bonus_ditahan || 0,
+    bonus_ditahan: String(entry.bonus_ditahan ?? 0),
     notes: entry.notes || '',
   });
   const f = k => e => setForm(p => ({ ...p, [k]: e.target.value }));
-  const fNum = k => e => setForm(p => ({ ...p, [k]: parseFloat(e.target.value) || 0 }));
+
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape' && !saving) onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose, saving]);
+
+  const handleSave = () => {
+    onSave({
+      ...form,
+      bonus_penjualan: parseFloat(form.bonus_penjualan) || 0,
+      bonus_tartun: parseFloat(form.bonus_tartun) || 0,
+      bonus_lain: parseFloat(form.bonus_lain) || 0,
+      bonus_ditahan: parseFloat(form.bonus_ditahan) || 0,
+    });
+  };
 
   const labelS = { display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' };
 
   return createPortal(
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, backdropFilter: 'blur(6px)', padding: '20px' }}>
-      <div style={{ width: '100%', maxWidth: '420px', background: 'var(--bg-surface-opaque)', border: '1px solid var(--border-color)', borderRadius: '20px', boxShadow: '0 24px 48px rgba(0,0,0,0.4)' }}>
+    <div
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3000, backdropFilter: 'blur(6px)', padding: '20px', overscrollBehavior: 'contain' }}
+      onClick={() => !saving && onClose()}
+    >
+      <div
+        style={{ width: '100%', maxWidth: '420px', maxHeight: '90vh', overflowY: 'auto', background: 'var(--bg-surface-opaque)', border: '1px solid var(--border-color)', borderRadius: '20px', boxShadow: '0 24px 48px rgba(0,0,0,0.4)' }}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>Input Bonus & Catatan</h3>
             <p style={{ margin: '3px 0 0', fontSize: '12px', color: 'var(--text-muted)' }}>{entry.employee_name}</p>
           </div>
-          <button onClick={onClose} style={{ background: 'var(--bg-hover)', border: 'none', borderRadius: '8px', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '18px', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
+          <button type="button" disabled={saving} onClick={onClose} style={{ background: 'var(--bg-hover)', border: 'none', borderRadius: '8px', color: 'var(--text-primary)', cursor: saving ? 'not-allowed' : 'pointer', fontSize: '18px', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
         </div>
         <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
           {[
@@ -155,16 +201,16 @@ function BonusModal({ entry, onSave, onClose }) {
           ].map(({ label, key }) => (
             <div key={key}>
               <label style={labelS}>{label}</label>
-              <input type="number" min="0" step="1000" style={{ ...inputS, textAlign: 'left' }} value={form[key]} onChange={fNum(key)} />
+              <input type="number" min="0" step="1000" style={{ ...inputS, textAlign: 'left' }} value={form[key]} onChange={f(key)} />
             </div>
           ))}
           <div>
             <label style={labelS}>Label Bonus Lain</label>
             <input style={{ ...inputS, textAlign: 'left' }} placeholder="Contoh: Bonus Lebaran" value={form.bonus_lain_label} onChange={f('bonus_lain_label')} />
           </div>
-          <div style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)', borderRadius: '10px', padding: '12px' }}>
+          <div style={{ background: 'var(--color-warning-bg)', border: '1px solid rgba(245,158,11,0.2)', borderRadius: '10px', padding: '12px' }}>
             <label style={{ ...labelS, color: '#f59e0b' }}>Bonus Ditahan (Rp) — tidak masuk slip</label>
-            <input type="number" min="0" step="1000" style={{ ...inputS, textAlign: 'left' }} value={form.bonus_ditahan} onChange={fNum('bonus_ditahan')} />
+            <input type="number" min="0" step="1000" style={{ ...inputS, textAlign: 'left' }} value={form.bonus_ditahan} onChange={f('bonus_ditahan')} />
             <p style={{ margin: '6px 0 0', fontSize: '11px', color: 'var(--text-muted)' }}>Dicatat sbg komponen laporan keuangan cabang, tidak masuk THP.</p>
           </div>
           <div>
@@ -173,8 +219,10 @@ function BonusModal({ entry, onSave, onClose }) {
           </div>
         </div>
         <div style={{ padding: '0 24px 24px', display: 'flex', gap: '10px' }}>
-          <button onClick={onClose} style={{ flex: 1, padding: '12px', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '10px', color: 'var(--text-primary)', cursor: 'pointer', fontWeight: 600, fontFamily: 'inherit', fontSize: '14px' }}>Batal</button>
-          <button onClick={() => onSave(form)} style={{ flex: 2, padding: '12px', background: 'linear-gradient(135deg, #7c3aed, #6d28d9)', border: 'none', borderRadius: '10px', color: 'white', cursor: 'pointer', fontWeight: 700, fontFamily: 'inherit', fontSize: '14px' }}>Simpan</button>
+          <button type="button" disabled={saving} onClick={onClose} style={{ flex: 1, padding: '12px', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '10px', color: 'var(--text-primary)', cursor: saving ? 'not-allowed' : 'pointer', fontWeight: 600, fontFamily: 'inherit', fontSize: '14px' }}>Batal</button>
+          <button type="button" disabled={saving} onClick={handleSave} style={{ flex: 2, padding: '12px', background: 'linear-gradient(135deg, #7c3aed, #6d28d9)', border: 'none', borderRadius: '10px', color: 'white', cursor: saving ? 'not-allowed' : 'pointer', fontWeight: 700, fontFamily: 'inherit', fontSize: '14px', opacity: saving ? 0.7 : 1 }}>
+            {saving ? 'Menyimpan...' : 'Simpan'}
+          </button>
         </div>
       </div>
     </div>,
@@ -193,17 +241,22 @@ export default function PayrollManagement() {
   const [periodInfo, setPeriodInfo] = useState(null);
   const [summary, setSummary] = useState({ data: [], grand_total: 0 });
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
   const [generating, setGenerating] = useState(false);
   const [activeTab, setActiveTab] = useState('entries');
   const [slipData, setSlipData] = useState(null);
   const [bonusEntry, setBonusEntry] = useState(null);
+  const [bonusSaving, setBonusSaving] = useState(false);
 
   useEffect(() => {
-    branchApi.getAll().then(r => { if (r.success) setBranches(r.data.filter(b => b.status === 'Active')); });
+    branchApi.getAll()
+      .then(r => { if (r.success) setBranches(r.data.filter(b => b.status === 'Active')); })
+      .catch(() => {});
   }, []);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
+    setError('');
     try {
       const params = {};
       if (employeeType) params.employee_type = employeeType;
@@ -212,10 +265,22 @@ export default function PayrollManagement() {
         payrollApi.getEntries(period, params),
         payrollApi.getSummary(period),
       ]);
-      if (entRes.success) { setEntries(entRes.data); setPeriodInfo(entRes.period_info); }
-      if (sumRes.success) setSummary({ data: sumRes.data, grand_total: sumRes.grand_total, period_info: sumRes.period_info });
-    } catch { /* silent */ }
-    setLoading(false);
+      if (entRes.success) {
+        setEntries(entRes.data);
+        setPeriodInfo(entRes.period_info);
+      } else {
+        setError(entRes.message || 'Gagal memuat data payroll.');
+      }
+      if (sumRes.success) {
+        setSummary({ data: sumRes.data, grand_total: sumRes.grand_total, period_info: sumRes.period_info });
+      } else if (entRes.success) {
+        setError(sumRes.message || 'Gagal memuat rekap payroll.');
+      }
+    } catch (err) {
+      setError(err.message || 'Gagal memuat data payroll.');
+    } finally {
+      setLoading(false);
+    }
   }, [period, employeeType, branchId]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
@@ -232,18 +297,32 @@ export default function PayrollManagement() {
   };
 
   const openSlip = async (entry) => {
-    const res = await payrollApi.getSlip(entry.id);
-    if (res.success) setSlipData(res.data);
-    else alert(res.message);
+    try {
+      const res = await payrollApi.getSlip(entry.id);
+      if (res.success) setSlipData(res.data);
+      else alert(res.message || 'Gagal memuat slip gaji.');
+    } catch (err) {
+      alert(err.message || 'Gagal memuat slip gaji.');
+    }
   };
 
   const handleBonusSave = async (form) => {
-    const res = await payrollApi.updateEntry(bonusEntry.id, form);
-    if (res.success) {
-      setEntries(prev => prev.map(e => e.id === bonusEntry.id ? { ...e, ...res.data } : e));
-      setBonusEntry(null);
-      fetchAll();
-    } else alert(res.message);
+    if (!bonusEntry || bonusSaving) return;
+    setBonusSaving(true);
+    try {
+      const res = await payrollApi.updateEntry(bonusEntry.id, form);
+      if (res.success) {
+        setEntries(prev => prev.map(e => e.id === bonusEntry.id ? { ...e, ...res.data } : e));
+        setBonusEntry(null);
+        fetchAll();
+      } else {
+        alert(res.message || 'Gagal menyimpan bonus.');
+      }
+    } catch (err) {
+      alert(err.message || 'Gagal menyimpan bonus.');
+    } finally {
+      setBonusSaving(false);
+    }
   };
 
   const filteredEntries = entries.filter(e => {
@@ -252,10 +331,26 @@ export default function PayrollManagement() {
     return (e.employee_name || '').toLowerCase().includes(q) || (e.branch_name || '').toLowerCase().includes(q) || (e.position || '').toLowerCase().includes(q);
   });
 
+  const filteredSummaryData = (summary.data || []).filter(row => {
+    if (employeeType && row.employee_type !== employeeType) return false;
+    if (branchId && String(row.branch_id ?? '') !== String(branchId)) return false;
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      return (row.branch_name || 'tanpa cabang').toLowerCase().includes(q)
+        || (row.branch_code || '').toLowerCase().includes(q)
+        || (row.employee_type || '').toLowerCase().includes(q);
+    }
+    return true;
+  });
+  const filteredRekapHeadcount = filteredSummaryData.reduce((s, r) => s + (r.headcount || 0), 0);
+  const filteredRekapTHP = filteredSummaryData.reduce((s, r) => s + (r.total_thp || 0), 0);
+
   const totalGross = filteredEntries.reduce((s, e) => s + (e.salary || 0) + (e.allowance || 0), 0);
   const totalBonus = filteredEntries.reduce((s, e) => s + (e.bonus_penjualan || 0) + (e.bonus_tartun || 0) + (e.bonus_lain || 0), 0);
   const totalPot = filteredEntries.reduce((s, e) => s + (e.deduction_kasbon || 0) + (e.deduction_absent || 0) + (e.deduction_late || 0) + (e.deduction_fake_money || 0), 0);
   const totalTHP = filteredEntries.reduce((s, e) => s + (e.take_home_pay || 0), 0);
+
+  const isLockedPeriod = Boolean(periodInfo && periodInfo.status !== 'Draft');
 
   const statusBadge = (status) => {
     const m = { Draft: ['rgba(107,114,128,0.15)', '#9ca3af'], Submitted: ['rgba(245,158,11,0.15)', '#f59e0b'], Approved: ['rgba(16,185,129,0.15)', '#10b981'], Rejected: ['rgba(239,68,68,0.15)', '#ef4444'] };
@@ -274,8 +369,12 @@ export default function PayrollManagement() {
         </div>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
           {periodInfo && statusBadge(periodInfo.status)}
-          <button onClick={handleGenerate} disabled={generating || periodInfo?.status !== 'Draft' && periodInfo}
-            style={{ background: generating ? 'rgba(16,185,129,0.3)' : 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.3)', color: '#10b981', padding: '10px 16px', borderRadius: '10px', cursor: (generating || (periodInfo?.status !== 'Draft' && periodInfo)) ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: 600, fontFamily: 'inherit' }}>
+          <button
+            type="button"
+            onClick={handleGenerate}
+            disabled={generating || isLockedPeriod}
+            style={{ background: generating ? 'rgba(16,185,129,0.3)' : 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.3)', color: '#10b981', padding: '10px 16px', borderRadius: '10px', cursor: (generating || isLockedPeriod) ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: 600, fontFamily: 'inherit', opacity: isLockedPeriod ? 0.6 : 1 }}
+          >
             {generating ? 'Generating...' : '⚡ Generate Payroll'}
           </button>
         </div>
@@ -309,22 +408,29 @@ export default function PayrollManagement() {
           <input
             type="text"
             placeholder="Ketik nama atau cabang..."
-            style={{ ...inputS, textAlign: 'left', width: '220px', padding: '9px 13px' }}
+            style={{ ...inputS, textAlign: 'left', width: '220px', maxWidth: '100%', padding: '9px 13px' }}
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
           />
         </div>
       </div>
 
+      {error && (
+        <div className="glass-panel" style={{ padding: '12px 16px', marginBottom: '16px', border: '1px solid rgba(239,68,68,0.35)', background: 'var(--color-danger-bg)', color: 'var(--color-danger)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '13px', fontWeight: 600 }}>⚠ {error}</span>
+          <button type="button" onClick={fetchAll} className="btn btn-secondary" style={{ fontSize: '12px', padding: '6px 12px' }}>Coba Lagi</button>
+        </div>
+      )}
+
       {/* Summary Stats */}
-      <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)', marginBottom: '20px' }}>
+      <div className="stats-grid" style={{ marginBottom: '20px' }}>
         {[
           { label: 'Gaji + Tunjangan', value: fmtRp(totalGross), color: '#3b82f6' },
           { label: 'Total Bonus', value: fmtRp(totalBonus), color: '#10b981' },
           { label: 'Total Potongan', value: `(${fmtRp(totalPot)})`, color: '#ef4444' },
           { label: 'GRAND TOTAL THP', value: fmtRp(totalTHP), color: '#8b5cf6' },
         ].map(s => (
-          <div key={s.label} className="glass-panel stat-card" style={{ borderColor: `${s.color}40` }}>
+          <div key={s.label} className="glass-panel stat-card">
             <div className="stat-card-title">{s.label}</div>
             <div className="stat-card-value" style={{ color: s.color, fontSize: '14px' }}>{s.value}</div>
             <div className="stat-card-desc">{filteredEntries.length} karyawan</div>
@@ -335,7 +441,7 @@ export default function PayrollManagement() {
       {/* Tabs */}
       <div style={{ display: 'flex', borderBottom: '1px solid var(--border-color)', marginBottom: '20px' }}>
         {[{ id: 'entries', label: 'Detail Karyawan' }, { id: 'rekap', label: 'Rekap per Cabang' }].map(t => (
-          <button key={t.id} onClick={() => setActiveTab(t.id)} style={{ padding: '10px 20px', border: 'none', background: 'transparent', cursor: 'pointer', fontFamily: 'inherit', fontSize: '14px', fontWeight: activeTab === t.id ? 700 : 500, color: activeTab === t.id ? 'var(--color-primary)' : 'var(--text-secondary)', borderBottom: `2px solid ${activeTab === t.id ? 'var(--color-primary)' : 'transparent'}`, marginBottom: '-1px' }}>
+          <button type="button" key={t.id} onClick={() => setActiveTab(t.id)} style={{ padding: '10px 20px', border: 'none', background: 'transparent', cursor: 'pointer', fontFamily: 'inherit', fontSize: '14px', fontWeight: activeTab === t.id ? 700 : 500, color: activeTab === t.id ? 'var(--color-primary)' : 'var(--text-secondary)', borderBottom: `2px solid ${activeTab === t.id ? 'var(--color-primary)' : 'transparent'}`, marginBottom: '-1px' }}>
             {t.label}
           </button>
         ))}
@@ -390,12 +496,20 @@ export default function PayrollManagement() {
                         </td>
                         <td style={{ textAlign: 'right', fontWeight: 700, color: '#10b981', fontSize: '14px' }}>{fmtRp(e.take_home_pay)}</td>
                         <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
-                          <button onClick={() => setBonusEntry(e)}
-                            style={{ background: 'rgba(139,92,246,0.12)', border: '1px solid rgba(139,92,246,0.25)', color: 'var(--color-primary)', padding: '5px 10px', borderRadius: '7px', cursor: 'pointer', fontSize: '12px', fontWeight: 600, marginRight: '6px', fontFamily: 'inherit' }}>
+                          <button
+                            type="button"
+                            disabled={isLockedPeriod}
+                            title={isLockedPeriod ? 'Periode sudah disubmit/disetujui' : 'Input Bonus & Catatan'}
+                            onClick={() => setBonusEntry(e)}
+                            style={{ background: 'rgba(139,92,246,0.12)', border: '1px solid rgba(139,92,246,0.25)', color: 'var(--color-primary)', padding: '5px 10px', borderRadius: '7px', cursor: isLockedPeriod ? 'not-allowed' : 'pointer', fontSize: '12px', fontWeight: 600, marginRight: '6px', fontFamily: 'inherit', opacity: isLockedPeriod ? 0.5 : 1 }}
+                          >
                             Bonus
                           </button>
-                          <button onClick={() => openSlip(e)}
-                            style={{ background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.25)', color: '#10b981', padding: '5px 10px', borderRadius: '7px', cursor: 'pointer', fontSize: '12px', fontWeight: 600, fontFamily: 'inherit' }}>
+                          <button
+                            type="button"
+                            onClick={() => openSlip(e)}
+                            style={{ background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.25)', color: '#10b981', padding: '5px 10px', borderRadius: '7px', cursor: 'pointer', fontSize: '12px', fontWeight: 600, fontFamily: 'inherit' }}
+                          >
                             Slip
                           </button>
                         </td>
@@ -412,53 +526,55 @@ export default function PayrollManagement() {
       {/* Rekap Tab */}
       {activeTab === 'rekap' && (
         <div className="glass-panel">
-          {summary.data.length === 0 ? (
+          {loading ? (
             <div style={{ textAlign: 'center', padding: '60px', color: 'var(--text-muted)' }}>
-              <p>Belum ada data rekap. Generate payroll terlebih dahulu.</p>
+              <div className="loading-spinner" style={{ margin: '0 auto 12px' }} />Memuat rekap payroll...
+            </div>
+          ) : filteredSummaryData.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '60px', color: 'var(--text-muted)' }}>
+              <p>{summary.data.length === 0 ? 'Belum ada data rekap. Generate payroll terlebih dahulu.' : 'Tidak ada rekap yang cocok dengan filter.'}</p>
             </div>
           ) : (
-            <>
-              <div style={{ overflowX: 'auto' }}>
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Cabang</th>
-                      <th>Tipe</th>
-                      <th style={{ textAlign: 'center' }}>Karyawan</th>
-                      <th style={{ textAlign: 'right' }}>Total THP</th>
+            <div style={{ overflowX: 'auto' }}>
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Cabang</th>
+                    <th>Tipe</th>
+                    <th style={{ textAlign: 'center' }}>Karyawan</th>
+                    <th style={{ textAlign: 'right' }}>Total THP</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredSummaryData.map((row, i) => (
+                    <tr key={`${row.branch_id ?? 'none'}-${row.employee_type}-${i}`}>
+                      <td style={{ fontWeight: 600 }}>{row.branch_name || 'Tanpa Cabang'}</td>
+                      <td>
+                        <span style={{ background: row.employee_type === 'Staff' ? 'rgba(139,92,246,0.15)' : 'rgba(59,130,246,0.15)', color: row.employee_type === 'Staff' ? '#8b5cf6' : '#3b82f6', padding: '3px 10px', borderRadius: '20px', fontSize: '12px', fontWeight: 600 }}>
+                          {row.employee_type}
+                        </span>
+                      </td>
+                      <td style={{ textAlign: 'center', color: 'var(--text-muted)' }}>{row.headcount}</td>
+                      <td style={{ textAlign: 'right', fontWeight: 700, color: '#10b981', fontSize: '14px' }}>{fmtRp(row.total_thp)}</td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {summary.data.map((row, i) => (
-                      <tr key={i}>
-                        <td style={{ fontWeight: 600 }}>{row.branch_name || 'Tanpa Cabang'}</td>
-                        <td>
-                          <span style={{ background: row.employee_type === 'Staff' ? 'rgba(139,92,246,0.15)' : 'rgba(59,130,246,0.15)', color: row.employee_type === 'Staff' ? '#8b5cf6' : '#3b82f6', padding: '3px 10px', borderRadius: '20px', fontSize: '12px', fontWeight: 600 }}>
-                            {row.employee_type}
-                          </span>
-                        </td>
-                        <td style={{ textAlign: 'center', color: 'var(--text-muted)' }}>{row.headcount}</td>
-                        <td style={{ textAlign: 'right', fontWeight: 700, color: '#10b981', fontSize: '14px' }}>{fmtRp(row.total_thp)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr style={{ background: 'rgba(139,92,246,0.08)' }}>
-                      <td colSpan={2} style={{ fontWeight: 800, color: 'var(--text-primary)', fontSize: '14px', padding: '12px 16px' }}>GRAND TOTAL</td>
-                      <td style={{ textAlign: 'center', fontWeight: 600 }}>{summary.data.reduce((s, r) => s + r.headcount, 0)}</td>
-                      <td style={{ textAlign: 'right', fontWeight: 800, color: '#10b981', fontSize: '16px', padding: '12px 16px' }}>{fmtRp(summary.grand_total)}</td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-            </>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr style={{ background: 'rgba(139,92,246,0.08)' }}>
+                    <td colSpan={2} style={{ fontWeight: 800, color: 'var(--text-primary)', fontSize: '14px', padding: '12px 16px' }}>GRAND TOTAL</td>
+                    <td style={{ textAlign: 'center', fontWeight: 600 }}>{filteredRekapHeadcount}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 800, color: '#10b981', fontSize: '16px', padding: '12px 16px' }}>{fmtRp(filteredRekapTHP)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
           )}
         </div>
       )}
 
       {/* Modals */}
       {slipData && <SlipModal slip={slipData} onClose={() => setSlipData(null)} />}
-      {bonusEntry && <BonusModal entry={bonusEntry} onSave={handleBonusSave} onClose={() => setBonusEntry(null)} />}
+      {bonusEntry && <BonusModal entry={bonusEntry} saving={bonusSaving} onSave={handleBonusSave} onClose={() => !bonusSaving && setBonusEntry(null)} />}
     </div>
   );
 }

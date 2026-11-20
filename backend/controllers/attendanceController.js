@@ -1,5 +1,5 @@
 const { query } = require('../db');
-const { calcDeductionAbsent, calcDeductionLate } = require('../utils/payrollCalc');
+const { calcDeductionAbsent, calcDeductionLate, getPeriodDateRange, getPeriodForDate, getPeriodLabel } = require('../utils/payrollCalc');
 
 async function getSettings() {
   const rows = await query.all('SELECT key, value FROM system_settings');
@@ -10,27 +10,40 @@ async function getPenaltyRules() {
   return query.all('SELECT * FROM late_penalty_rules ORDER BY min_count ASC');
 }
 
+function normalizeTimeHHMM(raw) {
+  if (!raw) return '';
+  const m = String(raw).trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const h = parseInt(m[1], 10);
+  const min = parseInt(m[2], 10);
+  if (h < 0 || h > 23 || min < 0 || min > 59) return null;
+  return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+}
+
 // Compute attendance status from shift and check_in_time.
 // Returns { status, is_late }
 function computeStatus(shift, checkInTime, settings) {
   if (!checkInTime) return { status: 'Tidak Hadir', is_late: 0 };
+  const normalized = normalizeTimeHHMM(checkInTime) || String(checkInTime).trim();
   const cutoff = shift === 'Siang'
-    ? (settings.shift_siang_cutoff || '14:30')
-    : (settings.shift_pagi_cutoff || '06:30');
-  const late = checkInTime > cutoff; // lexicographic compare works for HH:MM
+    ? (normalizeTimeHHMM(settings.shift_siang_cutoff) || '14:30')
+    : (normalizeTimeHHMM(settings.shift_pagi_cutoff) || '06:30');
+  const late = normalized > cutoff;
   return { status: late ? 'Telat' : 'Hadir', is_late: late ? 1 : 0 };
 }
 
 // Sync daily records for one employee+period → update attendance_records aggregate
 async function syncEmployeePeriod(employeeId, period, settings, rules) {
-  const monthPattern = `${period}-%`;
+  const startDay = parseInt(settings.payroll_period_start_day, 10) || 29;
+  const endDay = parseInt(settings.payroll_period_end_day, 10) || 28;
+  const { startDate, endDate } = getPeriodDateRange(period, startDay, endDay);
   const agg = await query.get(
     `SELECT
        COUNT(CASE WHEN status = 'Tidak Hadir' THEN 1 END) AS days_absent,
        COUNT(CASE WHEN is_late = 1 THEN 1 END) AS late_count
      FROM daily_attendance
-     WHERE employee_id = ? AND date LIKE ?`,
-    [employeeId, monthPattern]
+     WHERE employee_id = ? AND date BETWEEN ? AND ?`,
+    [employeeId, startDate, endDate]
   );
 
   const days_absent = agg ? agg.days_absent : 0;
@@ -91,6 +104,7 @@ exports.getByDate = async (req, res) => {
     if (branch_id) { sql += ' AND e.branch_id = ?'; params.push(branch_id); }
     sql += ' ORDER BY b.name ASC, e.name ASC';
 
+    const settings = await getSettings();
     const rows = await query.all(sql, params);
     // Employees without a record get default Belum Absen status
     const result = rows.map(r => ({
@@ -100,7 +114,14 @@ exports.getByDate = async (req, res) => {
       check_in_time: r.check_in_time || '',
       notes: r.notes || '',
     }));
-    res.json({ success: true, data: result });
+    res.json({
+      success: true,
+      data: result,
+      cutoffs: {
+        pagi: settings.shift_pagi_cutoff || '06:30',
+        siang: settings.shift_siang_cutoff || '14:30',
+      },
+    });
   } catch (err) {
     console.error('API Error (attendance getByDate):', err);
     res.status(500).json({ success: false, message: 'Server error.' });
@@ -117,7 +138,7 @@ exports.getByDate = async (req, res) => {
  */
 exports.upsertDaily = async (req, res) => {
   try {
-    const employeeId = parseInt(req.params.employeeId);
+    const employeeId = parseInt(req.params.employeeId, 10);
     const { date } = req.params;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return res.status(400).json({ success: false, message: 'Format date harus YYYY-MM-DD.' });
@@ -127,11 +148,20 @@ exports.upsertDaily = async (req, res) => {
     if (!emp) return res.status(404).json({ success: false, message: 'Karyawan tidak ditemukan atau tidak aktif.' });
 
     const { shift = '', check_in_time = '', status: bodyStatus = 'Tidak Hadir', notes = '' } = req.body;
+    let cleanTime = '';
+    if (check_in_time && String(check_in_time).trim() !== '') {
+      const normalized = normalizeTimeHHMM(check_in_time);
+      if (!normalized) {
+        return res.status(400).json({ success: false, message: 'Format jam masuk harus HH:MM (contoh 06:30).' });
+      }
+      cleanTime = normalized;
+    }
+
     const settings = await getSettings();
 
     let status, is_late;
-    if (check_in_time) {
-      const computed = computeStatus(shift, check_in_time, settings);
+    if (cleanTime) {
+      const computed = computeStatus(shift, cleanTime, settings);
       status = computed.status;
       is_late = computed.is_late;
     } else {
@@ -149,17 +179,19 @@ exports.upsertDaily = async (req, res) => {
     if (existing) {
       await query.run(
         `UPDATE daily_attendance SET shift=?, check_in_time=?, status=?, is_late=?, notes=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
-        [shift, check_in_time || null, status, is_late, notes || null, existing.id]
+        [shift, cleanTime || null, status, is_late, notes || null, existing.id]
       );
     } else {
       await query.run(
         `INSERT INTO daily_attendance (employee_id, date, shift, check_in_time, status, is_late, notes) VALUES (?,?,?,?,?,?,?)`,
-        [employeeId, date, shift, check_in_time || null, status, is_late, notes || null]
+        [employeeId, date, shift, cleanTime || null, status, is_late, notes || null]
       );
     }
 
-    // Auto-sync to attendance_records for payroll
-    const period = date.substring(0, 7);
+    // Auto-sync to attendance_records for the payroll period that this date falls into
+    const startDay = parseInt(settings.payroll_period_start_day, 10) || 29;
+    const endDay = parseInt(settings.payroll_period_end_day, 10) || 28;
+    const period = getPeriodForDate(date, startDay, endDay);
     const rules = await getPenaltyRules();
     await syncEmployeePeriod(employeeId, period, settings, rules);
 
@@ -167,7 +199,19 @@ exports.upsertDaily = async (req, res) => {
       'SELECT * FROM daily_attendance WHERE employee_id = ? AND date = ?',
       [employeeId, date]
     );
-    res.json({ success: true, data: saved, message: 'Absensi disimpan.' });
+    // Preserve employee_id in `id` and expose daily_attendance PK as `record_id` matching getByDate shape
+    res.json({
+      success: true,
+      data: {
+        ...saved,
+        record_id: saved.id,
+        id: employeeId,
+        shift: saved.shift || '',
+        check_in_time: saved.check_in_time || '',
+        notes: saved.notes || '',
+      },
+      message: 'Absensi disimpan.'
+    });
   } catch (err) {
     console.error('API Error (attendance upsertDaily):', err);
     res.status(500).json({ success: false, message: 'Server error.' });
@@ -185,7 +229,10 @@ exports.getMonthlySummary = async (req, res) => {
     if (!period || !/^\d{4}-\d{2}$/.test(period)) {
       return res.status(400).json({ success: false, message: 'Parameter period wajib format YYYY-MM.' });
     }
-    const monthPattern = `${period}-%`;
+    const settings = await getSettings();
+    const startDay = parseInt(settings.payroll_period_start_day, 10) || 29;
+    const endDay = parseInt(settings.payroll_period_end_day, 10) || 28;
+    const { startDate, endDate } = getPeriodDateRange(period, startDay, endDay);
 
     let sql = `
       SELECT e.id, e.name, e.position, e.employee_type, e.branch_id, b.name AS branch_name,
@@ -201,16 +248,20 @@ exports.getMonthlySummary = async (req, res) => {
              a.deduction_absent, a.deduction_late, a.asben_contribution, a.notes AS rec_notes
       FROM employees e
       LEFT JOIN branches b ON e.branch_id = b.id
-      LEFT JOIN daily_attendance d ON d.employee_id = e.id AND d.date LIKE ?
+      LEFT JOIN daily_attendance d ON d.employee_id = e.id AND d.date BETWEEN ? AND ?
       LEFT JOIN attendance_records a ON a.employee_id = e.id AND a.period = ?
       WHERE e.status = 'Active'
     `;
-    const params = [monthPattern, period];
+    const params = [startDate, endDate, period];
     if (branch_id) { sql += ' AND e.branch_id = ?'; params.push(branch_id); }
     sql += ' GROUP BY e.id ORDER BY b.name ASC, e.name ASC';
 
     const rows = await query.all(sql, params);
-    res.json({ success: true, data: rows });
+    res.json({
+      success: true,
+      data: rows,
+      period_range: { startDate, endDate, label: getPeriodLabel(period, startDay, endDay) }
+    });
   } catch (err) {
     console.error('API Error (attendance getMonthlySummary):', err);
     res.status(500).json({ success: false, message: 'Server error.' });
@@ -219,19 +270,22 @@ exports.getMonthlySummary = async (req, res) => {
 
 /**
  * GET /api/attendance/daily-detail/:employeeId?period=YYYY-MM
- * Day-by-day records for one employee in a given month.
+ * Day-by-day records for one employee in a given period.
  */
 exports.getEmployeeDailyDetail = async (req, res) => {
   try {
-    const employeeId = parseInt(req.params.employeeId);
+    const employeeId = parseInt(req.params.employeeId, 10);
     const { period } = req.query;
     if (!period || !/^\d{4}-\d{2}$/.test(period)) {
       return res.status(400).json({ success: false, message: 'period wajib format YYYY-MM.' });
     }
-    const monthPattern = `${period}-%`;
+    const settings = await getSettings();
+    const startDay = parseInt(settings.payroll_period_start_day, 10) || 29;
+    const endDay = parseInt(settings.payroll_period_end_day, 10) || 28;
+    const { startDate, endDate } = getPeriodDateRange(period, startDay, endDay);
     const rows = await query.all(
-      'SELECT * FROM daily_attendance WHERE employee_id = ? AND date LIKE ? ORDER BY date ASC',
-      [employeeId, monthPattern]
+      'SELECT * FROM daily_attendance WHERE employee_id = ? AND date BETWEEN ? AND ? ORDER BY date ASC',
+      [employeeId, startDate, endDate]
     );
     res.json({ success: true, data: rows });
   } catch (err) {
@@ -246,7 +300,7 @@ exports.getEmployeeDailyDetail = async (req, res) => {
  */
 exports.upsertRecord = async (req, res) => {
   try {
-    const employeeId = parseInt(req.params.employeeId);
+    const employeeId = parseInt(req.params.employeeId, 10);
     const { period } = req.params;
     if (!/^\d{4}-\d{2}$/.test(period)) {
       return res.status(400).json({ success: false, message: 'Format period harus YYYY-MM.' });
@@ -254,21 +308,26 @@ exports.upsertRecord = async (req, res) => {
     const emp = await query.get('SELECT id FROM employees WHERE id = ?', [employeeId]);
     if (!emp) return res.status(404).json({ success: false, message: 'Karyawan tidak ditemukan.' });
 
-    const { cash_advance = 0, fake_money = 0, notes = '' } = req.body;
+    const cash_advance = Math.max(0, parseFloat(req.body.cash_advance) || 0);
+    const fake_money = Math.max(0, parseFloat(req.body.fake_money) || 0);
 
     const existing = await query.get(
-      'SELECT id FROM attendance_records WHERE employee_id = ? AND period = ?',
+      'SELECT id, notes FROM attendance_records WHERE employee_id = ? AND period = ?',
       [employeeId, period]
     );
+    const finalNotes = req.body.notes !== undefined
+      ? String(req.body.notes ?? '')
+      : (existing ? (existing.notes || '') : '');
+
     if (existing) {
       await query.run(
         `UPDATE attendance_records SET cash_advance=?, fake_money=?, notes=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
-        [cash_advance, fake_money, notes, existing.id]
+        [cash_advance, fake_money, finalNotes, existing.id]
       );
     } else {
       await query.run(
         `INSERT INTO attendance_records (employee_id, period, cash_advance, fake_money, notes) VALUES (?,?,?,?,?)`,
-        [employeeId, period, cash_advance, fake_money, notes]
+        [employeeId, period, cash_advance, fake_money, finalNotes]
       );
     }
     const saved = await query.get(
@@ -294,12 +353,13 @@ exports.syncPeriod = async (req, res) => {
     }
     const settings = await getSettings();
     const rules = await getPenaltyRules();
+    const startDay = parseInt(settings.payroll_period_start_day, 10) || 29;
+    const endDay = parseInt(settings.payroll_period_end_day, 10) || 28;
+    const { startDate, endDate } = getPeriodDateRange(period, startDay, endDay);
 
-    // Get all employees with any daily record in this period
-    const monthPattern = `${period}-%`;
     const employees = await query.all(
-      `SELECT DISTINCT employee_id FROM daily_attendance WHERE date LIKE ?`,
-      [monthPattern]
+      `SELECT DISTINCT employee_id FROM daily_attendance WHERE date BETWEEN ? AND ?`,
+      [startDate, endDate]
     );
 
     for (const { employee_id } of employees) {

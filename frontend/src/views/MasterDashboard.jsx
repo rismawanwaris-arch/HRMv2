@@ -1,12 +1,15 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { dashboardApi, settingsApi, branchApi, staffApi } from '../services/api';
+import { dashboardApi, settingsApi, branchApi } from '../services/api';
 
-const fmt = (n) => new Intl.NumberFormat('id-ID').format(n || 0);
 const fmtRp = (n) =>
   new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(n || 0);
 
-export default function MasterDashboard({ setView }) {
+export default function MasterDashboard({ setView, currentRole = 'master', canAccess = {} }) {
+  const canManageBranches = canAccess.cabang ?? ['finance', 'master'].includes(currentRole);
+  const canManageEmployees = canAccess.karyawan ?? ['finance', 'master'].includes(currentRole);
+  const canManageSettings = canAccess.settings ?? currentRole === 'master';
+
   const [activeTab, setActiveTab] = useState('overview'); // 'overview' | 'employees' | 'branches' | 'settings'
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -20,6 +23,7 @@ export default function MasterDashboard({ setView }) {
   });
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsMsg, setSettingsMsg] = useState(null);
+  const settingsTimerRef = useRef(null);
 
   // Branch Quick Modal
   const [showBranchModal, setShowBranchModal] = useState(false);
@@ -44,6 +48,24 @@ export default function MasterDashboard({ setView }) {
   const [savingRule, setSavingRule] = useState(false);
   const [ruleMsg, setRuleMsg] = useState(null);
 
+  useEffect(() => {
+    return () => {
+      if (settingsTimerRef.current) clearTimeout(settingsTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!showBranchModal && !showRuleModal) return;
+    const onKey = (e) => {
+      if (e.key === 'Escape') {
+        if (showBranchModal) { setShowBranchModal(false); setBranchMsg(null); }
+        if (showRuleModal) { setShowRuleModal(false); setRuleMsg(null); }
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [showBranchModal, showRuleModal]);
+
   const loadData = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -61,7 +83,7 @@ export default function MasterDashboard({ setView }) {
       }
     } catch (err) {
       console.error('Failed to load master summary:', err);
-      setError('Gagal memuat ringkasan data.');
+      setError(err.message || 'Gagal memuat ringkasan data.');
     } finally {
       setLoading(false);
     }
@@ -73,13 +95,25 @@ export default function MasterDashboard({ setView }) {
 
   const handleSaveSettings = async (e) => {
     e.preventDefault();
+    const startDay = parseInt(settingsForm.payroll_period_start_day, 10);
+    const endDay = parseInt(settingsForm.payroll_period_end_day, 10);
+    const workDays = parseInt(settingsForm.working_days_per_month, 10);
+    if (!startDay || !endDay || !workDays || startDay < 1 || startDay > 31 || endDay < 1 || endDay > 31 || workDays < 1 || workDays > 31) {
+      setSettingsMsg({ type: 'err', text: 'Semua angka periode & hari kerja harus valid (1 - 31).' });
+      return;
+    }
     setSavingSettings(true);
     setSettingsMsg(null);
     try {
-      const res = await settingsApi.updateSettings(settingsForm);
+      const res = await settingsApi.updateSettings({
+        payroll_period_start_day: startDay,
+        payroll_period_end_day: endDay,
+        working_days_per_month: workDays,
+      });
       if (res.success) {
         setSettingsMsg({ type: 'ok', text: 'Pengaturan sistem berhasil disimpan!' });
-        setTimeout(() => setSettingsMsg(null), 3000);
+        if (settingsTimerRef.current) clearTimeout(settingsTimerRef.current);
+        settingsTimerRef.current = setTimeout(() => setSettingsMsg(null), 3000);
         await loadData();
       } else {
         setSettingsMsg({ type: 'err', text: res.message || 'Gagal menyimpan pengaturan.' });
@@ -117,13 +151,24 @@ export default function MasterDashboard({ setView }) {
 
   const handleCreateRule = async (e) => {
     e.preventDefault();
+    const minVal = parseInt(ruleForm.min_count, 10);
+    const maxVal = ruleForm.max_count === '' || ruleForm.max_count === null ? null : parseInt(ruleForm.max_count, 10);
+    const penVal = parseFloat(ruleForm.penalty_per_occurrence) || 0;
+    if (Number.isNaN(minVal) || minVal < 1) {
+      setRuleMsg('Keterlambatan minimal (Dari Ke-) harus >= 1.');
+      return;
+    }
+    if (maxVal !== null && (Number.isNaN(maxVal) || maxVal < minVal)) {
+      setRuleMsg('Batas atas (Sampai Ke-) harus >= Dari Ke-.');
+      return;
+    }
     setSavingRule(true);
     setRuleMsg(null);
     try {
       const payload = {
-        min_count: parseInt(ruleForm.min_count, 10),
-        max_count: ruleForm.max_count === '' || ruleForm.max_count === null ? null : parseInt(ruleForm.max_count, 10),
-        penalty_per_occurrence: parseFloat(ruleForm.penalty_per_occurrence) || 0,
+        min_count: minVal,
+        max_count: maxVal,
+        penalty_per_occurrence: penVal,
       };
       const res = await settingsApi.createPenaltyRule(payload);
       if (res.success) {
@@ -141,70 +186,53 @@ export default function MasterDashboard({ setView }) {
   };
 
   if (loading) {
-    return <div style={{ textAlign: 'center', padding: '60px', color: 'var(--text-muted)' }}>Memuat Dashboard Data & Pengaturan...</div>;
+    return <div className="loading-spinner"></div>;
   }
 
   if (error || !summary) {
     return (
-      <div className="card" style={{ padding: '30px', textAlign: 'center', color: '#ef4444' }}>
+      <div className="card" style={{ padding: '30px', textAlign: 'center', color: 'var(--color-danger)' }}>
         <p>{error || 'Data tidak tersedia'}</p>
-        <button onClick={loadData} className="btn btn-primary" style={{ marginTop: '10px' }}>Coba Lagi</button>
+        <button type="button" onClick={loadData} className="btn btn-primary" style={{ marginTop: '10px' }}>Coba Lagi</button>
       </div>
     );
   }
 
-  const { employees, branches, late_rules } = summary;
+  const { employees = {}, branches = {}, late_rules = [] } = summary;
+  const branchListSafe = Array.isArray(branches.list) ? branches.list : [];
 
   return (
-    <div className="view-container">
+    <div>
       {/* Header */}
-      <div className="view-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
+      <div className="page-header" style={{ flexWrap: 'wrap', gap: '16px' }}>
         <div>
-          <h1 className="view-title">Pusat Data & Pengaturan</h1>
-          <p className="view-subtitle">Dashboard manajemen terpadu untuk Data Karyawan, Cabang Outlet, dan Pengaturan Sistem</p>
+          <h1 className="page-title">Pusat Data & Pengaturan</h1>
+          <p className="page-subtitle">Dashboard manajemen terpadu untuk Data Karyawan, Cabang Outlet, dan Pengaturan Sistem</p>
         </div>
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-          <button
-            onClick={() => setShowBranchModal(true)}
-            style={{
-              padding: '9px 16px',
-              borderRadius: '8px',
-              border: '1px solid var(--border-color)',
-              background: 'var(--bg-secondary)',
-              color: 'var(--text-primary)',
-              fontWeight: 600,
-              fontSize: '13px',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px'
-            }}
-          >
-            🏢 + Cabang Baru
-          </button>
-          <button
-            onClick={() => setView('employees')}
-            style={{
-              padding: '9px 16px',
-              borderRadius: '8px',
-              border: 'none',
-              background: 'var(--primary)',
-              color: '#fff',
-              fontWeight: 600,
-              fontSize: '13px',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px'
-            }}
-          >
-            👤 Kelola Karyawan
-          </button>
+          {canManageBranches && (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => { setBranchMsg(null); setShowBranchModal(true); }}
+            >
+              🏢 + Cabang Baru
+            </button>
+          )}
+          {canManageEmployees && (
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => setView('employees')}
+            >
+              👤 Kelola Karyawan
+            </button>
+          )}
         </div>
       </div>
 
       {/* Pending Candidate Promotion Banner */}
-      {employees.pending_promotion > 0 && (
+      {canManageEmployees && employees.pending_promotion > 0 && (
         <div style={{
           background: 'linear-gradient(90deg, rgba(245, 158, 11, 0.15), rgba(245, 158, 11, 0.05))',
           border: '1px solid rgba(245, 158, 11, 0.4)',
@@ -220,7 +248,7 @@ export default function MasterDashboard({ setView }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <span style={{ fontSize: '24px' }}>🎉</span>
             <div>
-              <div style={{ fontWeight: 700, color: '#f59e0b', fontSize: '14px' }}>
+              <div style={{ fontWeight: 700, color: 'var(--color-warning)', fontSize: '14px' }}>
                 Ada {employees.pending_promotion} Kandidat Lulus Seleksi (Hired)
               </div>
               <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
@@ -229,6 +257,7 @@ export default function MasterDashboard({ setView }) {
             </div>
           </div>
           <button
+            type="button"
             onClick={() => setView('employees')}
             style={{
               padding: '7px 16px',
@@ -247,66 +276,61 @@ export default function MasterDashboard({ setView }) {
       )}
 
       {/* Top 4 KPI Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px', marginBottom: '24px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '14px', marginBottom: '24px' }}>
         {/* Karyawan Card */}
         <div
-          className="card"
+          className="card stat-card"
           onClick={() => setActiveTab('employees')}
-          style={{ padding: '18px', cursor: 'pointer', borderLeft: '4px solid #10b981', transition: 'transform 0.15s' }}
-          onMouseOver={e => e.currentTarget.style.transform = 'translateY(-2px)'}
-          onMouseOut={e => e.currentTarget.style.transform = 'translateY(0)'}
+          style={{ padding: '18px', cursor: 'pointer' }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
             <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>Karyawan Aktif</span>
             <span style={{ fontSize: '18px' }}>👥</span>
           </div>
-          <div style={{ fontSize: '28px', fontWeight: 900, color: '#10b981', marginBottom: '6px' }}>
-            {employees.total} <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-muted)' }}>orang</span>
+          <div style={{ fontSize: '28px', fontWeight: 900, color: 'var(--color-success)', marginBottom: '6px' }}>
+            {employees.total || 0} <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-muted)' }}>orang</span>
           </div>
-          <div style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'flex', gap: '10px' }}>
-            <span>Frontliner: <strong>{employees.frontliner}</strong></span>
+          <div style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+            <span>Frontliner: <strong>{employees.frontliner || 0}</strong></span>
             <span>•</span>
-            <span>Staff: <strong>{employees.staff}</strong></span>
+            <span>Staff: <strong>{employees.staff || 0}</strong></span>
           </div>
         </div>
 
         {/* Cabang Card */}
         <div
-          className="card"
+          className="card stat-card"
           onClick={() => setActiveTab('branches')}
-          style={{ padding: '18px', cursor: 'pointer', borderLeft: '4px solid #3b82f6', transition: 'transform 0.15s' }}
-          onMouseOver={e => e.currentTarget.style.transform = 'translateY(-2px)'}
-          onMouseOut={e => e.currentTarget.style.transform = 'translateY(0)'}
+          style={{ padding: '18px', cursor: 'pointer' }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
             <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>Cabang Outlet</span>
             <span style={{ fontSize: '18px' }}>🏢</span>
           </div>
-          <div style={{ fontSize: '28px', fontWeight: 900, color: '#3b82f6', marginBottom: '6px' }}>
-            {branches.total} <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-muted)' }}>lokasi</span>
+          <div style={{ fontSize: '28px', fontWeight: 900, color: 'var(--color-info)', marginBottom: '6px' }}>
+            {branches.total || 0} <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-muted)' }}>lokasi</span>
           </div>
-          <div style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'flex', gap: '8px' }}>
-            <span>Konter: <strong>{branches.konter}</strong></span>
+          <div style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+            <span>Konter: <strong>{branches.konter || 0}</strong></span>
             <span>•</span>
-            <span>Gudang: <strong>{branches.gudang}</strong></span>
+            <span>Gudang: <strong>{branches.gudang || 0}</strong></span>
+            {branches.kantor > 0 && <><span>•</span><span>Kantor: <strong>{branches.kantor}</strong></span></>}
             <span>•</span>
-            <span>Petshop: <strong>{branches.petshop}</strong></span>
+            <span>Petshop: <strong>{branches.petshop || 0}</strong></span>
           </div>
         </div>
 
         {/* Total Sewa Card */}
         <div
-          className="card"
+          className="card stat-card"
           onClick={() => setActiveTab('branches')}
-          style={{ padding: '18px', cursor: 'pointer', borderLeft: '4px solid #f59e0b', transition: 'transform 0.15s' }}
-          onMouseOver={e => e.currentTarget.style.transform = 'translateY(-2px)'}
-          onMouseOut={e => e.currentTarget.style.transform = 'translateY(0)'}
+          style={{ padding: '18px', cursor: 'pointer' }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
             <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>Beban Sewa Outlet</span>
             <span style={{ fontSize: '18px' }}>💰</span>
           </div>
-          <div style={{ fontSize: '22px', fontWeight: 900, color: '#f59e0b', marginBottom: '6px' }}>
+          <div style={{ fontSize: '22px', fontWeight: 900, color: 'var(--color-warning)', marginBottom: '6px' }}>
             {fmtRp(branches.total_rent)}
           </div>
           <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
@@ -316,17 +340,15 @@ export default function MasterDashboard({ setView }) {
 
         {/* Pengaturan Card */}
         <div
-          className="card"
+          className="card stat-card"
           onClick={() => setActiveTab('settings')}
-          style={{ padding: '18px', cursor: 'pointer', borderLeft: '4px solid #8b5cf6', transition: 'transform 0.15s' }}
-          onMouseOver={e => e.currentTarget.style.transform = 'translateY(-2px)'}
-          onMouseOut={e => e.currentTarget.style.transform = 'translateY(0)'}
+          style={{ padding: '18px', cursor: 'pointer' }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
             <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>Periode & Denda</span>
             <span style={{ fontSize: '18px' }}>⚙️</span>
           </div>
-          <div style={{ fontSize: '18px', fontWeight: 800, color: '#8b5cf6', marginBottom: '6px' }}>
+          <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--color-primary)', marginBottom: '6px' }}>
             Tgl {settingsForm.payroll_period_start_day} - {settingsForm.payroll_period_end_day}
           </div>
           <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
@@ -348,11 +370,12 @@ export default function MasterDashboard({ setView }) {
       }}>
         {[
           { id: 'overview', label: '📊 Overview Terpadu' },
-          { id: 'employees', label: `👥 Data Karyawan (${employees.total})` },
-          { id: 'branches', label: `🏢 Cabang Outlet (${branches.total})` },
+          { id: 'employees', label: `👥 Data Karyawan (${employees.total || 0})` },
+          { id: 'branches', label: `🏢 Cabang Outlet (${branches.total || 0})` },
           { id: 'settings', label: '⚙️ Pengaturan & Denda ASBEN' },
         ].map(tab => (
           <button
+            type="button"
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
             style={{
@@ -365,7 +388,7 @@ export default function MasterDashboard({ setView }) {
               fontSize: '13px',
               cursor: 'pointer',
               whiteSpace: 'nowrap',
-              transition: 'all 0.15s'
+              transition: 'background-color 150ms ease-out, color 150ms ease-out, scale 150ms ease-out'
             }}
           >
             {tab.label}
@@ -375,7 +398,7 @@ export default function MasterDashboard({ setView }) {
 
       {/* TAB 1: OVERVIEW TERPADU */}
       {activeTab === 'overview' && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '20px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(360px, 100%), 1fr))', gap: '20px' }}>
           
           {/* Alokasi Staf per Cabang */}
           <div className="card" style={{ padding: '20px' }}>
@@ -383,16 +406,19 @@ export default function MasterDashboard({ setView }) {
               <h3 style={{ margin: 0, fontSize: '15px', color: 'var(--text-primary)', fontWeight: 700 }}>
                 🏢 Alokasi Staf per Cabang
               </h3>
-              <button
-                onClick={() => setView('branches')}
-                style={{ background: 'transparent', border: 'none', color: '#3b82f6', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
-              >
-                Lihat Semua ➔
-              </button>
+              {canManageBranches && (
+                <button
+                  type="button"
+                  onClick={() => setView('branches')}
+                  style={{ background: 'transparent', border: 'none', color: 'var(--color-info)', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
+                >
+                  Lihat Semua ➔
+                </button>
+              )}
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {branches.list.slice(0, 6).map(b => (
+              {branchListSafe.slice(0, 6).map(b => (
                 <div key={b.id} style={{
                   padding: '12px',
                   borderRadius: '8px',
@@ -414,8 +440,8 @@ export default function MasterDashboard({ setView }) {
                     <span style={{
                       padding: '4px 10px',
                       borderRadius: '6px',
-                      background: b.staff_count > 0 ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)',
-                      color: b.staff_count > 0 ? '#10b981' : '#ef4444',
+                      background: b.staff_count > 0 ? 'var(--color-success-bg)' : 'var(--color-danger-bg)',
+                      color: b.staff_count > 0 ? 'var(--color-success)' : 'var(--color-danger)',
                       fontWeight: 700,
                       fontSize: '12px'
                     }}>
@@ -433,12 +459,15 @@ export default function MasterDashboard({ setView }) {
               <h3 style={{ margin: 0, fontSize: '15px', color: 'var(--text-primary)', fontWeight: 700 }}>
                 👥 Karyawan Terbaru
               </h3>
-              <button
-                onClick={() => setView('employees')}
-                style={{ background: 'transparent', border: 'none', color: '#10b981', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
-              >
-                Data Lengkap ➔
-              </button>
+              {canManageEmployees && (
+                <button
+                  type="button"
+                  onClick={() => setView('employees')}
+                  style={{ background: 'transparent', border: 'none', color: 'var(--color-success)', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
+                >
+                  Data Lengkap ➔
+                </button>
+              )}
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -466,8 +495,8 @@ export default function MasterDashboard({ setView }) {
                       borderRadius: '6px',
                       fontSize: '11px',
                       fontWeight: 600,
-                      background: e.employee_type === 'Frontliner' ? 'rgba(59,130,246,0.15)' : 'rgba(139,92,246,0.15)',
-                      color: e.employee_type === 'Frontliner' ? '#3b82f6' : '#8b5cf6',
+                      background: e.employee_type === 'Frontliner' ? 'var(--color-info-bg)' : 'rgba(139,92,246,0.15)',
+                      color: e.employee_type === 'Frontliner' ? 'var(--color-info)' : 'var(--color-primary)',
                     }}>
                       {e.employee_type}
                     </span>
@@ -493,35 +522,38 @@ export default function MasterDashboard({ setView }) {
                 Manajemen Karyawan
               </h2>
               <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-muted)' }}>
-                Total {employees.total} karyawan aktif terdaftar di sistem
+                Total {employees.total || 0} karyawan aktif terdaftar di sistem
               </p>
             </div>
-            <button
-              onClick={() => setView('employees')}
-              className="btn btn-primary"
-              style={{ padding: '9px 18px', fontSize: '13px' }}
-            >
-              👤 Buka Form & Tabel Karyawan Penuh ➔
-            </button>
+            {canManageEmployees && (
+              <button
+                type="button"
+                onClick={() => setView('employees')}
+                className="btn btn-primary"
+                style={{ padding: '9px 18px', fontSize: '13px' }}
+              >
+                👤 Buka Form & Tabel Karyawan Penuh ➔
+              </button>
+            )}
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px', marginBottom: '20px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(260px, 100%), 1fr))', gap: '16px', marginBottom: '20px' }}>
             <div style={{ background: 'var(--bg-secondary)', padding: '16px', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
               <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '8px' }}>TIPE KARYAWAN</div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
                 <span>Frontliner (Konter):</span>
-                <strong>{employees.frontliner} orang</strong>
+                <strong>{employees.frontliner || 0} orang</strong>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span>Staff & Gudang:</span>
-                <strong>{employees.staff} orang</strong>
+                <strong>{employees.staff || 0} orang</strong>
               </div>
             </div>
 
             <div style={{ background: 'var(--bg-secondary)', padding: '16px', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
               <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '8px' }}>STATUS KONTRAK</div>
               {employees.contracts && employees.contracts.map(c => (
-                <div key={c.contract_type} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                <div key={c.contract_type || 'unset'} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
                   <span>{c.contract_type || 'Belum Ditentukan'}:</span>
                   <strong>{c.count} orang</strong>
                 </div>
@@ -529,20 +561,20 @@ export default function MasterDashboard({ setView }) {
             </div>
 
             <div
-              onClick={() => setView('resigned-employees')}
-              style={{ background: 'var(--bg-secondary)', padding: '16px', borderRadius: '10px', border: '1px solid var(--border-color)', cursor: 'pointer' }}
+              onClick={() => { if (canManageEmployees) setView('resigned-employees'); }}
+              style={{ background: 'var(--bg-secondary)', padding: '16px', borderRadius: '10px', border: '1px solid var(--border-color)', cursor: canManageEmployees ? 'pointer' : 'default' }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                 <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)' }}>STATUS NON-AKTIF</span>
-                <span style={{ fontSize: '11px', fontWeight: 600, color: '#f59e0b' }}>Lihat Detail ➔</span>
+                {canManageEmployees && <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--color-warning)' }}>Lihat Detail ➔</span>}
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
                 <span>Resign:</span>
-                <strong style={{ color: '#f59e0b' }}>{employees.resign} orang</strong>
+                <strong style={{ color: 'var(--color-warning)' }}>{employees.resign || 0} orang</strong>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span>Terminated:</span>
-                <strong style={{ color: '#ef4444' }}>{employees.terminated} orang</strong>
+                <strong style={{ color: 'var(--color-danger)' }}>{employees.terminated || 0} orang</strong>
               </div>
             </div>
           </div>
@@ -561,43 +593,29 @@ export default function MasterDashboard({ setView }) {
                 Kelola data konter pulsa, gudang pusat, dan unit petshop
               </p>
             </div>
-            <div style={{ display: 'flex', gap: '10px' }}>
-              <button
-                onClick={() => setShowBranchModal(true)}
-                style={{
-                  padding: '9px 16px',
-                  borderRadius: '8px',
-                  border: 'none',
-                  background: 'var(--primary)',
-                  color: '#fff',
-                  fontWeight: 600,
-                  fontSize: '13px',
-                  cursor: 'pointer'
-                }}
-              >
-                + Tambah Cabang
-              </button>
-              <button
-                onClick={() => setView('branches')}
-                style={{
-                  padding: '9px 16px',
-                  borderRadius: '8px',
-                  border: '1px solid var(--border-color)',
-                  background: 'var(--bg-secondary)',
-                  color: 'var(--text-primary)',
-                  fontWeight: 600,
-                  fontSize: '13px',
-                  cursor: 'pointer'
-                }}
-              >
-                Buka Manajemen Cabang Penuh ➔
-              </button>
-            </div>
+            {canManageBranches && (
+              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={() => { setBranchMsg(null); setShowBranchModal(true); }}
+                  className="btn btn-primary"
+                >
+                  + Tambah Cabang
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setView('branches')}
+                  className="btn btn-secondary"
+                >
+                  Buka Manajemen Cabang Penuh ➔
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Branches Grid */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '16px' }}>
-            {branches.list.map(b => (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(280px, 100%), 1fr))', gap: '16px' }}>
+            {branchListSafe.map(b => (
               <div key={b.id} style={{
                 background: 'var(--bg-secondary)',
                 border: '1px solid var(--border-color)',
@@ -614,8 +632,8 @@ export default function MasterDashboard({ setView }) {
                       borderRadius: '6px',
                       fontSize: '11px',
                       fontWeight: 700,
-                      background: 'rgba(59,130,246,0.15)',
-                      color: '#3b82f6',
+                      background: 'var(--color-info-bg)',
+                      color: 'var(--color-info)',
                       fontFamily: 'monospace'
                     }}>
                       {b.code}
@@ -625,8 +643,8 @@ export default function MasterDashboard({ setView }) {
                       borderRadius: '6px',
                       fontSize: '11px',
                       fontWeight: 600,
-                      background: b.location_type === 'Gudang' ? 'rgba(139,92,246,0.15)' : 'rgba(6,182,212,0.15)',
-                      color: b.location_type === 'Gudang' ? '#a78bfa' : '#06b6d4'
+                      background: b.location_type === 'Gudang' ? 'rgba(139,92,246,0.15)' : 'var(--color-info-bg)',
+                      color: b.location_type === 'Gudang' ? 'var(--color-primary)' : 'var(--color-info)'
                     }}>
                       {b.location_type}
                     </span>
@@ -641,13 +659,13 @@ export default function MasterDashboard({ setView }) {
                 <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
                     <div style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Biaya Sewa</div>
-                    <div style={{ fontSize: '13px', fontWeight: 700, color: '#f59e0b' }}>{fmtRp(b.rent_amount)}</div>
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--color-warning)' }}>{fmtRp(b.rent_amount)}</div>
                   </div>
                   <span style={{
                     padding: '4px 10px',
                     borderRadius: '6px',
-                    background: b.staff_count > 0 ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)',
-                    color: b.staff_count > 0 ? '#10b981' : '#ef4444',
+                    background: b.staff_count > 0 ? 'var(--color-success-bg)' : 'var(--color-danger-bg)',
+                    color: b.staff_count > 0 ? 'var(--color-success)' : 'var(--color-danger)',
                     fontSize: '12px',
                     fontWeight: 700
                   }}>
@@ -662,7 +680,7 @@ export default function MasterDashboard({ setView }) {
 
       {/* TAB 4: PENGATURAN SISTEM & DENDA ASBEN */}
       {activeTab === 'settings' && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '20px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(320px, 100%), 1fr))', gap: '20px' }}>
           
           {/* Quick Settings Form */}
           <div className="card" style={{ padding: '24px' }}>
@@ -679,8 +697,8 @@ export default function MasterDashboard({ setView }) {
                 borderRadius: '8px',
                 marginBottom: '16px',
                 fontSize: '13px',
-                background: settingsMsg.type === 'ok' ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)',
-                color: settingsMsg.type === 'ok' ? '#10b981' : '#ef4444',
+                background: settingsMsg.type === 'ok' ? 'var(--color-success-bg)' : 'var(--color-danger-bg)',
+                color: settingsMsg.type === 'ok' ? 'var(--color-success)' : 'var(--color-danger)',
                 border: `1px solid ${settingsMsg.type === 'ok' ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'}`
               }}>
                 {settingsMsg.text}
@@ -696,18 +714,9 @@ export default function MasterDashboard({ setView }) {
                   type="number"
                   min="1"
                   max="31"
+                  disabled={!canManageSettings}
                   value={settingsForm.payroll_period_start_day}
-                  onChange={e => setSettingsForm(p => ({ ...p, payroll_period_start_day: parseInt(e.target.value, 10) }))}
-                  style={{
-                    width: '100%',
-                    padding: '9px 12px',
-                    borderRadius: '8px',
-                    border: '1px solid var(--border-color)',
-                    background: 'var(--bg-input)',
-                    color: 'var(--text-primary)',
-                    boxSizing: 'border-box',
-                    outline: 'none'
-                  }}
+                  onChange={e => setSettingsForm(p => ({ ...p, payroll_period_start_day: e.target.value === '' ? '' : parseInt(e.target.value, 10) }))}
                   required
                 />
               </div>
@@ -720,18 +729,9 @@ export default function MasterDashboard({ setView }) {
                   type="number"
                   min="1"
                   max="31"
+                  disabled={!canManageSettings}
                   value={settingsForm.payroll_period_end_day}
-                  onChange={e => setSettingsForm(p => ({ ...p, payroll_period_end_day: parseInt(e.target.value, 10) }))}
-                  style={{
-                    width: '100%',
-                    padding: '9px 12px',
-                    borderRadius: '8px',
-                    border: '1px solid var(--border-color)',
-                    background: 'var(--bg-input)',
-                    color: 'var(--text-primary)',
-                    boxSizing: 'border-box',
-                    outline: 'none'
-                  }}
+                  onChange={e => setSettingsForm(p => ({ ...p, payroll_period_end_day: e.target.value === '' ? '' : parseInt(e.target.value, 10) }))}
                   required
                 />
               </div>
@@ -744,45 +744,33 @@ export default function MasterDashboard({ setView }) {
                   type="number"
                   min="1"
                   max="31"
+                  disabled={!canManageSettings}
                   value={settingsForm.working_days_per_month}
-                  onChange={e => setSettingsForm(p => ({ ...p, working_days_per_month: parseInt(e.target.value, 10) }))}
-                  style={{
-                    width: '100%',
-                    padding: '9px 12px',
-                    borderRadius: '8px',
-                    border: '1px solid var(--border-color)',
-                    background: 'var(--bg-input)',
-                    color: 'var(--text-primary)',
-                    boxSizing: 'border-box',
-                    outline: 'none'
-                  }}
+                  onChange={e => setSettingsForm(p => ({ ...p, working_days_per_month: e.target.value === '' ? '' : parseInt(e.target.value, 10) }))}
                   required
                 />
               </div>
 
-              <button
-                type="submit"
-                disabled={savingSettings}
-                style={{
-                  padding: '10px 16px',
-                  borderRadius: '8px',
-                  border: 'none',
-                  background: 'var(--primary)',
-                  color: '#fff',
-                  fontWeight: 600,
-                  cursor: savingSettings ? 'not-allowed' : 'pointer',
-                  fontSize: '13px',
-                  marginTop: '6px'
-                }}
-              >
-                {savingSettings ? 'Menyimpan...' : '💾 Simpan Pengaturan'}
-              </button>
+              {canManageSettings ? (
+                <button
+                  type="submit"
+                  disabled={savingSettings}
+                  className="btn btn-primary"
+                  style={{ justifyContent: 'center', marginTop: '6px' }}
+                >
+                  {savingSettings ? 'Menyimpan...' : '💾 Simpan Pengaturan'}
+                </button>
+              ) : (
+                <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                  Hanya akun Master yang dapat mengubah pengaturan ini.
+                </div>
+              )}
             </form>
           </div>
 
           {/* Late Penalty Rules (ASBEN) */}
           <div className="card" style={{ padding: '24px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
               <div>
                 <h3 style={{ margin: '0 0 4px', fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>
                   ⚠️ Aturan Denda ASBEN
@@ -791,39 +779,34 @@ export default function MasterDashboard({ setView }) {
                   Denda otomatis keterlambatan jam masuk kerja
                 </p>
               </div>
-              <button
-                onClick={() => setShowRuleModal(true)}
-                style={{
-                  padding: '7px 12px',
-                  borderRadius: '6px',
-                  border: '1px solid var(--border-color)',
-                  background: 'var(--bg-secondary)',
-                  color: 'var(--text-primary)',
-                  fontSize: '12px',
-                  fontWeight: 600,
-                  cursor: 'pointer'
-                }}
-              >
-                + Tambah Aturan
-              </button>
+              {canManageSettings && (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => { setRuleMsg(null); setShowRuleModal(true); }}
+                  style={{ padding: '7px 12px', fontSize: '12px' }}
+                >
+                  + Tambah Aturan
+                </button>
+              )}
             </div>
 
             <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+              <table className="data-table" style={{ fontSize: '13px', marginTop: 0 }}>
                 <thead>
-                  <tr style={{ background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase' }}>
-                    <th style={{ padding: '10px 12px', textAlign: 'left' }}>Kejadian Ke-</th>
-                    <th style={{ padding: '10px 12px', textAlign: 'right' }}>Denda per Kejadian</th>
+                  <tr>
+                    <th style={{ textAlign: 'left' }}>Kejadian Ke-</th>
+                    <th style={{ textAlign: 'right' }}>Denda per Kejadian</th>
                   </tr>
                 </thead>
                 <tbody>
                   {late_rules && late_rules.length > 0 ? (
                     late_rules.map(r => (
-                      <tr key={r.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                        <td style={{ padding: '10px 12px' }}>
+                      <tr key={r.id}>
+                        <td>
                           Terlambat ke-<strong>{r.min_count}</strong> s/d <strong>{r.max_count !== null ? r.max_count : '∞'}</strong>
                         </td>
-                        <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700, color: r.penalty_per_occurrence === 0 ? '#10b981' : '#ef4444' }}>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: r.penalty_per_occurrence === 0 ? 'var(--color-success)' : 'var(--color-danger)' }}>
                           {fmtRp(r.penalty_per_occurrence)}
                         </td>
                       </tr>
@@ -839,14 +822,17 @@ export default function MasterDashboard({ setView }) {
               </table>
             </div>
 
-            <div style={{ marginTop: '16px', textAlign: 'right' }}>
-              <button
-                onClick={() => setView('settings')}
-                style={{ background: 'transparent', border: 'none', color: '#8b5cf6', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
-              >
-                Kelola Aturan Selengkapnya di Settings ➔
-              </button>
-            </div>
+            {canManageSettings && (
+              <div style={{ marginTop: '16px', textAlign: 'right' }}>
+                <button
+                  type="button"
+                  onClick={() => setView('settings')}
+                  style={{ background: 'transparent', border: 'none', color: 'var(--color-primary)', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
+                >
+                  Kelola Aturan Selengkapnya di Settings ➔
+                </button>
+              </div>
+            )}
           </div>
 
         </div>
@@ -854,24 +840,29 @@ export default function MasterDashboard({ setView }) {
 
       {/* QUICK MODAL: TAMBAH CABANG */}
       {showBranchModal && createPortal(
-        <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          zIndex: 1000, padding: '20px', backdropFilter: 'blur(4px)'
-        }}>
-          <div style={{
-            width: '100%', maxWidth: '440px',
-            background: 'var(--bg-card, #1e1e2d)',
-            borderRadius: '16px', border: '1px solid var(--border-color)',
-            boxShadow: '0 20px 40px rgba(0,0,0,0.5)', overflow: 'hidden'
-          }}>
+        <div
+          className="modal-overlay"
+          onClick={() => { setShowBranchModal(false); setBranchMsg(null); }}
+          style={{ padding: '20px', zIndex: 3000 }}
+        >
+          <div
+            className="modal-content"
+            onClick={e => e.stopPropagation()}
+            style={{
+              width: '100%', maxWidth: '460px', maxHeight: '90vh', overflowY: 'auto',
+              overscrollBehavior: 'contain', padding: 0,
+              background: 'var(--bg-surface-opaque)',
+              borderRadius: '16px', border: '1px solid var(--border-color)',
+              boxShadow: '0 20px 40px rgba(0,0,0,0.45)'
+            }}
+          >
             <div style={{ padding: '18px 24px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h3 style={{ margin: 0, fontSize: '16px', color: 'var(--text-primary)' }}>Tambah Cabang Baru</h3>
-              <button onClick={() => setShowBranchModal(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '20px', cursor: 'pointer' }}>×</button>
+              <button type="button" onClick={() => { setShowBranchModal(false); setBranchMsg(null); }} className="close-btn" aria-label="Tutup">×</button>
             </div>
 
             <form onSubmit={handleCreateBranch} style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              {branchMsg && <div style={{ color: '#ef4444', fontSize: '12px' }}>{branchMsg}</div>}
+              {branchMsg && <div style={{ color: 'var(--color-danger)', fontSize: '12px' }}>{branchMsg}</div>}
 
               <div>
                 <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '4px' }}>KODE CABANG *</label>
@@ -881,7 +872,6 @@ export default function MasterDashboard({ setView }) {
                   value={branchForm.code}
                   onChange={e => setBranchForm(p => ({ ...p, code: e.target.value.toUpperCase() }))}
                   required
-                  style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-primary)', outline: 'none' }}
                 />
               </div>
 
@@ -893,20 +883,19 @@ export default function MasterDashboard({ setView }) {
                   value={branchForm.name}
                   onChange={e => setBranchForm(p => ({ ...p, name: e.target.value }))}
                   required
-                  style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-primary)', outline: 'none' }}
                 />
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <div className="responsive-grid-2" style={{ gap: '12px' }}>
                 <div>
                   <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '4px' }}>TIPE LOKASI</label>
                   <select
                     value={branchForm.location_type}
                     onChange={e => setBranchForm(p => ({ ...p, location_type: e.target.value }))}
-                    style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-primary)', outline: 'none' }}
                   >
                     <option value="Konter">Konter</option>
                     <option value="Gudang">Gudang</option>
+                    <option value="Kantor/Pusat">Kantor/Pusat</option>
                   </select>
                 </div>
                 <div>
@@ -916,7 +905,6 @@ export default function MasterDashboard({ setView }) {
                     placeholder="Jakarta"
                     value={branchForm.city}
                     onChange={e => setBranchForm(p => ({ ...p, city: e.target.value }))}
-                    style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-primary)', outline: 'none' }}
                   />
                 </div>
               </div>
@@ -925,10 +913,10 @@ export default function MasterDashboard({ setView }) {
                 <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '4px' }}>BIAYA SEWA BULANAN (RP)</label>
                 <input
                   type="number"
+                  min="0"
                   placeholder="0"
                   value={branchForm.rent_amount}
                   onChange={e => setBranchForm(p => ({ ...p, rent_amount: e.target.value }))}
-                  style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-primary)', outline: 'none' }}
                 />
               </div>
 
@@ -939,7 +927,7 @@ export default function MasterDashboard({ setView }) {
                   checked={branchForm.has_petshop}
                   onChange={e => setBranchForm(p => ({ ...p, has_petshop: e.target.checked }))}
                 />
-                <label htmlFor="petshop_chk" style={{ fontSize: '13px', color: 'var(--text-primary)', cursor: 'pointer' }}>
+                <label htmlFor="petshop_chk" style={{ fontSize: '13px', color: 'var(--text-primary)', cursor: 'pointer', marginBottom: 0 }}>
                   Lokasi memiliki unit <strong>Petshop</strong>
                 </label>
               </div>
@@ -947,15 +935,17 @@ export default function MasterDashboard({ setView }) {
               <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
                 <button
                   type="button"
-                  onClick={() => setShowBranchModal(false)}
-                  style={{ flex: 1, padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-primary)', cursor: 'pointer' }}
+                  className="btn btn-secondary"
+                  onClick={() => { setShowBranchModal(false); setBranchMsg(null); }}
+                  style={{ flex: 1, justifyContent: 'center' }}
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
                   disabled={savingBranch}
-                  style={{ flex: 1, padding: '10px', borderRadius: '8px', border: 'none', background: 'var(--primary)', color: '#fff', fontWeight: 600, cursor: savingBranch ? 'not-allowed' : 'pointer' }}
+                  className="btn btn-primary"
+                  style={{ flex: 1, justifyContent: 'center' }}
                 >
                   {savingBranch ? 'Menyimpan...' : 'Simpan Cabang'}
                 </button>
@@ -968,26 +958,31 @@ export default function MasterDashboard({ setView }) {
 
       {/* QUICK MODAL: TAMBAH ATURAN DENDA */}
       {showRuleModal && createPortal(
-        <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          zIndex: 1000, padding: '20px', backdropFilter: 'blur(4px)'
-        }}>
-          <div style={{
-            width: '100%', maxWidth: '400px',
-            background: 'var(--bg-card, #1e1e2d)',
-            borderRadius: '16px', border: '1px solid var(--border-color)',
-            boxShadow: '0 20px 40px rgba(0,0,0,0.5)', overflow: 'hidden'
-          }}>
+        <div
+          className="modal-overlay"
+          onClick={() => { setShowRuleModal(false); setRuleMsg(null); }}
+          style={{ padding: '20px', zIndex: 3000 }}
+        >
+          <div
+            className="modal-content"
+            onClick={e => e.stopPropagation()}
+            style={{
+              width: '100%', maxWidth: '420px', maxHeight: '90vh', overflowY: 'auto',
+              overscrollBehavior: 'contain', padding: 0,
+              background: 'var(--bg-surface-opaque)',
+              borderRadius: '16px', border: '1px solid var(--border-color)',
+              boxShadow: '0 20px 40px rgba(0,0,0,0.45)'
+            }}
+          >
             <div style={{ padding: '18px 24px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h3 style={{ margin: 0, fontSize: '16px', color: 'var(--text-primary)' }}>Tambah Aturan Denda ASBEN</h3>
-              <button onClick={() => setShowRuleModal(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '20px', cursor: 'pointer' }}>×</button>
+              <button type="button" onClick={() => { setShowRuleModal(false); setRuleMsg(null); }} className="close-btn" aria-label="Tutup">×</button>
             </div>
 
             <form onSubmit={handleCreateRule} style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              {ruleMsg && <div style={{ color: '#ef4444', fontSize: '12px' }}>{ruleMsg}</div>}
+              {ruleMsg && <div style={{ color: 'var(--color-danger)', fontSize: '12px' }}>{ruleMsg}</div>}
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <div className="responsive-grid-2" style={{ gap: '12px' }}>
                 <div>
                   <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '4px' }}>DARI KE- *</label>
                   <input
@@ -997,7 +992,6 @@ export default function MasterDashboard({ setView }) {
                     value={ruleForm.min_count}
                     onChange={e => setRuleForm(p => ({ ...p, min_count: e.target.value }))}
                     required
-                    style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-primary)', outline: 'none' }}
                   />
                 </div>
                 <div>
@@ -1008,7 +1002,6 @@ export default function MasterDashboard({ setView }) {
                     placeholder="Kosong = ∞"
                     value={ruleForm.max_count}
                     onChange={e => setRuleForm(p => ({ ...p, max_count: e.target.value }))}
-                    style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-primary)', outline: 'none' }}
                   />
                 </div>
               </div>
@@ -1023,22 +1016,23 @@ export default function MasterDashboard({ setView }) {
                   value={ruleForm.penalty_per_occurrence}
                   onChange={e => setRuleForm(p => ({ ...p, penalty_per_occurrence: e.target.value }))}
                   required
-                  style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-primary)', outline: 'none' }}
                 />
               </div>
 
               <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
                 <button
                   type="button"
-                  onClick={() => setShowRuleModal(false)}
-                  style={{ flex: 1, padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-primary)', cursor: 'pointer' }}
+                  className="btn btn-secondary"
+                  onClick={() => { setShowRuleModal(false); setRuleMsg(null); }}
+                  style={{ flex: 1, justifyContent: 'center' }}
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
                   disabled={savingRule}
-                  style={{ flex: 1, padding: '10px', borderRadius: '8px', border: 'none', background: 'var(--primary)', color: '#fff', fontWeight: 600, cursor: savingRule ? 'not-allowed' : 'pointer' }}
+                  className="btn btn-primary"
+                  style={{ flex: 1, justifyContent: 'center' }}
                 >
                   {savingRule ? 'Menyimpan...' : 'Simpan Aturan'}
                 </button>

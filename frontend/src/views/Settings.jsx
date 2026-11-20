@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { settingsApi, adminApi } from '../services/api';
 
@@ -22,17 +22,17 @@ function CopyIconSwap({ isCopied }) {
 
 const fmt = (n) => new Intl.NumberFormat('id-ID').format(n || 0);
 
-const ROLE_LABELS = { master: 'Master', finance: 'Admin Finance', staff: 'Admin Staff' };
 const ROLE_COLORS = {
-  master:  { bg: '#7c3aed22', color: '#a78bfa', border: '#7c3aed44' },
-  finance: { bg: '#10b98122', color: '#34d399',  border: '#10b98144' },
-  staff:   { bg: '#3b82f622', color: '#60a5fa',  border: '#3b82f644' },
+  master:  { bg: 'rgba(124,58,237,0.14)', color: 'var(--color-primary)', border: 'rgba(124,58,237,0.35)' },
+  finance: { bg: 'var(--color-success-bg)', color: 'var(--color-success)', border: 'rgba(16,185,129,0.35)' },
+  staff:   { bg: 'var(--color-info-bg)', color: 'var(--color-info)', border: 'rgba(59,130,246,0.35)' },
 };
 
 export default function Settings({ currentRole = 'master' }) {
   const [settings, setSettings] = useState({ payroll_period_start_day: 29, payroll_period_end_day: 28, working_days_per_month: 25, shift_pagi_cutoff: '06:30', shift_siang_cutoff: '14:30' });
   const [rules, setRules] = useState([]);
   const [loadingSettings, setLoadingSettings] = useState(true);
+  const [settingsError, setSettingsError] = useState('');
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsMsg, setSettingsMsg] = useState(null);
   const [savingShift, setSavingShift] = useState(false);
@@ -46,6 +46,8 @@ export default function Settings({ currentRole = 'master' }) {
 
   // Admin management state (master only)
   const [admins, setAdmins] = useState([]);
+  const [loadingAdmins, setLoadingAdmins] = useState(false);
+  const [adminsError, setAdminsError] = useState('');
   const [showAdminForm, setShowAdminForm] = useState(false);
   const [adminForm, setAdminForm] = useState({ username: '', password: '', role: 'staff' });
   const [adminMsg, setAdminMsg] = useState(null);
@@ -60,10 +62,34 @@ export default function Settings({ currentRole = 'master' }) {
   const [testingMobileApi, setTestingMobileApi] = useState(false);
   const [mobileTestResult, setMobileTestResult] = useState(null);
   const [showDartSnippet, setShowDartSnippet] = useState(false);
+  const copyTimerRef = useRef(null);
 
-  const loadAdmins = () => adminApi.list().then(r => { if (r.success) setAdmins(r.data); }).catch(() => {});
+  useEffect(() => () => {
+    if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+  }, []);
 
-  const loadMobileConfig = () => {
+  useEffect(() => {
+    if (!showRuleModal) return;
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape' && !savingRule) setShowRuleModal(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [showRuleModal, savingRule]);
+
+  const loadAdmins = useCallback(() => {
+    setLoadingAdmins(true);
+    setAdminsError('');
+    adminApi.list()
+      .then(r => {
+        if (r.success) setAdmins(r.data || []);
+        else setAdminsError(r.message || 'Gagal memuat daftar admin.');
+      })
+      .catch(err => setAdminsError(err.message || 'Gagal memuat daftar admin.'))
+      .finally(() => setLoadingAdmins(false));
+  }, []);
+
+  const loadMobileConfig = useCallback(() => {
     settingsApi.getMobileConfig()
       .then(res => {
         if (res.success && res.data) {
@@ -72,12 +98,42 @@ export default function Settings({ currentRole = 'master' }) {
         }
       })
       .catch(() => {});
-  };
+  }, []);
 
-  const handleCopy = (text, key) => {
-    navigator.clipboard.writeText(text);
-    setCopiedKey(key);
-    setTimeout(() => setCopiedKey(null), 2500);
+  const loadSettingsData = useCallback(() => {
+    setLoadingSettings(true);
+    setSettingsError('');
+    Promise.all([settingsApi.getSettings(), settingsApi.getPenaltyRules()])
+      .then(([s, r]) => {
+        if (s.success) setSettings(prev => ({ ...prev, ...s.data }));
+        if (r.success) setRules(r.data || []);
+      })
+      .catch(err => setSettingsError(err.message || 'Gagal memuat pengaturan sistem.'))
+      .finally(() => setLoadingSettings(false));
+  }, []);
+
+  const handleCopy = async (text, key) => {
+    if (!text) return;
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      setCopiedKey(key);
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = setTimeout(() => setCopiedKey(null), 2500);
+    } catch {
+      alert('Gagal menyalin teks ke clipboard.');
+    }
   };
 
   const handleSaveCustomBaseUrl = async (e) => {
@@ -92,19 +148,28 @@ export default function Settings({ currentRole = 'master' }) {
       } else {
         setMobileUrlMsg({ type: 'err', text: res.message || 'Gagal menyimpan URL.' });
       }
-    } catch {
-      setMobileUrlMsg({ type: 'err', text: 'Kesalahan jaringan saat menyimpan URL.' });
+    } catch (err) {
+      setMobileUrlMsg({ type: 'err', text: err.message || 'Kesalahan jaringan saat menyimpan URL.' });
     } finally {
       setSavingMobileUrl(false);
     }
   };
 
   const handleTestMobileApi = async () => {
+    const token = localStorage.getItem('auth_token') || localStorage.getItem('token');
+    if (!token) {
+      setMobileTestResult({
+        ok: false,
+        latency: 0,
+        message: 'Token autentikasi tidak ditemukan. Silakan login ulang.'
+      });
+      return;
+    }
+
     setTestingMobileApi(true);
     setMobileTestResult(null);
     const start = performance.now();
     try {
-      const token = localStorage.getItem('auth_token') || localStorage.getItem('token');
       const targetUrl = customBaseUrl || mobileConfig?.recommended_base_url || '/api';
       const cleanUrl = targetUrl.replace(/\/$/, '');
       const res = await fetch(`${cleanUrl}/mobile/master-data`, {
@@ -115,8 +180,17 @@ export default function Settings({ currentRole = 'master' }) {
       });
       const end = performance.now();
       const latency = Math.round(end - start);
-      if (res.ok) {
-        const json = await res.json();
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        setMobileTestResult({
+          ok: false,
+          latency,
+          message: `Server merespon non-JSON (${res.status}). Periksa alamat URL Base API.`
+        });
+        return;
+      }
+      const json = await res.json();
+      if (res.ok && json.success !== false) {
         setMobileTestResult({
           ok: true,
           latency,
@@ -126,7 +200,7 @@ export default function Settings({ currentRole = 'master' }) {
         setMobileTestResult({
           ok: false,
           latency,
-          message: `Server merespon status ${res.status}: ${res.statusText}`
+          message: json.message || `Server merespon status ${res.status}: ${res.statusText}`
         });
       }
     } catch (err) {
@@ -142,15 +216,10 @@ export default function Settings({ currentRole = 'master' }) {
   };
 
   useEffect(() => {
-    Promise.all([settingsApi.getSettings(), settingsApi.getPenaltyRules()])
-      .then(([s, r]) => {
-        if (s.success) setSettings(prev => ({ ...prev, ...s.data }));
-        if (r.success) setRules(r.data);
-      })
-      .finally(() => setLoadingSettings(false));
+    loadSettingsData();
     loadMobileConfig();
     if (currentRole === 'master') loadAdmins();
-  }, [currentRole]);
+  }, [currentRole, loadSettingsData, loadMobileConfig, loadAdmins]);
 
   const handleCreateAdmin = async (e) => {
     e.preventDefault();
@@ -163,10 +232,10 @@ export default function Settings({ currentRole = 'master' }) {
         setShowAdminForm(false);
         loadAdmins();
       } else {
-        setAdminMsg({ type: 'err', text: res.message });
+        setAdminMsg({ type: 'err', text: res.message || 'Gagal menambah admin.' });
       }
     } catch (err) {
-      setAdminMsg({ type: 'err', text: err.message || 'Gagal.' });
+      setAdminMsg({ type: 'err', text: err.message || 'Gagal menambah admin.' });
     } finally {
       setSavingAdmin(false);
     }
@@ -177,7 +246,7 @@ export default function Settings({ currentRole = 'master' }) {
     try {
       const res = await adminApi.delete(id);
       if (res.success) loadAdmins();
-      else alert(res.message);
+      else alert(res.message || 'Gagal menghapus.');
     } catch (err) {
       alert(err.message || 'Gagal menghapus.');
     }
@@ -197,10 +266,14 @@ export default function Settings({ currentRole = 'master' }) {
     setSavingSettings(true);
     setSettingsMsg(null);
     try {
-      const res = await settingsApi.updateSettings(settings);
+      const res = await settingsApi.updateSettings({
+        payroll_period_start_day: settings.payroll_period_start_day,
+        payroll_period_end_day: settings.payroll_period_end_day,
+        working_days_per_month: settings.working_days_per_month,
+      });
       setSettingsMsg({ type: res.success ? 'success' : 'error', text: res.message });
-    } catch {
-      setSettingsMsg({ type: 'error', text: 'Gagal menyimpan pengaturan.' });
+    } catch (err) {
+      setSettingsMsg({ type: 'error', text: err.message || 'Gagal menyimpan pengaturan.' });
     } finally {
       setSavingSettings(false);
     }
@@ -216,8 +289,8 @@ export default function Settings({ currentRole = 'master' }) {
         shift_siang_cutoff: settings.shift_siang_cutoff,
       });
       setShiftMsg({ type: res.success ? 'success' : 'error', text: res.message });
-    } catch {
-      setShiftMsg({ type: 'error', text: 'Gagal menyimpan pengaturan.' });
+    } catch (err) {
+      setShiftMsg({ type: 'error', text: err.message || 'Gagal menyimpan pengaturan.' });
     } finally {
       setSavingShift(false);
     }
@@ -243,12 +316,23 @@ export default function Settings({ currentRole = 'master' }) {
 
   const handleSaveRule = async (e) => {
     e.preventDefault();
+    const minCount = parseInt(ruleForm.min_count, 10);
+    const maxCount = ruleForm.max_count !== '' ? parseInt(ruleForm.max_count, 10) : null;
+    if (Number.isNaN(minCount) || minCount < 1) {
+      setRuleMsg({ type: 'error', text: 'Keterlambatan ke- harus bernilai minimal 1.' });
+      return;
+    }
+    if (maxCount !== null && (Number.isNaN(maxCount) || maxCount < minCount)) {
+      setRuleMsg({ type: 'error', text: 'Batas "Sampai ke-" harus lebih besar atau sama dengan "Keterlambatan ke-".' });
+      return;
+    }
+
     setSavingRule(true);
     setRuleMsg(null);
     try {
       const payload = {
-        min_count: parseInt(ruleForm.min_count, 10),
-        max_count: ruleForm.max_count !== '' ? parseInt(ruleForm.max_count, 10) : null,
+        min_count: minCount,
+        max_count: maxCount,
         penalty_per_occurrence: parseInt(ruleForm.penalty_per_occurrence, 10) || 0,
       };
       let res;
@@ -260,9 +344,9 @@ export default function Settings({ currentRole = 'master' }) {
         if (res.success) setRules(prev => [...prev, res.data].sort((a, b) => a.min_count - b.min_count));
       }
       if (res.success) setShowRuleModal(false);
-      else setRuleMsg({ type: 'error', text: res.message });
-    } catch {
-      setRuleMsg({ type: 'error', text: 'Gagal menyimpan aturan.' });
+      else setRuleMsg({ type: 'error', text: res.message || 'Gagal menyimpan aturan.' });
+    } catch (err) {
+      setRuleMsg({ type: 'error', text: err.message || 'Gagal menyimpan aturan.' });
     } finally {
       setSavingRule(false);
     }
@@ -273,10 +357,26 @@ export default function Settings({ currentRole = 'master' }) {
     try {
       await settingsApi.deletePenaltyRule(rule.id);
       setRules(prev => prev.filter(r => r.id !== rule.id));
-    } catch {
-      alert('Gagal menghapus aturan.');
+    } catch (err) {
+      alert(err.message || 'Gagal menghapus aturan.');
     }
   };
+
+  const effectiveBaseUrl = customBaseUrl || mobileConfig?.recommended_base_url || 'http://100.103.255.45:5002/api';
+  const dartSnippet = [
+    'class ApiConfig {',
+    '  // Base URL aktif (Tailscale ZimaOS / Local LAN)',
+    `  static const String baseUrl = '${effectiveBaseUrl}';`,
+    '',
+    '  // Endpoint Autentikasi & Sinkronisasi (Wajib Header Authorization: Bearer <token>)',
+    "  static const String login = '$baseUrl/mobile/login';",
+    "  static const String masterData = '$baseUrl/mobile/master-data';",
+    "  static const String syncAsset = '$baseUrl/mobile/sync/asset';",
+    "  static const String syncVisit = '$baseUrl/mobile/sync/visit';",
+    "  static const String syncIncident = '$baseUrl/mobile/sync/incident';",
+    "  static const String syncEmployee = '$baseUrl/mobile/sync/employee';",
+    '}',
+  ].join('\n');
 
   const inputStyle = {
     background: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: '10px',
@@ -300,6 +400,13 @@ export default function Settings({ currentRole = 'master' }) {
         </div>
       </div>
 
+      {settingsError && (
+        <div className="glass-panel" style={{ padding: '12px 16px', marginBottom: '20px', border: '1px solid rgba(239,68,68,0.35)', background: 'var(--color-danger-bg)', color: 'var(--color-danger)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '13px', fontWeight: 600 }}>⚠ {settingsError}</span>
+          <button type="button" onClick={loadSettingsData} className="btn btn-secondary" style={{ fontSize: '12px', padding: '6px 12px' }}>Coba Lagi</button>
+        </div>
+      )}
+
       {/* Payroll Period Settings */}
       <div className="glass-panel" style={{ marginBottom: '24px' }}>
         <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border-color)' }}>
@@ -309,7 +416,7 @@ export default function Settings({ currentRole = 'master' }) {
           </p>
         </div>
         <form onSubmit={handleSaveSettings} style={{ padding: '24px' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px', marginBottom: '20px' }}>
+          <div className="responsive-grid-3" style={{ gap: '20px', marginBottom: '20px' }}>
             <div>
               <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
                 Tanggal Mulai Periode
@@ -348,8 +455,8 @@ export default function Settings({ currentRole = 'master' }) {
           {settingsMsg && (
             <div style={{
               padding: '10px 14px', borderRadius: '8px', marginBottom: '16px', fontSize: '13px',
-              background: settingsMsg.type === 'success' ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)',
-              color: settingsMsg.type === 'success' ? '#34d399' : '#f87171',
+              background: settingsMsg.type === 'success' ? 'var(--color-success-bg)' : 'var(--color-danger-bg)',
+              color: settingsMsg.type === 'success' ? 'var(--color-success)' : 'var(--color-danger)',
               border: `1px solid ${settingsMsg.type === 'success' ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'}`,
             }}>
               {settingsMsg.text}
@@ -378,7 +485,7 @@ export default function Settings({ currentRole = 'master' }) {
           </p>
         </div>
         <form onSubmit={handleSaveShift} style={{ padding: '24px' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '20px', maxWidth: '480px' }}>
+          <div className="responsive-grid-2" style={{ gap: '20px', marginBottom: '20px', maxWidth: '480px' }}>
             <div>
               <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
                 Batas Shift Pagi
@@ -431,8 +538,8 @@ export default function Settings({ currentRole = 'master' }) {
           {shiftMsg && (
             <div style={{
               padding: '10px 14px', borderRadius: '8px', marginBottom: '16px', fontSize: '13px',
-              background: shiftMsg.type === 'success' ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)',
-              color: shiftMsg.type === 'success' ? '#34d399' : '#f87171',
+              background: shiftMsg.type === 'success' ? 'var(--color-success-bg)' : 'var(--color-danger-bg)',
+              color: shiftMsg.type === 'success' ? 'var(--color-success)' : 'var(--color-danger)',
               border: `1px solid ${shiftMsg.type === 'success' ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'}`,
             }}>
               {shiftMsg.text}
@@ -454,7 +561,7 @@ export default function Settings({ currentRole = 'master' }) {
 
       {/* Late Penalty Rules */}
       <div className="glass-panel">
-        <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
           <div>
             <h2 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>Aturan Denda Keterlambatan (ASBEN)</h2>
             <p style={{ margin: '4px 0 0', fontSize: '13px', color: 'var(--text-muted)' }}>
@@ -462,6 +569,7 @@ export default function Settings({ currentRole = 'master' }) {
             </p>
           </div>
           <button
+            type="button"
             className="btn btn-primary"
             onClick={openAddRule}
           >
@@ -491,21 +599,23 @@ export default function Settings({ currentRole = 'master' }) {
                       <td>
                         <span style={{
                           fontWeight: 700,
-                          color: rule.penalty_per_occurrence > 0 ? '#f59e0b' : 'var(--text-muted)',
+                          color: rule.penalty_per_occurrence > 0 ? 'var(--color-warning)' : 'var(--text-muted)',
                         }}>
                           {rule.penalty_per_occurrence > 0 ? `Rp ${fmt(rule.penalty_per_occurrence)}` : 'Tidak didenda'}
                         </span>
                       </td>
-                      <td style={{ textAlign: 'center' }}>
+                      <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
                         <button
+                          type="button"
                           onClick={() => openEditRule(rule)}
                           style={{ background: 'rgba(59,130,246,0.12)', border: '1px solid rgba(59,130,246,0.25)', color: '#3b82f6', padding: '5px 12px', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: 600, marginRight: '8px' }}
                         >
                           Edit
                         </button>
                         <button
+                          type="button"
                           onClick={() => handleDeleteRule(rule)}
-                          style={{ background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.25)', color: '#ef4444', padding: '5px 12px', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: 600 }}
+                          style={{ background: 'var(--color-danger-bg)', border: '1px solid rgba(239,68,68,0.25)', color: 'var(--color-danger)', padding: '5px 12px', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: 600 }}
                         >
                           Hapus
                         </button>
@@ -527,25 +637,31 @@ export default function Settings({ currentRole = 'master' }) {
 
       {/* Rule Modal */}
       {showRuleModal && createPortal(
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(6px)', padding: '16px' }}>
-          <div style={{ width: '100%', maxWidth: '420px', background: 'var(--bg-surface-opaque)', border: '1px solid var(--border-color)', borderRadius: '20px', boxShadow: '0 24px 48px rgba(0,0,0,0.3)' }}>
+        <div
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3000, backdropFilter: 'blur(6px)', padding: '16px', overscrollBehavior: 'contain' }}
+          onClick={() => !savingRule && setShowRuleModal(false)}
+        >
+          <div
+            style={{ width: '100%', maxWidth: '420px', maxHeight: '90vh', overflowY: 'auto', background: 'var(--bg-surface-opaque)', border: '1px solid var(--border-color)', borderRadius: '20px', boxShadow: '0 24px 48px rgba(0,0,0,0.3)' }}
+            onClick={e => e.stopPropagation()}
+          >
             <div style={{ padding: '24px 28px 20px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)' }}>
                 {editingRule ? 'Edit Aturan Denda' : 'Tambah Aturan Denda'}
               </h3>
-              <button onClick={() => setShowRuleModal(false)} style={{ background: 'var(--bg-hover)', border: 'none', borderRadius: '8px', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '18px', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
+              <button type="button" disabled={savingRule} onClick={() => setShowRuleModal(false)} style={{ background: 'var(--bg-hover)', border: 'none', borderRadius: '8px', color: 'var(--text-primary)', cursor: savingRule ? 'not-allowed' : 'pointer', fontSize: '18px', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
             </div>
 
             <form onSubmit={handleSaveRule} style={{ padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
               {ruleMsg && (
-                <div style={{ padding: '10px 14px', borderRadius: '8px', fontSize: '13px', background: 'rgba(239,68,68,0.12)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)' }}>
+                <div style={{ padding: '10px 14px', borderRadius: '8px', fontSize: '13px', background: 'var(--color-danger-bg)', color: 'var(--color-danger)', border: '1px solid rgba(239,68,68,0.3)' }}>
                   {ruleMsg.text}
                 </div>
               )}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+              <div className="responsive-grid-2" style={{ gap: '14px' }}>
                 <div>
                   <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                    Keterlambatan ke- (dari) <span style={{ color: '#ef4444' }}>*</span>
+                    Keterlambatan ke- (dari) <span style={{ color: 'var(--color-danger)' }}>*</span>
                   </label>
                   <input type="number" min="1" style={inputStyle} required
                     value={ruleForm.min_count}
@@ -574,8 +690,8 @@ export default function Settings({ currentRole = 'master' }) {
                 />
               </div>
               <div style={{ display: 'flex', gap: '12px', paddingTop: '8px' }}>
-                <button type="button" onClick={() => setShowRuleModal(false)}
-                  style={{ flex: 1, padding: '12px', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '10px', color: 'var(--text-primary)', cursor: 'pointer', fontWeight: 600, fontFamily: 'inherit', fontSize: '14px' }}>
+                <button type="button" disabled={savingRule} onClick={() => setShowRuleModal(false)}
+                  style={{ flex: 1, padding: '12px', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '10px', color: 'var(--text-primary)', cursor: savingRule ? 'not-allowed' : 'pointer', fontWeight: 600, fontFamily: 'inherit', fontSize: '14px' }}>
                   Batal
                 </button>
                 <button type="submit" disabled={savingRule}
@@ -615,7 +731,7 @@ export default function Settings({ currentRole = 'master' }) {
               flexShrink: 0,
               boxShadow: '0 6px 18px rgba(79,70,229,0.2)'
             }}>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#818cf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
                 <line x1="12" y1="18" x2="12.01" y2="18" />
               </svg>
@@ -638,7 +754,7 @@ export default function Settings({ currentRole = 'master' }) {
               padding: '5px 11px',
               borderRadius: '20px',
               background: 'rgba(139,92,246,0.12)',
-              color: '#a78bfa',
+              color: 'var(--color-primary)',
               border: '1px solid rgba(139,92,246,0.28)',
               fontSize: '11.5px',
               fontWeight: 600
@@ -651,8 +767,8 @@ export default function Settings({ currentRole = 'master' }) {
               gap: '8px',
               padding: '5px 12px',
               borderRadius: '20px',
-              background: 'rgba(16,185,129,0.12)',
-              color: '#10b981',
+              background: 'var(--color-success-bg)',
+              color: 'var(--color-success)',
               border: '1px solid rgba(16,185,129,0.28)',
               fontSize: '12px',
               fontWeight: 700
@@ -686,7 +802,7 @@ export default function Settings({ currentRole = 'master' }) {
               <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '0.04em' }}>KUNJUNGAN GA</span>
               <span style={{ fontSize: '15px' }}>📋</span>
             </div>
-            <div style={{ fontSize: '24px', fontWeight: 800, color: '#10b981', marginTop: '6px', fontFamily: 'var(--font-heading)' }}>
+            <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--color-success)', marginTop: '6px', fontFamily: 'var(--font-heading)' }}>
               {mobileConfig?.sync_stats?.synced_visits ?? 0}
             </div>
             <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>Laporan audit cabang</div>
@@ -697,7 +813,7 @@ export default function Settings({ currentRole = 'master' }) {
               <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '0.04em' }}>INSIDEN OUTLET</span>
               <span style={{ fontSize: '15px' }}>⚠️</span>
             </div>
-            <div style={{ fontSize: '24px', fontWeight: 800, color: '#f59e0b', marginTop: '6px', fontFamily: 'var(--font-heading)' }}>
+            <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--color-warning)', marginTop: '6px', fontFamily: 'var(--font-heading)' }}>
               {mobileConfig?.sync_stats?.synced_incidents ?? 0}
             </div>
             <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>Temuan darurat lapangan</div>
@@ -708,7 +824,7 @@ export default function Settings({ currentRole = 'master' }) {
               <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '0.04em' }}>KARYAWAN BARU</span>
               <span style={{ fontSize: '15px' }}>👤</span>
             </div>
-            <div style={{ fontSize: '24px', fontWeight: 800, color: '#8b5cf6', marginTop: '6px', fontFamily: 'var(--font-heading)' }}>
+            <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--color-primary)', marginTop: '6px', fontFamily: 'var(--font-heading)' }}>
               {mobileConfig?.sync_stats?.synced_employees ?? 0}
             </div>
             <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>PII terenkripsi di server</div>
@@ -724,14 +840,14 @@ export default function Settings({ currentRole = 'master' }) {
                 <span style={{ fontSize: '13.5px', fontWeight: 700, color: 'var(--text-primary)' }}>
                   1. HP Fisik Android (Wi-Fi Lokal / Jaringan Kantor)
                 </span>
-                <span style={{ fontSize: '11px', background: 'rgba(59,130,246,0.16)', color: '#60a5fa', border: '1px solid rgba(59,130,246,0.3)', padding: '2px 8px', borderRadius: '6px', fontWeight: 600 }}>
+                <span style={{ fontSize: '11px', background: 'var(--color-info-bg)', color: 'var(--color-info)', border: '1px solid rgba(59,130,246,0.3)', padding: '2px 8px', borderRadius: '6px', fontWeight: 600 }}>
                   Otomatis Terdeteksi
                 </span>
               </div>
               <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
                 Gunakan URL ini di Flutter saat HP Android terhubung pada jaringan Wi-Fi yang sama dengan server.
               </div>
-              <code style={{ display: 'inline-block', marginTop: '8px', fontSize: '13px', color: '#10b981', fontWeight: 600, background: 'var(--bg-surface)', padding: '5px 10px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+              <code style={{ display: 'inline-block', marginTop: '8px', fontSize: '13px', color: 'var(--color-success)', fontWeight: 600, background: 'var(--bg-surface)', padding: '5px 10px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
                 {mobileConfig?.recommended_base_url || 'Memuat IP...'}
               </code>
             </div>
@@ -768,13 +884,13 @@ export default function Settings({ currentRole = 'master' }) {
               <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
                 Alamat loopback khusus <code>10.0.2.2</code> untuk menghubungkan emulator ke localhost komputer.
               </div>
-              <code style={{ display: 'inline-block', marginTop: '8px', fontSize: '13px', color: '#38bdf8', fontWeight: 600, background: 'var(--bg-surface)', padding: '5px 10px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+              <code style={{ display: 'inline-block', marginTop: '8px', fontSize: '13px', color: 'var(--color-info)', fontWeight: 600, background: 'var(--bg-surface)', padding: '5px 10px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
                 {mobileConfig?.emulator_base_url || 'http://10.0.2.2:5002/api'}
               </code>
             </div>
             <button
               type="button"
-              onClick={() => handleCopy(mobileConfig?.emulator_base_url || '', 'emu')}
+              onClick={() => handleCopy(mobileConfig?.emulator_base_url || 'http://10.0.2.2:5002/api', 'emu')}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -802,7 +918,7 @@ export default function Settings({ currentRole = 'master' }) {
               <div style={{ fontSize: '13.5px', fontWeight: 700, color: 'var(--text-primary)' }}>
                 3. Endpoint Tailscale ZimaOS / Domain Produksi
               </div>
-              <span style={{ fontSize: '11px', background: 'rgba(16,185,129,0.14)', color: '#34d399', border: '1px solid rgba(16,185,129,0.3)', padding: '2px 8px', borderRadius: '6px', fontWeight: 600 }}>
+              <span style={{ fontSize: '11px', background: 'var(--color-success-bg)', color: 'var(--color-success)', border: '1px solid rgba(16,185,129,0.3)', padding: '2px 8px', borderRadius: '6px', fontWeight: 600 }}>
                 Rekomendasi ZimaOS Tailscale
               </span>
             </div>
@@ -817,7 +933,8 @@ export default function Settings({ currentRole = 'master' }) {
                 onChange={e => setCustomBaseUrl(e.target.value)}
                 style={{
                   flex: 1,
-                  minWidth: '240px',
+                  minWidth: '200px',
+                  maxWidth: '100%',
                   padding: '10px 14px',
                   borderRadius: '10px',
                   border: '1px solid var(--border-color)',
@@ -869,7 +986,7 @@ export default function Settings({ currentRole = 'master' }) {
               </button>
             </div>
             {mobileUrlMsg && (
-              <div style={{ marginTop: '10px', fontSize: '12.5px', fontWeight: 600, color: mobileUrlMsg.type === 'ok' ? '#10b981' : '#ef4444', animation: 'popIn 0.25s ease forwards' }}>
+              <div style={{ marginTop: '10px', fontSize: '12.5px', fontWeight: 600, color: mobileUrlMsg.type === 'ok' ? 'var(--color-success)' : 'var(--color-danger)', animation: 'popIn 0.25s ease forwards' }}>
                 {mobileUrlMsg.type === 'ok' ? '✓ ' : '✕ '}{mobileUrlMsg.text}
               </div>
             )}
@@ -899,7 +1016,7 @@ export default function Settings({ currentRole = 'master' }) {
                 borderRadius: '10px',
                 border: '1px solid rgba(16,185,129,0.5)',
                 background: testingMobileApi ? 'rgba(16,185,129,0.2)' : 'linear-gradient(135deg, rgba(16,185,129,0.18), rgba(5,150,105,0.1))',
-                color: '#10b981',
+                color: 'var(--color-success)',
                 fontSize: '13px',
                 fontWeight: 700,
                 cursor: testingMobileApi ? 'not-allowed' : 'pointer',
@@ -916,7 +1033,7 @@ export default function Settings({ currentRole = 'master' }) {
                 borderRadius: '10px',
                 border: '1px solid var(--border-color)',
                 background: showDartSnippet ? 'rgba(99,102,241,0.15)' : 'var(--bg-hover)',
-                color: showDartSnippet ? '#818cf8' : 'var(--text-primary)',
+                color: showDartSnippet ? 'var(--color-primary)' : 'var(--text-primary)',
                 fontSize: '13px',
                 fontWeight: 600,
                 cursor: 'pointer',
@@ -927,12 +1044,12 @@ export default function Settings({ currentRole = 'master' }) {
             </button>
           </div>
 
-          <div style={{ display: 'flex', gap: '14px', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: '14px', alignItems: 'center', flexWrap: 'wrap' }}>
             <a
               href="/docs/ANDROID_SECURITY_AND_SYNC_GUIDE.md"
               target="_blank"
               rel="noopener noreferrer"
-              style={{ fontSize: '12px', color: '#34d399', textDecoration: 'none', fontWeight: 600 }}
+              style={{ fontSize: '12px', color: 'var(--color-success)', textDecoration: 'none', fontWeight: 600 }}
             >
               🛡️ Panduan Keamanan Android ↗
             </a>
@@ -940,7 +1057,7 @@ export default function Settings({ currentRole = 'master' }) {
               href="/docs/FLUTTER_HRGA_SPEC.md"
               target="_blank"
               rel="noopener noreferrer"
-              style={{ fontSize: '12px', color: '#a78bfa', textDecoration: 'none', fontWeight: 600 }}
+              style={{ fontSize: '12px', color: 'var(--color-primary)', textDecoration: 'none', fontWeight: 600 }}
             >
               📄 Dokumen PRD Spec ↗
             </a>
@@ -959,9 +1076,9 @@ export default function Settings({ currentRole = 'master' }) {
             justifyContent: 'space-between',
             flexWrap: 'wrap',
             gap: '8px',
-            background: mobileTestResult.ok ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
+            background: mobileTestResult.ok ? 'var(--color-success-bg)' : 'var(--color-danger-bg)',
             border: `1px solid ${mobileTestResult.ok ? 'rgba(16,185,129,0.35)' : 'rgba(239,68,68,0.35)'}`,
-            color: mobileTestResult.ok ? '#10b981' : '#ef4444',
+            color: mobileTestResult.ok ? 'var(--color-success)' : 'var(--color-danger)',
             animation: 'popIn 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards'
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -976,7 +1093,9 @@ export default function Settings({ currentRole = 'master' }) {
               fontWeight: 700,
               padding: '3px 9px',
               borderRadius: '6px',
-              background: 'rgba(0,0,0,0.2)'
+              background: 'var(--bg-secondary)',
+              border: '1px solid var(--border-color)',
+              color: 'var(--text-primary)'
             }}>
               ⚡ Latency: {mobileTestResult.latency} ms
             </div>
@@ -993,21 +1112,13 @@ export default function Settings({ currentRole = 'master' }) {
             border: '1px solid var(--border-color)',
             animation: 'submenuExpand 0.26s cubic-bezier(0.16, 1, 0.3, 1) forwards'
           }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
               <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)', fontFamily: 'monospace' }}>
                 lib/core/api_config.dart
               </span>
               <button
                 type="button"
-                onClick={() => handleCopy(`class ApiConfig {
-  static const String baseUrl = '${customBaseUrl || mobileConfig?.recommended_base_url || 'http://100.103.255.45:5002/api'}';
-  static const String login = '\$baseUrl/mobile/login';
-  static const String masterData = '\$baseUrl/mobile/master-data';
-  static const String syncAsset = '\$baseUrl/mobile/sync/asset';
-  static const String syncVisit = '\$baseUrl/mobile/sync/visit';
-  static const String syncIncident = '\$baseUrl/mobile/sync/incident';
-  static const String syncEmployee = '\$baseUrl/mobile/sync/employee';
-}`, 'dart')}
+                onClick={() => handleCopy(dartSnippet, 'dart')}
                 style={{
                   padding: '5px 12px',
                   borderRadius: '7px',
@@ -1035,18 +1146,7 @@ export default function Settings({ currentRole = 'master' }) {
               lineHeight: '1.55',
               border: '1px solid rgba(255,255,255,0.06)'
             }}>
-{`class ApiConfig {
-  // Base URL aktif (Tailscale ZimaOS / Local LAN)
-  static const String baseUrl = '${customBaseUrl || mobileConfig?.recommended_base_url || 'http://100.103.255.45:5002/api'}';
-
-  // Endpoint Autentikasi & Sinkronisasi (Wajib Header Authorization: Bearer <token>)
-  static const String login = '\$baseUrl/mobile/login';
-  static const String masterData = '\$baseUrl/mobile/master-data';
-  static const String syncAsset = '\$baseUrl/mobile/sync/asset';
-  static const String syncVisit = '\$baseUrl/mobile/sync/visit';
-  static const String syncIncident = '\$baseUrl/mobile/sync/incident';
-  static const String syncEmployee = '\$baseUrl/mobile/sync/employee';
-}`}
+              {dartSnippet}
             </pre>
           </div>
         )}
@@ -1055,12 +1155,13 @@ export default function Settings({ currentRole = 'master' }) {
       {/* ── MANAJEMEN ADMIN (master only) ── */}
       {currentRole === 'master' && (
         <div className="card" style={{ marginTop: '24px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
             <div>
               <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>Manajemen Admin</h3>
               <p style={{ margin: '2px 0 0', fontSize: '12px', color: 'var(--text-muted)' }}>Kelola akun dan peran pengguna admin sistem</p>
             </div>
             <button
+              type="button"
               onClick={() => { setShowAdminForm(p => !p); setAdminMsg(null); }}
               style={{ padding: '8px 16px', background: 'linear-gradient(135deg, #7c3aed, #6d28d9)', border: 'none', borderRadius: '8px', color: '#fff', fontWeight: 600, fontSize: '13px', cursor: 'pointer' }}
             >
@@ -1071,7 +1172,7 @@ export default function Settings({ currentRole = 'master' }) {
           {/* Form tambah admin */}
           {showAdminForm && (
             <form onSubmit={handleCreateAdmin} style={{ background: 'var(--bg-hover)', borderRadius: '10px', padding: '16px', marginBottom: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 160px auto', gap: '10px', alignItems: 'end' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '10px', alignItems: 'end' }}>
                 <div>
                   <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>Username</label>
                   <input required value={adminForm.username} onChange={e => setAdminForm(p => ({ ...p, username: e.target.value }))}
@@ -1098,16 +1199,25 @@ export default function Settings({ currentRole = 'master' }) {
                   {savingAdmin ? 'Menyimpan...' : 'Simpan'}
                 </button>
               </div>
-              {adminMsg && <div style={{ fontSize: '13px', color: adminMsg.type === 'ok' ? '#10b981' : '#ef4444' }}>{adminMsg.text}</div>}
+              {adminMsg && <div style={{ fontSize: '13px', color: adminMsg.type === 'ok' ? 'var(--color-success)' : 'var(--color-danger)' }}>{adminMsg.text}</div>}
             </form>
           )}
 
           {/* Daftar admin */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {admins.map(adm => {
+            {loadingAdmins ? (
+              <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px', padding: '16px' }}>Memuat...</div>
+            ) : adminsError ? (
+              <div style={{ textAlign: 'center', color: 'var(--color-danger)', fontSize: '13px', padding: '16px' }}>
+                ⚠ {adminsError}{' '}
+                <button type="button" onClick={loadAdmins} className="btn btn-secondary" style={{ fontSize: '12px', padding: '4px 10px', marginLeft: '8px' }}>Coba Lagi</button>
+              </div>
+            ) : admins.length === 0 ? (
+              <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px', padding: '16px' }}>Belum ada akun admin.</div>
+            ) : admins.map(adm => {
               const rc = ROLE_COLORS[adm.role] || ROLE_COLORS.staff;
               return (
-                <div key={adm.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: 'var(--bg-hover)', borderRadius: '10px', border: '1px solid var(--border-color)', gap: '12px' }}>
+                <div key={adm.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: 'var(--bg-hover)', borderRadius: '10px', border: '1px solid var(--border-color)', gap: '12px', flexWrap: 'wrap' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
                     <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, color: '#fff', flexShrink: 0 }}>
                       {adm.username.charAt(0).toUpperCase()}
@@ -1120,19 +1230,18 @@ export default function Settings({ currentRole = 'master' }) {
                       onChange={e => handleChangeAdminRole(adm.id, e.target.value)}
                       style={{ padding: '4px 8px', borderRadius: '6px', border: `1px solid ${rc.border}`, background: rc.bg, color: rc.color, fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}
                     >
-                      <option value="staff">Admin Staff</option>
-                      <option value="finance">Admin Finance</option>
-                      <option value="master">Master</option>
+                      <option value="staff" style={{ background: 'var(--bg-surface-opaque)', color: 'var(--text-primary)' }}>Admin Staff</option>
+                      <option value="finance" style={{ background: 'var(--bg-surface-opaque)', color: 'var(--text-primary)' }}>Admin Finance</option>
+                      <option value="master" style={{ background: 'var(--bg-surface-opaque)', color: 'var(--text-primary)' }}>Master</option>
                     </select>
-                    <button onClick={() => handleDeleteAdmin(adm.id, adm.username)}
-                      style={{ padding: '5px 10px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '6px', color: '#ef4444', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>
+                    <button type="button" onClick={() => handleDeleteAdmin(adm.id, adm.username)}
+                      style={{ padding: '5px 10px', background: 'var(--color-danger-bg)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '6px', color: 'var(--color-danger)', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>
                       Hapus
                     </button>
                   </div>
                 </div>
               );
             })}
-            {admins.length === 0 && <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px', padding: '16px' }}>Memuat...</div>}
           </div>
         </div>
       )}

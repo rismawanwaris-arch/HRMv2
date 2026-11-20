@@ -1,5 +1,18 @@
+const fs = require('fs');
+const path = require('path');
 const { query } = require('../db');
-const { generateAccessCode } = require('../utils/helpers');
+const { generateAccessCode, cleanupUploadedFiles, outletPhotosDir } = require('../utils/helpers');
+
+function safeParseJsonArray(str) {
+  if (!str) return [];
+  if (Array.isArray(str)) return str;
+  try {
+    const parsed = JSON.parse(str);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
 
 // Helper to format date YYYY-MM-DD
 function getTodayDateStr() {
@@ -52,7 +65,7 @@ exports.getAssets = async (req, res) => {
     const rows = await query.all(sql, params);
     const parsed = rows.map(r => ({
       ...r,
-      photos: r.photos ? JSON.parse(r.photos) : []
+      photos: safeParseJsonArray(r.photos)
     }));
 
     res.json({ success: true, data: parsed });
@@ -150,10 +163,10 @@ exports.getAssetDetail = async (req, res) => {
       success: true,
       data: {
         ...asset,
-        photos: asset.photos ? JSON.parse(asset.photos) : [],
+        photos: safeParseJsonArray(asset.photos),
         logs: logs.map(l => ({
           ...l,
-          photos: l.photos ? JSON.parse(l.photos) : []
+          photos: safeParseJsonArray(l.photos)
         }))
       }
     });
@@ -185,17 +198,24 @@ exports.createAsset = async (req, res) => {
     } = req.body;
 
     if (!name || !category || !branch_id) {
+      cleanupUploadedFiles(req.files);
       return res.status(400).json({
         success: false,
         message: 'Nama aset, kategori, dan cabang outlet wajib diisi.'
       });
     }
 
+    const branchIdInt = parseInt(branch_id, 10);
+    const branch = await query.get('SELECT id, code FROM branches WHERE id = ?', [branchIdInt]);
+    if (!branch) {
+      cleanupUploadedFiles(req.files);
+      return res.status(400).json({ success: false, message: 'Cabang outlet tidak ditemukan.' });
+    }
+
     // Generate asset_code if not supplied
     let finalCode = asset_code?.trim();
     if (!finalCode) {
-      const branch = await query.get('SELECT code FROM branches WHERE id = ?', [branch_id]);
-      const branchCode = branch?.code ? branch.code.replace(/[^A-Za-z0-9]/g, '').toUpperCase() : 'OUT';
+      const branchCode = branch.code ? branch.code.replace(/[^A-Za-z0-9]/g, '').toUpperCase() : 'OUT';
       const rand = generateAccessCode().slice(0, 4);
       finalCode = `AST-${branchCode}-${rand}`;
     }
@@ -206,45 +226,54 @@ exports.createAsset = async (req, res) => {
     }
 
     const date = purchase_date || getTodayDateStr();
+    const parsedCost = parseFloat(purchase_cost) || 0;
 
-    const insertSql = `
-      INSERT INTO outlet_assets (
-        asset_code, name, category, branch_id, purchase_date, purchase_cost,
-        condition, status, brand, serial_number, vendor_supplier, photos, notes
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `;
+    let assetId;
+    await query.run('BEGIN TRANSACTION');
+    try {
+      const insertSql = `
+        INSERT INTO outlet_assets (
+          asset_code, name, category, branch_id, purchase_date, purchase_cost,
+          condition, status, brand, serial_number, vendor_supplier, photos, notes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `;
 
-    const result = await query.run(insertSql, [
-      finalCode,
-      name.trim(),
-      category,
-      parseInt(branch_id, 10),
-      date,
-      parseFloat(purchase_cost) || 0,
-      condition || 'Baik',
-      status || 'Aktif',
-      brand || null,
-      serial_number || null,
-      vendor_supplier || null,
-      JSON.stringify(photosList),
-      notes || null
-    ]);
+      const result = await query.run(insertSql, [
+        finalCode,
+        name.trim(),
+        category,
+        branchIdInt,
+        date,
+        parsedCost,
+        condition || 'Baik',
+        status || 'Aktif',
+        brand || null,
+        serial_number || null,
+        vendor_supplier || null,
+        JSON.stringify(photosList),
+        notes || null
+      ]);
 
-    const assetId = result.id;
+      assetId = result.id;
 
-    // Log the addition
-    await query.run(`
-      INSERT INTO outlet_asset_logs (
-        asset_id, log_type, log_date, to_branch_id, cost, reason, performed_by, notes
-      ) VALUES (?, 'Penambahan', ?, ?, ?, 'Pendaftaran Aset Baru', ?, ?)
-    `, [
-      assetId,
-      date,
-      parseInt(branch_id, 10),
-      parseFloat(purchase_cost) || 0,
-      req.user?.username || 'Wisnu (GA)',
-      notes || 'Aset baru berhasil didaftarkan ke sistem.'
-    ]);
+      // Log the addition
+      await query.run(`
+        INSERT INTO outlet_asset_logs (
+          asset_id, log_type, log_date, to_branch_id, cost, reason, performed_by, notes
+        ) VALUES (?, 'Penambahan', ?, ?, ?, 'Pendaftaran Aset Baru', ?, ?)
+      `, [
+        assetId,
+        date,
+        branchIdInt,
+        parsedCost,
+        req.user?.username || 'Wisnu (GA)',
+        notes || 'Aset baru berhasil didaftarkan ke sistem.'
+      ]);
+      await query.run('COMMIT');
+    } catch (txErr) {
+      await query.run('ROLLBACK').catch(() => {});
+      throw txErr;
+    }
 
     res.status(201).json({
       success: true,
@@ -253,6 +282,10 @@ exports.createAsset = async (req, res) => {
       asset_code: finalCode
     });
   } catch (error) {
+    cleanupUploadedFiles(req.files);
+    if (error.message && error.message.includes('UNIQUE constraint failed: outlet_assets.asset_code')) {
+      return res.status(409).json({ success: false, message: 'Kode aset sudah terdaftar di sistem.' });
+    }
     console.error('API Error (createAsset):', error);
     res.status(500).json({ success: false, message: 'Gagal menambahkan aset baru.' });
   }
@@ -267,6 +300,7 @@ exports.updateAsset = async (req, res) => {
     const id = parseInt(req.params.id, 10);
     const existing = await query.get('SELECT * FROM outlet_assets WHERE id = ?', [id]);
     if (!existing) {
+      cleanupUploadedFiles(req.files);
       return res.status(404).json({ success: false, message: 'Aset tidak ditemukan.' });
     }
 
@@ -285,7 +319,17 @@ exports.updateAsset = async (req, res) => {
       notes
     } = req.body;
 
-    let currentPhotos = existing.photos ? JSON.parse(existing.photos) : [];
+    const parsedBranchId = (branch_id !== undefined && branch_id !== null && String(branch_id).trim() !== '')
+      ? parseInt(branch_id, 10)
+      : existing.branch_id;
+    const nextBranchId = Number.isNaN(parsedBranchId) ? existing.branch_id : parsedBranchId;
+
+    const parsedCost = (purchase_cost !== undefined && purchase_cost !== null && String(purchase_cost).trim() !== '')
+      ? parseFloat(purchase_cost)
+      : existing.purchase_cost;
+    const nextCost = Number.isNaN(parsedCost) ? existing.purchase_cost : parsedCost;
+
+    let currentPhotos = safeParseJsonArray(existing.photos);
     if (req.files && Array.isArray(req.files) && req.files.length > 0) {
       const newFiles = req.files.map(f => f.filename);
       currentPhotos = [...currentPhotos, ...newFiles];
@@ -300,12 +344,12 @@ exports.updateAsset = async (req, res) => {
     `;
 
     await query.run(updateSql, [
-      name ?? existing.name,
+      (name !== undefined && String(name).trim() !== '') ? String(name).trim() : existing.name,
       category ?? existing.category,
-      branch_id !== undefined ? parseInt(branch_id, 10) : existing.branch_id,
+      nextBranchId,
       asset_code ?? existing.asset_code,
       purchase_date ?? existing.purchase_date,
-      purchase_cost !== undefined ? parseFloat(purchase_cost) : existing.purchase_cost,
+      nextCost,
       condition ?? existing.condition,
       status ?? existing.status,
       brand ?? existing.brand,
@@ -318,6 +362,7 @@ exports.updateAsset = async (req, res) => {
 
     res.json({ success: true, message: 'Data aset berhasil diperbarui.' });
   } catch (error) {
+    cleanupUploadedFiles(req.files);
     console.error('API Error (updateAsset):', error);
     res.status(500).json({ success: false, message: 'Gagal memperbarui data aset.' });
   }
@@ -334,6 +379,7 @@ exports.replaceAsset = async (req, res) => {
     const id = parseInt(req.params.id, 10);
     const existing = await query.get('SELECT * FROM outlet_assets WHERE id = ?', [id]);
     if (!existing) {
+      cleanupUploadedFiles(req.files);
       return res.status(404).json({ success: false, message: 'Aset tidak ditemukan.' });
     }
 
@@ -351,6 +397,7 @@ exports.replaceAsset = async (req, res) => {
     } = req.body;
 
     if (!replacement_asset_name || !reason) {
+      cleanupUploadedFiles(req.files);
       return res.status(400).json({
         success: false,
         message: 'Nama aset pengganti dan alasan penggantian wajib diisi.'
@@ -366,76 +413,83 @@ exports.replaceAsset = async (req, res) => {
     const cost = parseFloat(replacement_cost) || 0;
     const actor = performed_by?.trim() || req.user?.username || 'Wisnu (GA)';
 
-    // 1. Mark existing asset as 'Diganti'
-    await query.run(`
-      UPDATE outlet_assets
-      SET status = 'Diganti', condition = 'Rusak Berat', updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `, [id]);
-
-    // 2. Record the Replacement log
-    await query.run(`
-      INSERT INTO outlet_asset_logs (
-        asset_id, log_type, log_date, from_branch_id, to_branch_id, cost,
-        replacement_asset_name, reason, performed_by, photos, notes
-      ) VALUES (?, 'Penggantian', ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [
-      id,
-      date,
-      existing.branch_id,
-      existing.branch_id,
-      cost,
-      replacement_asset_name,
-      reason,
-      actor,
-      JSON.stringify(photosList),
-      notes || `Aset lama digantikan dengan ${replacement_asset_name}.`
-    ]);
-
     let newAssetId = null;
     let newAssetCode = null;
 
-    // 3. Automatically register the new replacement asset if desired
-    if (register_as_new_asset === true || register_as_new_asset === 'true') {
-      const branch = await query.get('SELECT code FROM branches WHERE id = ?', [existing.branch_id]);
-      const branchCode = branch?.code ? branch.code.replace(/[^A-Za-z0-9]/g, '').toUpperCase() : 'OUT';
-      const rand = generateAccessCode().slice(0, 4);
-      newAssetCode = `AST-${branchCode}-${rand}`;
+    await query.run('BEGIN TRANSACTION');
+    try {
+      // 1. Mark existing asset as 'Diganti'
+      await query.run(`
+        UPDATE outlet_assets
+        SET status = 'Diganti', condition = 'Rusak Berat', updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `, [id]);
 
-      const newAssetResult = await query.run(`
-        INSERT INTO outlet_assets (
-          asset_code, name, category, branch_id, purchase_date, purchase_cost,
-          condition, status, brand, serial_number, vendor_supplier, photos, notes
-        ) VALUES (?, ?, ?, ?, ?, ?, 'Baik', 'Aktif', ?, ?, ?, ?, ?)
-      `, [
-        newAssetCode,
-        replacement_asset_name.trim(),
-        existing.category,
-        existing.branch_id,
-        date,
-        cost,
-        replacement_brand || null,
-        replacement_serial_number || null,
-        replacement_vendor || null,
-        JSON.stringify(photosList),
-        `Barang baru pengganti dari aset lama: ${existing.name} (${existing.asset_code}). Alasan: ${reason}`
-      ]);
-
-      newAssetId = newAssetResult.id;
-
-      // Log the addition of the new asset
+      // 2. Record the Replacement log
       await query.run(`
         INSERT INTO outlet_asset_logs (
-          asset_id, log_type, log_date, to_branch_id, cost, reason, performed_by, notes
-        ) VALUES (?, 'Penambahan', ?, ?, ?, 'Penggantian Aset Lama', ?, ?)
+          asset_id, log_type, log_date, from_branch_id, to_branch_id, cost,
+          replacement_asset_name, reason, performed_by, photos, notes
+        ) VALUES (?, 'Penggantian', ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
-        newAssetId,
+        id,
         date,
         existing.branch_id,
+        existing.branch_id,
         cost,
+        replacement_asset_name,
+        reason,
         actor,
-        `Aset baru pengganti dari ${existing.name} (${existing.asset_code}).`
+        JSON.stringify(photosList),
+        notes || `Aset lama digantikan dengan ${replacement_asset_name}.`
       ]);
+
+      // 3. Automatically register the new replacement asset if desired
+      if (register_as_new_asset === true || register_as_new_asset === 'true') {
+        const branch = await query.get('SELECT code FROM branches WHERE id = ?', [existing.branch_id]);
+        const branchCode = branch?.code ? branch.code.replace(/[^A-Za-z0-9]/g, '').toUpperCase() : 'OUT';
+        const rand = generateAccessCode().slice(0, 4);
+        newAssetCode = `AST-${branchCode}-${rand}`;
+
+        const newAssetResult = await query.run(`
+          INSERT INTO outlet_assets (
+            asset_code, name, category, branch_id, purchase_date, purchase_cost,
+            condition, status, brand, serial_number, vendor_supplier, photos, notes
+          ) VALUES (?, ?, ?, ?, ?, ?, 'Baik', 'Aktif', ?, ?, ?, ?, ?)
+        `, [
+          newAssetCode,
+          replacement_asset_name.trim(),
+          existing.category,
+          existing.branch_id,
+          date,
+          cost,
+          replacement_brand || null,
+          replacement_serial_number || null,
+          replacement_vendor || null,
+          JSON.stringify(photosList),
+          `Barang baru pengganti dari aset lama: ${existing.name} (${existing.asset_code}). Alasan: ${reason}`
+        ]);
+
+        newAssetId = newAssetResult.id;
+
+        // Log the addition of the new asset
+        await query.run(`
+          INSERT INTO outlet_asset_logs (
+            asset_id, log_type, log_date, to_branch_id, cost, reason, performed_by, notes
+          ) VALUES (?, 'Penambahan', ?, ?, ?, 'Penggantian Aset Lama', ?, ?)
+        `, [
+          newAssetId,
+          date,
+          existing.branch_id,
+          cost,
+          actor,
+          `Aset baru pengganti dari ${existing.name} (${existing.asset_code}).`
+        ]);
+      }
+      await query.run('COMMIT');
+    } catch (txErr) {
+      await query.run('ROLLBACK').catch(() => {});
+      throw txErr;
     }
 
     res.json({
@@ -445,6 +499,7 @@ exports.replaceAsset = async (req, res) => {
       new_asset_code: newAssetCode
     });
   } catch (error) {
+    cleanupUploadedFiles(req.files);
     console.error('API Error (replaceAsset):', error);
     res.status(500).json({ success: false, message: 'Gagal melakukan proses penggantian aset.' });
   }
@@ -469,6 +524,13 @@ exports.mutateAsset = async (req, res) => {
     }
 
     const targetBranchId = parseInt(to_branch_id, 10);
+    if (Number.isNaN(targetBranchId) || targetBranchId < 1) {
+      return res.status(400).json({ success: false, message: 'Cabang tujuan mutasi tidak valid.' });
+    }
+    const targetBranch = await query.get('SELECT id FROM branches WHERE id = ?', [targetBranchId]);
+    if (!targetBranch) {
+      return res.status(400).json({ success: false, message: 'Cabang tujuan mutasi tidak ditemukan.' });
+    }
     if (targetBranchId === existing.branch_id) {
       return res.status(400).json({ success: false, message: 'Cabang tujuan tidak boleh sama dengan cabang asal.' });
     }
@@ -476,27 +538,34 @@ exports.mutateAsset = async (req, res) => {
     const date = log_date || getTodayDateStr();
     const actor = performed_by?.trim() || req.user?.username || 'Wisnu (GA)';
 
-    // Update asset branch
-    await query.run(`
-      UPDATE outlet_assets
-      SET branch_id = ?, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `, [targetBranchId, id]);
+    await query.run('BEGIN TRANSACTION');
+    try {
+      // Update asset branch
+      await query.run(`
+        UPDATE outlet_assets
+        SET branch_id = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `, [targetBranchId, id]);
 
-    // Record mutation log
-    await query.run(`
-      INSERT INTO outlet_asset_logs (
-        asset_id, log_type, log_date, from_branch_id, to_branch_id, reason, performed_by, notes
-      ) VALUES (?, 'Mutasi Cabang', ?, ?, ?, ?, ?, ?)
-    `, [
-      id,
-      date,
-      existing.branch_id,
-      targetBranchId,
-      reason || 'Kebutuhan operasional cabang',
-      actor,
-      notes || `Aset dipindahkan ke cabang baru.`
-    ]);
+      // Record mutation log
+      await query.run(`
+        INSERT INTO outlet_asset_logs (
+          asset_id, log_type, log_date, from_branch_id, to_branch_id, reason, performed_by, notes
+        ) VALUES (?, 'Mutasi Cabang', ?, ?, ?, ?, ?, ?)
+      `, [
+        id,
+        date,
+        existing.branch_id,
+        targetBranchId,
+        reason || 'Kebutuhan operasional cabang',
+        actor,
+        notes || `Aset dipindahkan ke cabang baru.`
+      ]);
+      await query.run('COMMIT');
+    } catch (txErr) {
+      await query.run('ROLLBACK').catch(() => {});
+      throw txErr;
+    }
 
     res.json({ success: true, message: 'Mutasi cabang aset berhasil disimpan.' });
   } catch (error) {
@@ -565,7 +634,24 @@ exports.serviceAsset = async (req, res) => {
 exports.deleteAsset = async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
+    const existing = await query.get('SELECT id, photos FROM outlet_assets WHERE id = ?', [id]);
+    if (!existing) {
+      return res.status(404).json({ success: false, message: 'Aset tidak ditemukan.' });
+    }
+    const logRows = await query.all('SELECT photos FROM outlet_asset_logs WHERE asset_id = ?', [id]);
     await query.run('DELETE FROM outlet_assets WHERE id = ?', [id]);
+
+    const files = [
+      ...safeParseJsonArray(existing.photos),
+      ...logRows.flatMap((l) => safeParseJsonArray(l.photos)),
+    ];
+    for (const filename of files) {
+      const fp = path.join(outletPhotosDir, path.basename(String(filename)));
+      if (fs.existsSync(fp)) {
+        try { fs.unlinkSync(fp); } catch {}
+      }
+    }
+
     res.json({ success: true, message: 'Aset berhasil dihapus.' });
   } catch (error) {
     console.error('API Error (deleteAsset):', error);
@@ -593,7 +679,7 @@ exports.getAllAssetLogs = async (req, res) => {
     const params = [];
 
     if (log_type) {
-      sql += ' AND l.log_type = ?';
+      sql += ' AND LOWER(l.log_type) = LOWER(?)';
       params.push(log_type);
     }
     if (branch_id) {
@@ -607,7 +693,7 @@ exports.getAllAssetLogs = async (req, res) => {
     const rows = await query.all(sql, params);
     const parsed = rows.map(r => ({
       ...r,
-      photos: r.photos ? JSON.parse(r.photos) : []
+      photos: safeParseJsonArray(r.photos)
     }));
 
     res.json({ success: true, data: parsed });

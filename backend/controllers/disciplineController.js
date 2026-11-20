@@ -25,10 +25,19 @@ exports.getAll = async (req, res) => {
   }
 };
 
+function getTodayLocalDateStr() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 exports.create = async (req, res) => {
   try {
     const { employee_id, type, date, description, issued_by } = req.body;
-    if (!employee_id || !type || !date || !description) {
+    const cleanDesc = String(description || '').trim();
+    if (!employee_id || !type || !date || !cleanDesc) {
       return res.status(400).json({ success: false, message: 'Karyawan, tipe, tanggal, dan keterangan wajib diisi.' });
     }
     if (!VALID_TYPES.includes(type)) {
@@ -41,7 +50,7 @@ exports.create = async (req, res) => {
     const result = await query.run(
       `INSERT INTO discipline_records (employee_id, type, date, description, issued_by, status)
        VALUES (?, ?, ?, ?, ?, 'Aktif')`,
-      [parseInt(employee_id, 10), type, date, description.trim(), (issued_by || '').trim()]
+      [parseInt(employee_id, 10), type, date, cleanDesc, (issued_by || '').trim()]
     );
     const row = await query.get(
       `SELECT d.*, e.name AS employee_name, e.employee_type, b.name AS branch_name
@@ -67,7 +76,7 @@ exports.resolve = async (req, res) => {
     const rec = await query.get('SELECT id, status FROM discipline_records WHERE id = ?', [id]);
     if (!rec) return res.status(404).json({ success: false, message: 'Catatan tidak ditemukan.' });
     if (rec.status === 'Resolved') return res.status(400).json({ success: false, message: 'Catatan sudah diselesaikan.' });
-    const today = new Date().toISOString().slice(0, 10);
+    const today = getTodayLocalDateStr();
     await query.run(
       `UPDATE discipline_records SET status='Resolved', resolution_note=?, resolved_at=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
       [resolution_note.trim(), today, id]

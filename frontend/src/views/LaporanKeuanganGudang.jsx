@@ -30,20 +30,29 @@ export default function LaporanKeuanganGudang() {
   const [period, setPeriod] = useState(currentPeriod());
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
   const [edits, setEdits] = useState({});
   const [saving, setSaving] = useState({});
   const [msgs, setMsgs] = useState({});
 
   const load = useCallback(async () => {
+    if (!period) return;
     setLoading(true);
+    setError('');
     try {
       const res = await financialApi.getWarehouseReport(period);
-      setRows(res.data || []);
-      setEdits({});
-      setMsgs({});
+      if (res.success) {
+        setRows(res.data || []);
+        setEdits({});
+        setMsgs({});
+      } else {
+        setRows([]);
+        setError(res.message || 'Gagal memuat laporan keuangan gudang.');
+      }
     } catch (err) {
       console.error('Failed to load warehouse report:', err);
       setRows([]);
+      setError(err.message || 'Gagal memuat laporan keuangan gudang.');
     } finally {
       setLoading(false);
     }
@@ -57,6 +66,7 @@ export default function LaporanKeuanganGudang() {
   };
 
   const setEdit = (branchId, field, value) => {
+    setMsgs(prev => (prev[branchId] ? { ...prev, [branchId]: '' } : prev));
     setEdits(prev => ({
       ...prev,
       [branchId]: { ...(prev[branchId] || {}), [field]: value },
@@ -64,6 +74,7 @@ export default function LaporanKeuanganGudang() {
   };
 
   const handleSave = async (row) => {
+    if (!period) return;
     const key = String(row.branch_id);
     const payload = {
       penj_gudang: parseNum(getEdit(row.branch_id, 'penj_gudang', row.penj_gudang)),
@@ -83,8 +94,15 @@ export default function LaporanKeuanganGudang() {
     setMsgs(prev => ({ ...prev, [key]: '' }));
     try {
       await financialApi.upsertWarehouse(row.branch_id, period, payload);
+      const fresh = await financialApi.getWarehouseReport(period);
+      if (fresh.success) setRows(fresh.data || []);
+      setEdits(prev => {
+        if (!prev[key]) return prev;
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
       setMsgs(prev => ({ ...prev, [key]: 'ok' }));
-      await load();
     } catch (err) {
       console.error('Failed to save warehouse financial data:', err);
       setMsgs(prev => ({ ...prev, [key]: 'err' }));
@@ -114,11 +132,11 @@ export default function LaporanKeuanganGudang() {
   };
 
   return (
-    <div className="view-container">
-      <div className="view-header">
+    <div>
+      <div className="page-header">
         <div>
-          <h1 className="view-title">Laporan Keuangan Gudang</h1>
-          <p className="view-subtitle">Pendapatan grosir internal, HPP gudang, potongan 17%, dan laba bersih lokasi gudang</p>
+          <h1 className="page-title">Laporan Keuangan Gudang</h1>
+          <p className="page-subtitle">Pendapatan grosir internal, HPP gudang, potongan 17%, dan laba bersih lokasi gudang</p>
         </div>
       </div>
 
@@ -150,6 +168,7 @@ export default function LaporanKeuanganGudang() {
           {periodLabel(period)}
         </span>
         <button
+          type="button"
           onClick={load}
           style={{
             padding: '8px 16px',
@@ -165,6 +184,13 @@ export default function LaporanKeuanganGudang() {
           🔄 Refresh
         </button>
       </div>
+
+      {error && (
+        <div className="card" style={{ marginBottom: '16px', padding: '12px 16px', border: '1px solid rgba(239,68,68,0.35)', background: 'var(--color-danger-bg)', color: 'var(--color-danger)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '13px', fontWeight: 600 }}>⚠ {error}</span>
+          <button type="button" onClick={load} className="btn btn-secondary" style={{ fontSize: '12px', padding: '6px 12px' }}>Coba Lagi</button>
+        </div>
+      )}
 
       {/* Summary KPI Cards */}
       {!loading && rows.length > 0 && (
@@ -194,7 +220,7 @@ export default function LaporanKeuanganGudang() {
         </div>
       )}
 
-      {!loading && rows.length === 0 && (
+      {!loading && !error && rows.length === 0 && (
         <div className="card" style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
           <div style={{ fontSize: '32px', marginBottom: '10px' }}>📦</div>
           <div style={{ fontWeight: 600, fontSize: '15px', color: 'var(--text-primary)', marginBottom: '4px' }}>
@@ -281,6 +307,7 @@ export default function LaporanKeuanganGudang() {
                 )}
 
                 <button
+                  type="button"
                   onClick={() => handleSave(row)}
                   disabled={isSaving}
                   style={{
@@ -303,7 +330,7 @@ export default function LaporanKeuanganGudang() {
             </div>
 
             {/* Grid 3 Columns: Pendapatan, HPP, Biaya */}
-            <div style={{ padding: '20px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }}>
+            <div style={{ padding: '20px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(300px, 100%), 1fr))', gap: '20px' }}>
               
               {/* Kolom 1: PENDAPATAN */}
               <div style={{ background: 'var(--bg-secondary)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>

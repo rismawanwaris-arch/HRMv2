@@ -58,11 +58,21 @@ exports.getTestQuestions = async (req, res) => {
 
 exports.submitTest = async (req, res) => {
   try {
-    const { code, answers } = req.body; 
-    const candidate = await query.get(`SELECT id, name, current_stage FROM candidates WHERE access_code = ? AND status = 'Active'`, [code.trim().toUpperCase()]);
+    const { code, answers } = req.body || {};
+    if (!code || !String(code).trim() || !answers || typeof answers !== 'object' || Array.isArray(answers)) {
+      return res.status(400).json({ success: false, message: 'Kode akses dan objek jawaban wajib disertakan.' });
+    }
+    const candidate = await query.get(
+      `SELECT c.id, c.name, c.current_stage, t2.test_completed_at
+       FROM candidates c
+       LEFT JOIN stage2_written_test t2 ON c.id = t2.candidate_id
+       WHERE c.access_code = ? AND c.status = 'Active'`,
+      [String(code).trim().toUpperCase()]
+    );
     
     if (!candidate) return res.status(404).json({ success: false, message: 'Kandidat tidak aktif atau tidak ditemukan.' });
     if (candidate.current_stage !== 2) return res.status(400).json({ success: false, message: 'Kandidat tidak sedang dalam tahap ujian.' });
+    if (candidate.test_completed_at) return res.status(400).json({ success: false, message: 'Anda sudah menyelesaikan tes tertulis sebelumnya.' });
 
     const dbQuestions = await query.all("SELECT id, subtest, question_text, correct_option, question_type, dimension FROM test_questions WHERE subtest != 'training'");
     let numerikTotal = 0, numerikCorrect = 0, situasionalTotal = 0, situasionalCorrect = 0;
@@ -102,16 +112,29 @@ exports.submitTest = async (req, res) => {
     const totalScore = activeSubtests > 0 ? Math.round(totalCognitiveScoreSum / activeSubtests) : 0;
     const passed = totalScore >= 65 ? 1 : 0;
     
-    await query.run(
-      `UPDATE stage2_written_test SET score_numerik = ?, score_situasional = ?, score_pengetahuan = ?, score_nominal = ?, score_kepribadian = ?, cognitive_details = ?, total_score = ?, passed = ?, test_completed_at = CURRENT_TIMESTAMP WHERE candidate_id = ?`,
+    const upd = await query.run(
+      `UPDATE stage2_written_test SET score_numerik = ?, score_situasional = ?, score_pengetahuan = ?, score_nominal = ?, score_kepribadian = ?, cognitive_details = ?, total_score = ?, passed = ?, test_completed_at = CURRENT_TIMESTAMP WHERE candidate_id = ? AND test_completed_at IS NULL`,
       [scoreNumerik, scoreSituasional, scorePengetahuan, scoreNominal, JSON.stringify(kepribadianResults), JSON.stringify(cognitiveDetails), totalScore, passed, candidate.id]
     );
+    if (upd.changes === 0) {
+      return res.status(400).json({ success: false, message: 'Anda sudah menyelesaikan tes tertulis sebelumnya.' });
+    }
 
-    let nextStage = 2, status = 'Active';
-    if (passed === 1) nextStage = 3; else status = 'Rejected';
+    let nextStage = candidate.current_stage, status = 'Active';
+    if (passed === 1) {
+      const activeStages = await query.all('SELECT id FROM recruitment_stages WHERE is_active = 1 ORDER BY order_num ASC');
+      const idx = activeStages.findIndex((s) => s.id === candidate.current_stage);
+      if (idx !== -1 && idx < activeStages.length - 1) {
+        nextStage = activeStages[idx + 1].id;
+      } else {
+        nextStage = 3;
+      }
+    } else {
+      status = 'Rejected';
+    }
     await query.run('UPDATE candidates SET current_stage = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [nextStage, status, candidate.id]);
 
-    res.json({ success: true, message: 'Ujian berhasil dikirimkan.', results: { scoreNumerik, scoreSituasional, scorePengetahuan, totalScore, passed: passed === 1 } });
+    res.json({ success: true, message: 'Ujian berhasil dikirimkan.', results: { scoreNumerik, scoreSituasional, scorePengetahuan, scoreNominal, totalScore, passed: passed === 1 } });
   } catch (error) {
     console.error('API Error (submit test):', error);
     res.status(500).json({ success: false, message: 'Server error processing test submission' });
@@ -145,13 +168,16 @@ exports.addAdminQuestion = async (req, res) => {
 
 exports.updateAdminQuestion = async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
-    const { subtest, question_text, option_a, option_b, option_c, option_d, correct_option, question_type, dimension, option_p, option_q } = req.body;
+    const id = parseInt(req.params.id, 10);
+    const { subtest, question_text, option_a, option_b, option_c, option_d, correct_option, question_type, dimension, option_p, option_q } = req.body || {};
+    if (!subtest || !question_text || !String(question_text).trim() || !question_type) {
+      return res.status(400).json({ success: false, message: 'Subtest, teks soal, dan tipe soal wajib diisi.' });
+    }
     const existing = await query.get('SELECT id FROM test_questions WHERE id = ?', [id]);
     if (!existing) return res.status(404).json({ success: false, message: 'Soal tidak ditemukan' });
 
     const sql = `UPDATE test_questions SET subtest = ?, question_text = ?, option_a = ?, option_b = ?, option_c = ?, option_d = ?, correct_option = ?, question_type = ?, dimension = ?, option_p = ?, option_q = ? WHERE id = ?`;
-    await query.run(sql, [subtest, question_text, option_a || null, option_b || null, option_c || null, option_d || null, correct_option || null, question_type, dimension || null, option_p || null, option_q || null, id]);
+    await query.run(sql, [subtest, String(question_text).trim(), option_a || null, option_b || null, option_c || null, option_d || null, correct_option || null, question_type, dimension || null, option_p || null, option_q || null, id]);
     res.json({ success: true, message: 'Soal berhasil diperbarui' });
   } catch (error) {
     console.error('API Error (admin update question):', error);
@@ -199,11 +225,14 @@ exports.addTrainingQuestion = async (req, res) => {
 
 exports.updateTrainingQuestion = async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
-    const { statement_text } = req.body;
+    const id = parseInt(req.params.id, 10);
+    const { statement_text } = req.body || {};
+    if (!statement_text || !String(statement_text).trim()) {
+      return res.status(400).json({ success: false, message: 'Teks pernyataan wajib diisi.' });
+    }
     const existing = await query.get('SELECT id FROM training_questions WHERE id = ?', [id]);
     if (!existing) return res.status(404).json({ success: false, message: 'Pernyataan tidak ditemukan' });
-    await query.run('UPDATE training_questions SET statement_text = ? WHERE id = ?', [statement_text, id]);
+    await query.run('UPDATE training_questions SET statement_text = ? WHERE id = ?', [String(statement_text).trim(), id]);
     res.json({ success: true, message: 'Pernyataan berhasil diperbarui' });
   } catch (error) {
     console.error('API Error (update training question):', error);
@@ -244,24 +273,51 @@ exports.validateTrainingTest = async (req, res) => {
 
 exports.submitTrainingTest = async (req, res) => {
   try {
-    const { code, ratings, notes } = req.body;
-    const candidate = await query.get(`SELECT id, name, current_stage FROM candidates WHERE access_code = ? AND status = 'Active'`, [code.trim().toUpperCase()]);
+    const { code, ratings, notes } = req.body || {};
+    if (!code || !String(code).trim() || !ratings || typeof ratings !== 'object' || Array.isArray(ratings)) {
+      return res.status(400).json({ success: false, message: 'Kode akses dan objek penilaian wajib disertakan.' });
+    }
+    const candidate = await query.get(
+      `SELECT c.id, c.name, c.current_stage, t6.test_completed_at
+       FROM candidates c
+       LEFT JOIN stage6_mcu_ref t6 ON c.id = t6.candidate_id
+       WHERE c.access_code = ? AND c.status = 'Active'`,
+      [String(code).trim().toUpperCase()]
+    );
     if (!candidate) return res.status(404).json({ success: false, message: 'Kandidat tidak aktif atau tidak ditemukan.' });
     if (candidate.current_stage !== 6) return res.status(400).json({ success: false, message: 'Kandidat tidak sedang dalam Tahap 6 (Training).' });
+    if (candidate.test_completed_at) return res.status(400).json({ success: false, message: 'Evaluasi training untuk kandidat ini sudah pernah dikirim.' });
 
     const dbStatements = await query.all('SELECT id FROM training_questions');
     if (dbStatements.length === 0) return res.status(400).json({ success: false, message: 'Belum ada indikator pernyataan training di bank soal.' });
 
     let sum = 0;
-    dbStatements.forEach(stmt => { sum += parseInt(ratings[stmt.id]) || 0; });
+    dbStatements.forEach(stmt => { sum += parseInt(ratings[stmt.id], 10) || 0; });
     const averageScore = parseFloat((sum / dbStatements.length).toFixed(2));
     const passed = averageScore >= 6.5 ? 1 : 0;
     const scoreTrainingPercentage = Math.round((averageScore / 10) * 100);
+    const cleanNotes = notes ? String(notes).trim() : '';
 
-    await query.run(`UPDATE stage6_mcu_ref SET score_training = ?, passed = ?, test_completed_at = CURRENT_TIMESTAMP, training_details = ? WHERE candidate_id = ?`, [scoreTrainingPercentage, passed, JSON.stringify(ratings), candidate.id]);
+    const upd = await query.run(
+      `UPDATE stage6_mcu_ref SET score_training = ?, passed = ?, ref_check_notes = ?, test_completed_at = CURRENT_TIMESTAMP, training_details = ? WHERE candidate_id = ? AND test_completed_at IS NULL`,
+      [scoreTrainingPercentage, passed, cleanNotes, JSON.stringify(ratings), candidate.id]
+    );
+    if (upd.changes === 0) {
+      return res.status(400).json({ success: false, message: 'Evaluasi training untuk kandidat ini sudah pernah dikirim.' });
+    }
 
-    let nextStage = 6, status = 'Active';
-    if (passed === 1) nextStage = 7; else status = 'Rejected';
+    let nextStage = candidate.current_stage, status = 'Active';
+    if (passed === 1) {
+      const activeStages = await query.all('SELECT id FROM recruitment_stages WHERE is_active = 1 ORDER BY order_num ASC');
+      const idx = activeStages.findIndex((s) => s.id === candidate.current_stage);
+      if (idx !== -1 && idx < activeStages.length - 1) {
+        nextStage = activeStages[idx + 1].id;
+      } else {
+        nextStage = 7;
+      }
+    } else {
+      status = 'Rejected';
+    }
     await query.run('UPDATE candidates SET current_stage = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [nextStage, status, candidate.id]);
 
     res.json({ success: true, message: 'Evaluasi training berhasil disimpan.', results: { averageScore, passed: passed === 1 } });

@@ -1,37 +1,37 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { candidateApi } from '../services/api';
+
+const EMPTY_FORM = {
+  name: '',
+  nik: '',
+  phone: '',
+  email: '',
+  gender: 'Laki-laki',
+  birth_place: '',
+  birth_date: '',
+  religion: 'Islam',
+  marital_status: 'Belum Kawin',
+  education_level: 'SMA / SMK',
+  education_institution: '',
+  education_major: '',
+  address_ktp: '',
+  address_domicile: '',
+  work_experience: '',
+};
+
+const EMPTY_FILES = {
+  cv: null,
+  ktp: null,
+  foto: null,
+  ijazah: null,
+  surat_lamaran: null,
+  skck: null,
+};
 
 export default function UploadPelamar({ setView, onSelectCandidate }) {
   const [activeTab, setActiveTab] = useState('bulk'); // 'bulk' (default) | 'single'
-
-  // Single Candidate Form Data
-  const [formData, setFormData] = useState({
-    name: '',
-    nik: '',
-    phone: '',
-    email: '',
-    gender: 'Laki-laki',
-    birth_place: '',
-    birth_date: '',
-    religion: 'Islam',
-    marital_status: 'Belum Kawin',
-    education_level: 'SMA / SMK',
-    education_institution: '',
-    education_major: '',
-    address_ktp: '',
-    address_domicile: '',
-    work_experience: '',
-  });
-
-  // Uploaded Files State
-  const [files, setFiles] = useState({
-    cv: null,
-    ktp: null,
-    foto: null,
-    ijazah: null,
-    surat_lamaran: null,
-    skck: null,
-  });
+  const [formData, setFormData] = useState(EMPTY_FORM);
+  const [files, setFiles] = useState(EMPTY_FILES);
 
   const [submitting, setSubmitting] = useState(false);
   const [submitResult, setSubmitResult] = useState(null);
@@ -39,9 +39,11 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
 
   // Bulk Excel Upload State
   const [excelFile, setExcelFile] = useState(null);
+  const [dragActive, setDragActive] = useState(false);
   const [uploadingExcel, setUploadingExcel] = useState(false);
   const [excelResult, setExcelResult] = useState(null);
   const [excelError, setExcelError] = useState(null);
+  const excelInputRef = useRef(null);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -53,14 +55,46 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
     if (file) {
       if (file.size > 10 * 1024 * 1024) {
         alert(`Ukuran file ${file.name} melebihi batas 10 MB.`);
+        e.target.value = '';
         return;
       }
       setFiles((prev) => ({ ...prev, [field]: file }));
     }
+    e.target.value = '';
   };
 
   const handleRemoveFile = (field) => {
     setFiles((prev) => ({ ...prev, [field]: null }));
+  };
+
+  const handleDownloadTemplate = async () => {
+    try {
+      const resp = await candidateApi.downloadTemplate();
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'template_import_pelamar.xlsx';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert(err.message || 'Gagal mengunduh template Excel pelamar.');
+    }
+  };
+
+  const handleDropExcel = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    const dropped = e.dataTransfer?.files?.[0];
+    if (!dropped) return;
+    const ext = dropped.name.split('.').pop()?.toLowerCase();
+    if (!['xlsx', 'xls', 'csv'].includes(ext)) {
+      setExcelError('Format file harus .xlsx, .xls, atau .csv.');
+      return;
+    }
+    setExcelError(null);
+    setExcelFile(dropped);
   };
 
   const handleSubmitSingle = async (e) => {
@@ -82,7 +116,6 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
         }
       });
 
-      // Append uploaded documents
       Object.entries(files).forEach(([field, file]) => {
         if (file) {
           data.append(field, file);
@@ -92,32 +125,8 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
       const res = await candidateApi.uploadWithDocuments(data);
       if (res.success) {
         setSubmitResult(res);
-        // Reset form
-        setFormData({
-          name: '',
-          nik: '',
-          phone: '',
-          email: '',
-          gender: 'Laki-laki',
-          birth_place: '',
-          birth_date: '',
-          religion: 'Islam',
-          marital_status: 'Belum Kawin',
-          education_level: 'SMA / SMK',
-          education_institution: '',
-          education_major: '',
-          address_ktp: '',
-          address_domicile: '',
-          work_experience: '',
-        });
-        setFiles({
-          cv: null,
-          ktp: null,
-          foto: null,
-          ijazah: null,
-          surat_lamaran: null,
-          skck: null,
-        });
+        setFormData(EMPTY_FORM);
+        setFiles(EMPTY_FILES);
       } else {
         setErrorMsg(res.message || 'Gagal mengunggah data pelamar.');
       }
@@ -147,6 +156,7 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
       if (res.success) {
         setExcelResult(res);
         setExcelFile(null);
+        if (excelInputRef.current) excelInputRef.current.value = '';
       } else {
         setExcelError(res.message || 'Gagal memproses file Excel.');
       }
@@ -165,35 +175,41 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
   };
 
+  const fieldInputStyle = {
+    width: '100%',
+    boxSizing: 'border-box',
+    padding: '10px 14px',
+    borderRadius: '8px',
+    border: '1px solid var(--border-color)',
+    background: 'var(--bg-input)',
+    color: 'var(--text-primary)',
+    outline: 'none'
+  };
+
+  const fieldLabelStyle = {
+    display: 'block',
+    fontSize: '12px',
+    fontWeight: 600,
+    color: 'var(--text-secondary)',
+    marginBottom: '6px'
+  };
+
   return (
-    <div className="view-container">
+    <div>
       {/* Page Header */}
-      <div className="view-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px', marginBottom: '20px' }}>
+      <div className="page-header">
         <div>
-          <h1 className="view-title" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <span>📤 Upload Pelamar & Import Google Form</span>
-          </h1>
-          <p className="view-subtitle">
-            Import respon Google Form pelamar via Excel (<code style={{ background: 'rgba(255,255,255,0.06)', padding: '2px 6px', borderRadius: '4px' }}>.xlsx</code> / <code style={{ background: 'rgba(255,255,255,0.06)', padding: '2px 6px', borderRadius: '4px' }}>.csv</code>) atau daftarkan pelamar manual dan simpan berkas ke penyimpanan server.
+          <h1 className="page-title">Upload Pelamar & Import Google Form</h1>
+          <p className="page-subtitle">
+            Import respon Google Form pelamar via Excel (<code style={{ background: 'var(--bg-secondary)', padding: '2px 6px', borderRadius: '4px' }}>.xlsx</code> / <code style={{ background: 'var(--bg-secondary)', padding: '2px 6px', borderRadius: '4px' }}>.csv</code>) atau daftarkan pelamar manual dan simpan berkas ke penyimpanan server.
           </p>
         </div>
 
         <div style={{ display: 'flex', gap: '10px' }}>
           <button
+            type="button"
+            className="btn btn-secondary"
             onClick={() => setView('candidates')}
-            style={{
-              padding: '9px 16px',
-              borderRadius: '8px',
-              border: '1px solid var(--border-color)',
-              background: 'var(--bg-secondary)',
-              color: 'var(--text-primary)',
-              fontWeight: 600,
-              fontSize: '13px',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px'
-            }}
           >
             👥 Lihat Daftar Pelamar ➔
           </button>
@@ -204,6 +220,7 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
       <div style={{
         display: 'flex',
         gap: '6px',
+        flexWrap: 'wrap',
         background: 'var(--bg-secondary)',
         padding: '6px',
         borderRadius: '12px',
@@ -215,6 +232,7 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
           onClick={() => setActiveTab('bulk')}
           style={{
             flex: 1,
+            minWidth: '220px',
             padding: '10px 18px',
             borderRadius: '8px',
             border: 'none',
@@ -233,6 +251,7 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
           onClick={() => setActiveTab('single')}
           style={{
             flex: 1,
+            minWidth: '220px',
             padding: '10px 18px',
             borderRadius: '8px',
             border: 'none',
@@ -250,26 +269,26 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
 
       {/* TAB 1: IMPORT MASSAL EXCEL DARI GOOGLE FORM */}
       {activeTab === 'bulk' && (
-        <div className="card" style={{ padding: '30px' }}>
+        <div className="glass-panel" style={{ padding: '30px' }}>
           <div style={{ maxWidth: '720px', margin: '0 auto', textAlign: 'center' }}>
             <div style={{ fontSize: '48px', marginBottom: '16px' }}>📊</div>
             <h2 style={{ fontSize: '20px', fontWeight: 800, color: 'var(--text-primary)', margin: '0 0 8px' }}>
               Import Respon Google Form ke Database Pelamar
             </h2>
             <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '24px', lineHeight: 1.6 }}>
-              Bagikan link Google Form ke calon karyawan. Setelah terisi, unduh spreadsheet respon dari Google Sheets/Excel lalu upload file (<code style={{ background: 'rgba(255,255,255,0.06)', padding: '2px 6px', borderRadius: '4px' }}>.xlsx</code> / <code style={{ background: 'rgba(255,255,255,0.06)', padding: '2px 6px', borderRadius: '4px' }}>.csv</code>) di sini. Sistem akan otomatis memasukkan semua pelamar dan men-generate kode unik akses ujian online.
+              Bagikan link Google Form ke calon karyawan. Setelah terisi, unduh spreadsheet respon dari Google Sheets/Excel lalu upload file (<code style={{ background: 'var(--bg-secondary)', padding: '2px 6px', borderRadius: '4px' }}>.xlsx</code> / <code style={{ background: 'var(--bg-secondary)', padding: '2px 6px', borderRadius: '4px' }}>.csv</code>) di sini. Sistem akan otomatis memasukkan semua pelamar dan men-generate kode unik akses ujian online.
             </p>
 
             {/* Workflow Info Box */}
             <div style={{
-              background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.08), rgba(16, 185, 129, 0.08))',
+              background: 'var(--color-info-bg)',
               border: '1px solid rgba(59, 130, 246, 0.25)',
               borderRadius: '12px',
               padding: '16px 20px',
               marginBottom: '24px',
               textAlign: 'left'
             }}>
-              <div style={{ fontWeight: 700, fontSize: '13px', color: '#3b82f6', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <div style={{ fontWeight: 700, fontSize: '13px', color: 'var(--color-info)', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                 <span>💡</span> Alur Kerja Rekrutmen Google Form:
               </div>
               <ol style={{ margin: 0, paddingLeft: '20px', fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.7 }}>
@@ -290,6 +309,8 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: '12px',
               textAlign: 'left'
             }}>
               <div>
@@ -300,35 +321,36 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
                   Unduh template contoh untuk panduan membuat pertanyaan di Google Form atau import langsung.
                 </div>
               </div>
-              <a
-                href={candidateApi.getTemplateExcelUrl()}
-                download
+              <button
+                type="button"
+                onClick={handleDownloadTemplate}
                 style={{
                   padding: '8px 14px',
                   borderRadius: '8px',
-                  background: 'rgba(59, 130, 246, 0.15)',
-                  color: '#3b82f6',
+                  background: 'var(--color-info-bg)',
+                  border: '1px solid rgba(59, 130, 246, 0.25)',
+                  color: 'var(--color-info)',
                   fontWeight: 700,
                   fontSize: '12px',
-                  textDecoration: 'none',
+                  cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '6px'
                 }}
               >
                 📥 Unduh Template (.xlsx)
-              </a>
+              </button>
             </div>
 
             {/* Error Message */}
             {excelError && (
               <div style={{
-                background: 'rgba(239, 68, 68, 0.15)',
+                background: 'var(--color-danger-bg)',
                 border: '1px solid rgba(239, 68, 68, 0.4)',
                 borderRadius: '10px',
                 padding: '12px 18px',
                 marginBottom: '20px',
-                color: '#ef4444',
+                color: 'var(--color-danger)',
                 fontSize: '13px',
                 textAlign: 'left'
               }}>
@@ -339,14 +361,14 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
             {/* Success Result */}
             {excelResult && (
               <div style={{
-                background: 'rgba(16, 185, 129, 0.12)',
+                background: 'var(--color-success-bg)',
                 border: '1px solid rgba(16, 185, 129, 0.4)',
                 borderRadius: '12px',
                 padding: '20px',
                 marginBottom: '24px',
                 textAlign: 'left'
               }}>
-                <div style={{ fontWeight: 800, fontSize: '15px', color: '#10b981', marginBottom: '8px' }}>
+                <div style={{ fontWeight: 800, fontSize: '15px', color: 'var(--color-success)', marginBottom: '8px' }}>
                   🎉 {excelResult.message}
                 </div>
                 {excelResult.stats && (
@@ -355,7 +377,7 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
                   </div>
                 )}
                 {excelResult.stats?.errors?.length > 0 && (
-                  <div style={{ marginBottom: '12px', padding: '10px', background: 'rgba(239, 68, 68, 0.1)', borderRadius: '8px', fontSize: '11px', color: '#ef4444' }}>
+                  <div style={{ marginBottom: '12px', padding: '10px', background: 'var(--color-danger-bg)', borderRadius: '8px', fontSize: '11px', color: 'var(--color-danger)' }}>
                     <strong>Catatan Baris Dilewati:</strong>
                     <ul style={{ margin: '4px 0 0 0', paddingLeft: '16px' }}>
                       {excelResult.stats.errors.slice(0, 5).map((err, idx) => (
@@ -365,12 +387,12 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
                   </div>
                 )}
                 {excelResult.candidates && excelResult.candidates.length > 0 && (
-                  <div style={{ maxHeight: '180px', overflowY: 'auto', background: 'rgba(0,0,0,0.3)', padding: '10px', borderRadius: '8px' }}>
+                  <div style={{ maxHeight: '180px', overflowY: 'auto', background: 'var(--bg-surface)', padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
                     <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '6px' }}>KANDIDAT BARU DITAMBAHKAN:</div>
                     {excelResult.candidates.map(c => (
-                      <div key={c.id} style={{ fontSize: '12px', color: 'var(--text-primary)', display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                      <div key={c.id} style={{ fontSize: '12px', color: 'var(--text-primary)', display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px solid var(--border-color)' }}>
                         <span>{c.name}</span>
-                        <code style={{ color: '#f59e0b', fontWeight: 700 }}>{c.access_code}</code>
+                        <code style={{ color: 'var(--color-warning)', fontWeight: 700 }}>{c.access_code}</code>
                       </div>
                     ))}
                   </div>
@@ -380,26 +402,37 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
 
             {/* Dropzone & Upload Button */}
             <form onSubmit={handleUploadExcel}>
-              <div style={{
-                border: '2px dashed var(--border-color)',
-                borderRadius: '14px',
-                padding: '30px 20px',
-                marginBottom: '20px',
-                background: 'var(--bg-secondary)',
-                cursor: 'pointer'
-              }}>
+              <div
+                onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragActive(true); }}
+                onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setDragActive(true); }}
+                onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setDragActive(false); }}
+                onDrop={handleDropExcel}
+                style={{
+                  border: `2px dashed ${dragActive ? 'var(--primary)' : 'var(--border-color)'}`,
+                  borderRadius: '14px',
+                  padding: '30px 20px',
+                  marginBottom: '20px',
+                  background: dragActive ? 'var(--bg-hover)' : 'var(--bg-secondary)',
+                  cursor: 'pointer',
+                  transition: 'border-color 0.2s, background 0.2s'
+                }}
+              >
                 <input
+                  ref={excelInputRef}
                   type="file"
                   id="excel_input"
                   accept=".xlsx,.xls,.csv"
-                  onChange={(e) => setExcelFile(e.target.files ? e.target.files[0] : null)}
+                  onChange={(e) => {
+                    setExcelFile(e.target.files ? e.target.files[0] : null);
+                    e.target.value = '';
+                  }}
                   style={{ display: 'none' }}
                 />
                 <label htmlFor="excel_input" style={{ cursor: 'pointer', display: 'block' }}>
                   <div style={{ fontSize: '36px', marginBottom: '8px' }}>📁</div>
                   {excelFile ? (
                     <div>
-                      <div style={{ fontSize: '14px', fontWeight: 700, color: '#10b981' }}>{excelFile.name}</div>
+                      <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--color-success)' }}>{excelFile.name}</div>
                       <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>{formatBytes(excelFile.size)} • Klik untuk ganti file</div>
                     </div>
                   ) : (
@@ -414,17 +447,14 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
               <button
                 type="submit"
                 disabled={!excelFile || uploadingExcel}
+                className="btn btn-primary"
                 style={{
                   width: '100%',
                   padding: '12px 20px',
-                  borderRadius: '10px',
-                  border: 'none',
-                  background: 'var(--primary)',
-                  color: '#fff',
-                  fontWeight: 700,
+                  justifyContent: 'center',
                   fontSize: '14px',
-                  cursor: !excelFile || uploadingExcel ? 'not-allowed' : 'pointer',
-                  boxShadow: '0 4px 14px rgba(59, 130, 246, 0.4)'
+                  opacity: !excelFile || uploadingExcel ? 0.6 : 1,
+                  cursor: !excelFile || uploadingExcel ? 'not-allowed' : 'pointer'
                 }}
               >
                 {uploadingExcel ? '⏳ Sedang Mengimpor Data...' : '📤 Mulai Import Data Pelamar'}
@@ -440,7 +470,7 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
           {/* Success Banner */}
           {submitResult && (
             <div style={{
-              background: 'linear-gradient(90deg, rgba(16, 185, 129, 0.15), rgba(16, 185, 129, 0.05))',
+              background: 'var(--color-success-bg)',
               border: '1px solid rgba(16, 185, 129, 0.4)',
               borderRadius: '12px',
               padding: '18px 24px',
@@ -448,11 +478,11 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
             }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
                 <div>
-                  <div style={{ fontSize: '16px', fontWeight: 800, color: '#10b981', marginBottom: '4px' }}>
+                  <div style={{ fontSize: '16px', fontWeight: 800, color: 'var(--color-success)', marginBottom: '4px' }}>
                     ✅ {submitResult.message}
                   </div>
                   <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-                    Pelamar ID: <strong>#{submitResult.candidateId}</strong> • Kode Akses Ujian Online: <code style={{ fontSize: '14px', fontWeight: 700, background: 'rgba(0,0,0,0.3)', padding: '2px 8px', borderRadius: '4px', color: '#f59e0b' }}>{submitResult.accessCode}</code>
+                    Pelamar ID: <strong>#{submitResult.candidateId}</strong> • Kode Akses Ujian Online: <code style={{ fontSize: '14px', fontWeight: 700, background: 'var(--bg-surface)', padding: '2px 8px', borderRadius: '4px', color: 'var(--color-warning)', border: '1px solid var(--border-color)' }}>{submitResult.accessCode}</code>
                   </div>
                   {submitResult.uploadedDocuments && submitResult.uploadedDocuments.length > 0 && (
                     <div style={{ marginTop: '10px', fontSize: '12px', color: 'var(--text-muted)' }}>
@@ -462,6 +492,7 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
                 </div>
                 <div style={{ display: 'flex', gap: '10px' }}>
                   <button
+                    type="button"
                     onClick={() => {
                       if (onSelectCandidate) {
                         onSelectCandidate(submitResult.candidateId);
@@ -472,8 +503,8 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
                     }}
                     style={{
                       padding: '8px 16px',
-                      background: '#10b981',
-                      color: '#000',
+                      background: 'var(--color-success)',
+                      color: 'white',
                       fontWeight: 700,
                       borderRadius: '8px',
                       border: 'none',
@@ -484,6 +515,7 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
                     Buka Profil Pelamar ➔
                   </button>
                   <button
+                    type="button"
                     onClick={() => setSubmitResult(null)}
                     style={{
                       padding: '8px 14px',
@@ -504,12 +536,12 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
 
           {errorMsg && (
             <div style={{
-              background: 'rgba(239, 68, 68, 0.15)',
+              background: 'var(--color-danger-bg)',
               border: '1px solid rgba(239, 68, 68, 0.4)',
               borderRadius: '10px',
               padding: '12px 18px',
               marginBottom: '20px',
-              color: '#ef4444',
+              color: 'var(--color-danger)',
               fontSize: '13px',
               fontWeight: 600
             }}>
@@ -519,16 +551,16 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
 
           {/* FORMULIR LENGKAP PELAMAR */}
           <form onSubmit={handleSubmitSingle}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '24px', marginBottom: '24px' }}>
-              
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(320px, 100%), 1fr))', gap: '24px', marginBottom: '24px' }}>
+
               {/* KOLOM KIRI: BIODATA & PENDIDIKAN */}
-              <div className="card" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div className="glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <span>👤</span> 1. Biodata & Informasi Pribadi
                 </h3>
 
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
+                  <label style={fieldLabelStyle}>
                     Nama Lengkap Pelamar *
                   </label>
                   <input
@@ -538,13 +570,13 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
                     onChange={handleInputChange}
                     placeholder="Contoh: Ahmad Rizki Pratama"
                     required
-                    style={{ width: '100%', boxSizing: 'border-box', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-primary)', outline: 'none' }}
+                    style={fieldInputStyle}
                   />
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <div className="responsive-grid-2" style={{ gap: '12px' }}>
                   <div>
-                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
+                    <label style={fieldLabelStyle}>
                       Nomor Induk Kependudukan (NIK)
                     </label>
                     <input
@@ -554,18 +586,18 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
                       onChange={handleInputChange}
                       placeholder="16 digit NIK"
                       maxLength={20}
-                      style={{ width: '100%', boxSizing: 'border-box', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-primary)', outline: 'none' }}
+                      style={fieldInputStyle}
                     />
                   </div>
                   <div>
-                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
+                    <label style={fieldLabelStyle}>
                       Jenis Kelamin
                     </label>
                     <select
                       name="gender"
                       value={formData.gender}
                       onChange={handleInputChange}
-                      style={{ width: '100%', boxSizing: 'border-box', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-primary)', outline: 'none' }}
+                      style={fieldInputStyle}
                     >
                       <option value="Laki-laki">Laki-laki</option>
                       <option value="Perempuan">Perempuan</option>
@@ -573,9 +605,9 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
                   </div>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <div className="responsive-grid-2" style={{ gap: '12px' }}>
                   <div>
-                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
+                    <label style={fieldLabelStyle}>
                       No. WhatsApp / HP *
                     </label>
                     <input
@@ -584,11 +616,11 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
                       value={formData.phone}
                       onChange={handleInputChange}
                       placeholder="081234567890"
-                      style={{ width: '100%', boxSizing: 'border-box', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-primary)', outline: 'none' }}
+                      style={fieldInputStyle}
                     />
                   </div>
                   <div>
-                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
+                    <label style={fieldLabelStyle}>
                       Alamat Email
                     </label>
                     <input
@@ -597,14 +629,14 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
                       value={formData.email}
                       onChange={handleInputChange}
                       placeholder="pelamar@email.com"
-                      style={{ width: '100%', boxSizing: 'border-box', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-primary)', outline: 'none' }}
+                      style={fieldInputStyle}
                     />
                   </div>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <div className="responsive-grid-2" style={{ gap: '12px' }}>
                   <div>
-                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
+                    <label style={fieldLabelStyle}>
                       Tempat Lahir
                     </label>
                     <input
@@ -613,11 +645,11 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
                       value={formData.birth_place}
                       onChange={handleInputChange}
                       placeholder="Bandung"
-                      style={{ width: '100%', boxSizing: 'border-box', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-primary)', outline: 'none' }}
+                      style={fieldInputStyle}
                     />
                   </div>
                   <div>
-                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
+                    <label style={fieldLabelStyle}>
                       Tanggal Lahir
                     </label>
                     <input
@@ -625,21 +657,51 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
                       name="birth_date"
                       value={formData.birth_date}
                       onChange={handleInputChange}
-                      style={{ width: '100%', boxSizing: 'border-box', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-primary)', outline: 'none' }}
+                      style={fieldInputStyle}
                     />
                   </div>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <div className="responsive-grid-2" style={{ gap: '12px' }}>
                   <div>
-                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
+                    <label style={fieldLabelStyle}>Agama</label>
+                    <select
+                      name="religion"
+                      value={formData.religion}
+                      onChange={handleInputChange}
+                      style={fieldInputStyle}
+                    >
+                      {['Islam', 'Kristen', 'Katolik', 'Hindu', 'Buddha', 'Konghucu'].map(r => (
+                        <option key={r} value={r}>{r}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={fieldLabelStyle}>Status Perkawinan</label>
+                    <select
+                      name="marital_status"
+                      value={formData.marital_status}
+                      onChange={handleInputChange}
+                      style={fieldInputStyle}
+                    >
+                      <option value="Belum Kawin">Belum Kawin</option>
+                      <option value="Kawin">Kawin</option>
+                      <option value="Cerai Hidup">Cerai Hidup</option>
+                      <option value="Cerai Mati">Cerai Mati</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="responsive-grid-2" style={{ gap: '12px' }}>
+                  <div>
+                    <label style={fieldLabelStyle}>
                       Pendidikan Terakhir
                     </label>
                     <select
                       name="education_level"
                       value={formData.education_level}
                       onChange={handleInputChange}
-                      style={{ width: '100%', boxSizing: 'border-box', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-primary)', outline: 'none' }}
+                      style={fieldInputStyle}
                     >
                       <option value="SMA / SMK">SMA / SMK</option>
                       <option value="D3">D3</option>
@@ -649,7 +711,7 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
                     </select>
                   </div>
                   <div>
-                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
+                    <label style={fieldLabelStyle}>
                       Asal Sekolah / Kampus
                     </label>
                     <input
@@ -658,13 +720,13 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
                       value={formData.education_institution}
                       onChange={handleInputChange}
                       placeholder="SMK Negeri 1"
-                      style={{ width: '100%', boxSizing: 'border-box', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-primary)', outline: 'none' }}
+                      style={fieldInputStyle}
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
+                  <label style={fieldLabelStyle}>
                     Jurusan Pendidikan
                   </label>
                   <input
@@ -673,12 +735,26 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
                     value={formData.education_major}
                     onChange={handleInputChange}
                     placeholder="Contoh: Akuntansi / TKJ / Manajemen"
-                    style={{ width: '100%', boxSizing: 'border-box', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-primary)', outline: 'none' }}
+                    style={fieldInputStyle}
                   />
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
+                  <label style={fieldLabelStyle}>
+                    Alamat KTP
+                  </label>
+                  <textarea
+                    name="address_ktp"
+                    rows={2}
+                    value={formData.address_ktp}
+                    onChange={handleInputChange}
+                    placeholder="Alamat sesuai KTP pelamar..."
+                    style={{ ...fieldInputStyle, resize: 'vertical' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={fieldLabelStyle}>
                     Alamat Domisili Sekarang
                   </label>
                   <textarea
@@ -687,12 +763,12 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
                     value={formData.address_domicile}
                     onChange={handleInputChange}
                     placeholder="Alamat tempat tinggal pelamar..."
-                    style={{ width: '100%', boxSizing: 'border-box', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-primary)', outline: 'none', resize: 'vertical' }}
+                    style={{ ...fieldInputStyle, resize: 'vertical' }}
                   />
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
+                  <label style={fieldLabelStyle}>
                     Ringkasan Pengalaman Kerja
                   </label>
                   <textarea
@@ -701,18 +777,18 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
                     value={formData.work_experience}
                     onChange={handleInputChange}
                     placeholder="Contoh: Kasir di Indomaret (1 tahun), Sales Counter (6 bulan)"
-                    style={{ width: '100%', boxSizing: 'border-box', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-primary)', outline: 'none', resize: 'vertical' }}
+                    style={{ ...fieldInputStyle, resize: 'vertical' }}
                   />
                 </div>
               </div>
 
-              {/* KOLOM KANAN: BERKAS FISIK DOKUMEN ZIMAOS */}
-              <div className="card" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              {/* KOLOM KANAN: BERKAS FISIK DOKUMEN SERVER */}
+              <div className="glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <span>📂</span> 2. Berkas Dokumen Fisik (Penyimpanan Server)
                 </h3>
                 <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-muted)' }}>
-                  File yang terlampir akan disimpan permanen ke server.
+                  File yang terlampir akan disimpan permanen ke server (maks 10 MB per berkas).
                 </p>
 
                 {/* 1. CV / Resume */}
@@ -720,24 +796,24 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
                   padding: '14px',
                   borderRadius: '10px',
                   background: 'var(--bg-secondary)',
-                  border: files.cv ? '1px solid #10b981' : '1px dashed var(--border-color)'
+                  border: files.cv ? '1px solid var(--color-success)' : '1px dashed var(--border-color)'
                 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                     <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
                       📄 1. CV / Curriculum Vitae
                     </span>
                     {files.cv && (
-                      <span style={{ fontSize: '11px', color: '#10b981', fontWeight: 600 }}>
+                      <span style={{ fontSize: '11px', color: 'var(--color-success)', fontWeight: 600 }}>
                         {formatBytes(files.cv.size)}
                       </span>
                     )}
                   </div>
                   {files.cv ? (
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(16,185,129,0.1)', padding: '8px 12px', borderRadius: '6px' }}>
-                      <span style={{ fontSize: '12px', color: '#10b981', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '240px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--color-success-bg)', padding: '8px 12px', borderRadius: '6px' }}>
+                      <span style={{ fontSize: '12px', color: 'var(--color-success)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '240px' }}>
                         {files.cv.name}
                       </span>
-                      <button type="button" onClick={() => handleRemoveFile('cv')} style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '14px', fontWeight: 'bold' }}>×</button>
+                      <button type="button" onClick={() => handleRemoveFile('cv')} style={{ background: 'transparent', border: 'none', color: 'var(--color-danger)', cursor: 'pointer', fontSize: '14px', fontWeight: 'bold' }}>×</button>
                     </div>
                   ) : (
                     <input
@@ -754,24 +830,24 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
                   padding: '14px',
                   borderRadius: '10px',
                   background: 'var(--bg-secondary)',
-                  border: files.ktp ? '1px solid #10b981' : '1px dashed var(--border-color)'
+                  border: files.ktp ? '1px solid var(--color-success)' : '1px dashed var(--border-color)'
                 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                     <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
                       🪪 2. Foto / Scan KTP
                     </span>
                     {files.ktp && (
-                      <span style={{ fontSize: '11px', color: '#10b981', fontWeight: 600 }}>
+                      <span style={{ fontSize: '11px', color: 'var(--color-success)', fontWeight: 600 }}>
                         {formatBytes(files.ktp.size)}
                       </span>
                     )}
                   </div>
                   {files.ktp ? (
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(16,185,129,0.1)', padding: '8px 12px', borderRadius: '6px' }}>
-                      <span style={{ fontSize: '12px', color: '#10b981', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '240px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--color-success-bg)', padding: '8px 12px', borderRadius: '6px' }}>
+                      <span style={{ fontSize: '12px', color: 'var(--color-success)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '240px' }}>
                         {files.ktp.name}
                       </span>
-                      <button type="button" onClick={() => handleRemoveFile('ktp')} style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '14px', fontWeight: 'bold' }}>×</button>
+                      <button type="button" onClick={() => handleRemoveFile('ktp')} style={{ background: 'transparent', border: 'none', color: 'var(--color-danger)', cursor: 'pointer', fontSize: '14px', fontWeight: 'bold' }}>×</button>
                     </div>
                   ) : (
                     <input
@@ -788,24 +864,24 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
                   padding: '14px',
                   borderRadius: '10px',
                   background: 'var(--bg-secondary)',
-                  border: files.foto ? '1px solid #10b981' : '1px dashed var(--border-color)'
+                  border: files.foto ? '1px solid var(--color-success)' : '1px dashed var(--border-color)'
                 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                     <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
                       🖼️ 3. Pas Foto Pelamar
                     </span>
                     {files.foto && (
-                      <span style={{ fontSize: '11px', color: '#10b981', fontWeight: 600 }}>
+                      <span style={{ fontSize: '11px', color: 'var(--color-success)', fontWeight: 600 }}>
                         {formatBytes(files.foto.size)}
                       </span>
                     )}
                   </div>
                   {files.foto ? (
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(16,185,129,0.1)', padding: '8px 12px', borderRadius: '6px' }}>
-                      <span style={{ fontSize: '12px', color: '#10b981', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '240px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--color-success-bg)', padding: '8px 12px', borderRadius: '6px' }}>
+                      <span style={{ fontSize: '12px', color: 'var(--color-success)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '240px' }}>
                         {files.foto.name}
                       </span>
-                      <button type="button" onClick={() => handleRemoveFile('foto')} style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '14px', fontWeight: 'bold' }}>×</button>
+                      <button type="button" onClick={() => handleRemoveFile('foto')} style={{ background: 'transparent', border: 'none', color: 'var(--color-danger)', cursor: 'pointer', fontSize: '14px', fontWeight: 'bold' }}>×</button>
                     </div>
                   ) : (
                     <input
@@ -822,24 +898,24 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
                   padding: '14px',
                   borderRadius: '10px',
                   background: 'var(--bg-secondary)',
-                  border: files.ijazah ? '1px solid #10b981' : '1px dashed var(--border-color)'
+                  border: files.ijazah ? '1px solid var(--color-success)' : '1px dashed var(--border-color)'
                 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                     <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
                       🎓 4. Scan Ijazah / Transkrip Nilai
                     </span>
                     {files.ijazah && (
-                      <span style={{ fontSize: '11px', color: '#10b981', fontWeight: 600 }}>
+                      <span style={{ fontSize: '11px', color: 'var(--color-success)', fontWeight: 600 }}>
                         {formatBytes(files.ijazah.size)}
                       </span>
                     )}
                   </div>
                   {files.ijazah ? (
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(16,185,129,0.1)', padding: '8px 12px', borderRadius: '6px' }}>
-                      <span style={{ fontSize: '12px', color: '#10b981', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '240px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--color-success-bg)', padding: '8px 12px', borderRadius: '6px' }}>
+                      <span style={{ fontSize: '12px', color: 'var(--color-success)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '240px' }}>
                         {files.ijazah.name}
                       </span>
-                      <button type="button" onClick={() => handleRemoveFile('ijazah')} style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '14px', fontWeight: 'bold' }}>×</button>
+                      <button type="button" onClick={() => handleRemoveFile('ijazah')} style={{ background: 'transparent', border: 'none', color: 'var(--color-danger)', cursor: 'pointer', fontSize: '14px', fontWeight: 'bold' }}>×</button>
                     </div>
                   ) : (
                     <input
@@ -856,41 +932,47 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
                   padding: '14px',
                   borderRadius: '10px',
                   background: 'var(--bg-secondary)',
-                  border: files.surat_lamaran || files.skck ? '1px solid #10b981' : '1px dashed var(--border-color)'
+                  border: files.surat_lamaran || files.skck ? '1px solid var(--color-success)' : '1px dashed var(--border-color)'
                 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
                     <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                      📑 5. Surat Lamaran / SKCK (Opsional)
+                      📑 5. Surat Lamaran & SKCK (Opsional)
                     </span>
                   </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    {files.surat_lamaran ? (
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(16,185,129,0.1)', padding: '6px 12px', borderRadius: '6px' }}>
-                        <span style={{ fontSize: '11px', color: '#10b981' }}>Surat Lamaran: {files.surat_lamaran.name}</span>
-                        <button type="button" onClick={() => handleRemoveFile('surat_lamaran')} style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', fontWeight: 'bold' }}>×</button>
-                      </div>
-                    ) : (
-                      <input
-                        type="file"
-                        accept=".pdf,.doc,.docx"
-                        onChange={(e) => handleFileChange('surat_lamaran', e)}
-                        style={{ fontSize: '11px', color: 'var(--text-secondary)' }}
-                      />
-                    )}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    <div>
+                      <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '4px' }}>File Surat Lamaran (.pdf/.doc/.docx/.jpg)</div>
+                      {files.surat_lamaran ? (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--color-success-bg)', padding: '6px 12px', borderRadius: '6px' }}>
+                          <span style={{ fontSize: '11px', color: 'var(--color-success)' }}>Surat Lamaran: {files.surat_lamaran.name}</span>
+                          <button type="button" onClick={() => handleRemoveFile('surat_lamaran')} style={{ background: 'transparent', border: 'none', color: 'var(--color-danger)', cursor: 'pointer', fontWeight: 'bold' }}>×</button>
+                        </div>
+                      ) : (
+                        <input
+                          type="file"
+                          accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+                          onChange={(e) => handleFileChange('surat_lamaran', e)}
+                          style={{ fontSize: '11px', color: 'var(--text-secondary)' }}
+                        />
+                      )}
+                    </div>
 
-                    {files.skck ? (
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(16,185,129,0.1)', padding: '6px 12px', borderRadius: '6px' }}>
-                        <span style={{ fontSize: '11px', color: '#10b981' }}>SKCK: {files.skck.name}</span>
-                        <button type="button" onClick={() => handleRemoveFile('skck')} style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', fontWeight: 'bold' }}>×</button>
-                      </div>
-                    ) : (
-                      <input
-                        type="file"
-                        accept=".pdf,.jpg,.jpeg,.png"
-                        onChange={(e) => handleFileChange('skck', e)}
-                        style={{ fontSize: '11px', color: 'var(--text-secondary)' }}
-                      />
-                    )}
+                    <div>
+                      <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '4px' }}>File SKCK (.pdf/.jpg/.jpeg/.png)</div>
+                      {files.skck ? (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--color-success-bg)', padding: '6px 12px', borderRadius: '6px' }}>
+                          <span style={{ fontSize: '11px', color: 'var(--color-success)' }}>SKCK: {files.skck.name}</span>
+                          <button type="button" onClick={() => handleRemoveFile('skck')} style={{ background: 'transparent', border: 'none', color: 'var(--color-danger)', cursor: 'pointer', fontWeight: 'bold' }}>×</button>
+                        </div>
+                      ) : (
+                        <input
+                          type="file"
+                          accept=".pdf,.jpg,.jpeg,.png"
+                          onChange={(e) => handleFileChange('skck', e)}
+                          style={{ fontSize: '11px', color: 'var(--text-secondary)' }}
+                        />
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -898,21 +980,14 @@ export default function UploadPelamar({ setView, onSelectCandidate }) {
                 <button
                   type="submit"
                   disabled={submitting}
+                  className="btn btn-primary"
                   style={{
                     marginTop: '8px',
                     padding: '14px 20px',
-                    borderRadius: '10px',
-                    border: 'none',
-                    background: 'var(--primary)',
-                    color: '#fff',
-                    fontWeight: 700,
-                    fontSize: '14px',
-                    cursor: submitting ? 'not-allowed' : 'pointer',
-                    boxShadow: '0 4px 14px rgba(59, 130, 246, 0.4)',
-                    display: 'flex',
-                    alignItems: 'center',
                     justifyContent: 'center',
-                    gap: '8px'
+                    fontSize: '14px',
+                    opacity: submitting ? 0.65 : 1,
+                    cursor: submitting ? 'not-allowed' : 'pointer',
                   }}
                 >
                   {submitting ? '💾 Sedang Menyimpan Data...' : '🚀 Simpan Pelamar & Berkas'}

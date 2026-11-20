@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { staffApi, branchApi } from '../services/api';
 
@@ -26,25 +26,35 @@ const TERMINATED_REASONS = [
 
 const STATUS_BADGE = {
   Resign: {
-    bg: 'rgba(245, 158, 11, 0.15)',
+    bg: 'var(--color-warning-bg)',
     border: 'rgba(245, 158, 11, 0.35)',
-    color: '#f59e0b',
+    color: 'var(--color-warning)',
     label: '● Resign (Mengundurkan Diri)',
     shortLabel: '● Resign',
   },
   Terminated: {
-    bg: 'rgba(239, 68, 68, 0.15)',
+    bg: 'var(--color-danger-bg)',
     border: 'rgba(239, 68, 68, 0.35)',
-    color: '#ef4444',
+    color: 'var(--color-danger)',
     label: '● Dikeluarkan (Terminated)',
     shortLabel: '● Dikeluarkan',
   },
 };
 
 const TYPE_BADGE = {
-  Frontliner: { bg: 'rgba(59,130,246,0.15)', color: '#3b82f6' },
-  Staff: { bg: 'rgba(139,92,246,0.15)', color: '#8b5cf6' },
+  Frontliner: { bg: 'var(--color-info-bg)', color: 'var(--color-info)' },
+  Staff: { bg: 'rgba(139,92,246,0.15)', color: 'var(--color-primary)' },
 };
+
+const getTodayLocalDateStr = () => {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
+const getThisMonthLocalStr = () => getTodayLocalDateStr().slice(0, 7);
 
 const inputStyle = {
   background: 'var(--bg-input)',
@@ -106,13 +116,16 @@ export default function ResignedEmployees() {
   const [employees, setEmployees] = useState([]);
   const [activeEmployees, setActiveEmployees] = useState([]);
   const [branches, setBranches] = useState([]);
+  const [summaryStats, setSummaryStats] = useState({ totalOut: 0, resignCount: 0, terminatedCount: 0, thisMonthCount: 0 });
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [filters, setFilters] = useState({
     search: '',
     branch_id: '',
     employee_type: '',
     status: 'nonactive', // 'nonactive' | 'Resign' | 'Terminated'
   });
+  const [debouncedSearch, setDebouncedSearch] = useState('');
 
   // Modal Tambah / Catat dari Karyawan Aktif
   const [showRecordModal, setShowRecordModal] = useState(false);
@@ -120,7 +133,7 @@ export default function ResignedEmployees() {
   const [recordForm, setRecordForm] = useState({
     employeeId: '',
     status: 'Resign',
-    resign_date: new Date().toISOString().slice(0, 10),
+    resign_date: getTodayLocalDateStr(),
     resign_reason: RESIGN_REASONS[0],
     resign_notes: '',
   });
@@ -135,44 +148,99 @@ export default function ResignedEmployees() {
     resign_notes: '',
   });
 
+  const fetchReqIdRef = useRef(0);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(filters.search), 250);
+    return () => clearTimeout(t);
+  }, [filters.search]);
+
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.key !== 'Escape') return;
+      if (editingEmp) setEditingEmp(null);
+      else if (showRecordModal) setShowRecordModal(false);
+    };
+    if (showRecordModal || editingEmp) {
+      window.addEventListener('keydown', onKeyDown);
+      return () => window.removeEventListener('keydown', onKeyDown);
+    }
+    return undefined;
+  }, [showRecordModal, editingEmp]);
+
+  const computeSummary = (list) => {
+    const monthPrefix = getThisMonthLocalStr();
+    return {
+      totalOut: list.length,
+      resignCount: list.filter(e => e.status === 'Resign').length,
+      terminatedCount: list.filter(e => e.status === 'Terminated').length,
+      thisMonthCount: list.filter(e => (e.resign_date || '').startsWith(monthPrefix)).length,
+    };
+  };
+
+  const refreshSummaryStats = useCallback(async () => {
+    try {
+      const res = await staffApi.getAll({ status: 'nonactive' });
+      if (res.success && Array.isArray(res.data)) {
+        setSummaryStats(computeSummary(res.data));
+      }
+    } catch { /* silent */ }
+  }, []);
+
   const fetchResigned = useCallback(async () => {
+    const reqId = ++fetchReqIdRef.current;
     setLoading(true);
+    setError('');
     try {
       const params = { status: filters.status || 'nonactive' };
-      if (filters.search) params.search = filters.search;
+      if (debouncedSearch) params.search = debouncedSearch;
       if (filters.branch_id) params.branch_id = filters.branch_id;
       if (filters.employee_type) params.employee_type = filters.employee_type;
 
       const res = await staffApi.getAll(params);
-      if (res.success) setEmployees(res.data);
-    } catch {
-      /* silent */
+      if (reqId !== fetchReqIdRef.current) return;
+      if (res.success) {
+        const list = res.data || [];
+        setEmployees(list);
+        if (!debouncedSearch && !filters.branch_id && !filters.employee_type && (filters.status || 'nonactive') === 'nonactive') {
+          setSummaryStats(computeSummary(list));
+        } else {
+          refreshSummaryStats();
+        }
+      } else {
+        setError(res.message || 'Gagal memuat daftar karyawan resign/keluar.');
+      }
+    } catch (err) {
+      if (reqId !== fetchReqIdRef.current) return;
+      setError(err.message || 'Gagal menghubungi server.');
+    } finally {
+      if (reqId === fetchReqIdRef.current) setLoading(false);
     }
-    setLoading(false);
-  }, [filters]);
+  }, [debouncedSearch, filters.branch_id, filters.employee_type, filters.status, refreshSummaryStats]);
 
   useEffect(() => {
     fetchResigned();
   }, [fetchResigned]);
 
   useEffect(() => {
-    branchApi.getAll().then(r => {
-      if (r.success) setBranches(r.data);
-    });
+    branchApi.getAll()
+      .then(r => { if (r.success) setBranches(r.data || []); })
+      .catch(() => {});
   }, []);
 
   const openRecordModal = async () => {
     try {
       const res = await staffApi.getAll({ status: 'Active' });
-      if (res.success) setActiveEmployees(res.data);
-    } catch {
-      /* silent */
+      if (res.success) setActiveEmployees(res.data || []);
+      else alert(res.message || 'Gagal memuat daftar karyawan aktif.');
+    } catch (err) {
+      alert(err.message || 'Gagal memuat daftar karyawan aktif.');
     }
     setEmpSearch('');
     setRecordForm({
       employeeId: '',
       status: 'Resign',
-      resign_date: new Date().toISOString().slice(0, 10),
+      resign_date: getTodayLocalDateStr(),
       resign_reason: RESIGN_REASONS[0],
       resign_notes: '',
     });
@@ -203,8 +271,8 @@ export default function ResignedEmployees() {
       } else {
         alert(res.message || 'Gagal menyimpan data.');
       }
-    } catch {
-      alert('Gagal menghubungi server.');
+    } catch (err) {
+      alert(err.message || 'Gagal menghubungi server.');
     } finally {
       setSubmitting(false);
     }
@@ -215,7 +283,7 @@ export default function ResignedEmployees() {
     setEditingEmp(emp);
     setEditForm({
       status: emp.status === 'Terminated' ? 'Terminated' : 'Resign',
-      resign_date: emp.resign_date || new Date().toISOString().slice(0, 10),
+      resign_date: emp.resign_date ? String(emp.resign_date).slice(0, 10) : getTodayLocalDateStr(),
       resign_reason: emp.resign_reason || defaultReasonList[0],
       resign_notes: emp.resign_notes || '',
     });
@@ -233,8 +301,8 @@ export default function ResignedEmployees() {
       } else {
         alert(res.message || 'Gagal memperbarui data.');
       }
-    } catch {
-      alert('Gagal menghubungi server.');
+    } catch (err) {
+      alert(err.message || 'Gagal menghubungi server.');
     } finally {
       setSubmitting(false);
     }
@@ -249,16 +317,10 @@ export default function ResignedEmployees() {
       } else {
         alert(res.message || 'Gagal mengaktifkan kembali.');
       }
-    } catch {
-      alert('Gagal menghubungi server.');
+    } catch (err) {
+      alert(err.message || 'Gagal menghubungi server.');
     }
   };
-
-  const totalOut = employees.length;
-  const resignCount = employees.filter(e => e.status === 'Resign').length;
-  const terminatedCount = employees.filter(e => e.status === 'Terminated').length;
-  const currentMonthPrefix = new Date().toISOString().slice(0, 7);
-  const thisMonthCount = employees.filter(e => (e.resign_date || '').startsWith(currentMonthPrefix)).length;
 
   const filteredActiveEmployees = activeEmployees.filter(e => {
     if (!empSearch.trim()) return true;
@@ -269,6 +331,15 @@ export default function ResignedEmployees() {
       (e.position || '').toLowerCase().includes(q)
     );
   });
+
+  const selectedOutsideFilter = recordForm.employeeId && !filteredActiveEmployees.some(e => String(e.id) === String(recordForm.employeeId))
+    ? activeEmployees.filter(e => String(e.id) === String(recordForm.employeeId))
+    : [];
+
+  const editReasonBase = editForm.status === 'Resign' ? RESIGN_REASONS : TERMINATED_REASONS;
+  const editReasonOptions = editForm.resign_reason && !editReasonBase.includes(editForm.resign_reason)
+    ? [...editReasonBase, editForm.resign_reason]
+    : editReasonBase;
 
   return (
     <div>
@@ -281,6 +352,7 @@ export default function ResignedEmployees() {
         </div>
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
           <button
+            type="button"
             className="btn btn-primary"
             onClick={openRecordModal}
             style={{ background: 'linear-gradient(135deg, #f59e0b, #d97706)', border: 'none' }}
@@ -291,12 +363,12 @@ export default function ResignedEmployees() {
       </div>
 
       {/* Statistik Ringkasan */}
-      <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)', marginBottom: '24px' }}>
+      <div className="stats-grid" style={{ marginBottom: '24px' }}>
         {[
-          { label: 'Total Karyawan Keluar', value: totalOut, color: '#94a3b8' },
-          { label: 'Resign (Mengundurkan Diri)', value: resignCount, color: '#f59e0b' },
-          { label: 'Dikeluarkan (Terminated)', value: terminatedCount, color: '#ef4444' },
-          { label: 'Keluar Bulan Ini', value: thisMonthCount, color: '#8b5cf6' },
+          { label: 'Total Karyawan Keluar', value: summaryStats.totalOut, color: 'var(--text-secondary)' },
+          { label: 'Resign (Mengundurkan Diri)', value: summaryStats.resignCount, color: 'var(--color-warning)' },
+          { label: 'Dikeluarkan (Terminated)', value: summaryStats.terminatedCount, color: 'var(--color-danger)' },
+          { label: 'Keluar Bulan Ini', value: summaryStats.thisMonthCount, color: 'var(--color-primary)' },
         ].map(s => (
           <div key={s.label} className="glass-panel stat-card">
             <div className="stat-card-title">{s.label}</div>
@@ -304,6 +376,13 @@ export default function ResignedEmployees() {
           </div>
         ))}
       </div>
+
+      {error && (
+        <div style={{ padding: '12px 16px', borderRadius: '10px', marginBottom: '16px', backgroundColor: 'var(--color-danger-bg)', color: 'var(--color-danger)', border: '1px solid var(--color-danger)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', fontSize: '13px' }}>
+          <span>{error}</span>
+          <button type="button" className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: '12px' }} onClick={fetchResigned}>Coba Lagi</button>
+        </div>
+      )}
 
       {/* Filter Bar */}
       <div
@@ -508,6 +587,7 @@ export default function ResignedEmployees() {
       {/* Modal: Catat Karyawan Resign / Dikeluarkan dari Data Karyawan Aktif */}
       {showRecordModal && createPortal(
         <div
+          onClick={(e) => { if (e.target === e.currentTarget) setShowRecordModal(false); }}
           style={{
             position: 'fixed',
             inset: 0,
@@ -515,22 +595,26 @@ export default function ResignedEmployees() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            zIndex: 1001,
+            zIndex: 3000,
             backdropFilter: 'blur(6px)',
             padding: '16px',
+            overscrollBehavior: 'contain',
           }}
         >
           <div
             style={{
               width: '100%',
               maxWidth: '520px',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              overscrollBehavior: 'contain',
               background: 'var(--bg-surface-opaque)',
               border: '1px solid var(--border-color)',
               borderRadius: '20px',
               boxShadow: '0 24px 48px rgba(0,0,0,0.35)',
             }}
           >
-            <div style={{ padding: '22px 26px 18px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ padding: '22px 26px 18px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)' }}>
                   Catat Karyawan Resign / Dikeluarkan
@@ -540,8 +624,9 @@ export default function ResignedEmployees() {
                 </p>
               </div>
               <button
+                type="button"
                 onClick={() => setShowRecordModal(false)}
-                style={{ background: 'var(--bg-hover)', border: 'none', borderRadius: '8px', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '18px', width: '32px', height: '32px' }}
+                style={{ background: 'var(--bg-hover)', border: 'none', borderRadius: '8px', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '18px', width: '32px', height: '32px', flexShrink: 0 }}
               >
                 ×
               </button>
@@ -549,7 +634,7 @@ export default function ResignedEmployees() {
 
             <form onSubmit={handleRecordSubmit} style={{ padding: '22px 26px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div>
-                <label style={labelStyle}>Cari & Pilih Karyawan Aktif <span style={{ color: '#ef4444' }}>*</span></label>
+                <label style={labelStyle}>Cari & Pilih Karyawan Aktif <span style={{ color: 'var(--color-danger)' }}>*</span></label>
                 <input
                   style={{ ...inputStyle, marginBottom: '8px' }}
                   placeholder="Ketik nama karyawan atau cabang untuk menyaring..."
@@ -563,6 +648,11 @@ export default function ResignedEmployees() {
                   onChange={e => setRecordForm(p => ({ ...p, employeeId: e.target.value }))}
                 >
                   <option value="">-- Pilih Karyawan ({filteredActiveEmployees.length} orang) --</option>
+                  {selectedOutsideFilter.map(emp => (
+                    <option key={`sel-${emp.id}`} value={emp.id}>
+                      {emp.name} — {emp.branch_name || 'Tanpa Cabang'} ({emp.position || emp.employee_type}) [Terpilih]
+                    </option>
+                  ))}
                   {filteredActiveEmployees.map(emp => (
                     <option key={emp.id} value={emp.id}>
                       {emp.name} — {emp.branch_name || 'Tanpa Cabang'} ({emp.position || emp.employee_type})
@@ -571,9 +661,9 @@ export default function ResignedEmployees() {
                 </select>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <div className="responsive-grid-2" style={{ gap: '12px' }}>
                 <div>
-                  <label style={labelStyle}>Status Keluar <span style={{ color: '#ef4444' }}>*</span></label>
+                  <label style={labelStyle}>Status Keluar <span style={{ color: 'var(--color-danger)' }}>*</span></label>
                   <select
                     style={inputStyle}
                     value={recordForm.status}
@@ -588,7 +678,7 @@ export default function ResignedEmployees() {
                   </select>
                 </div>
                 <div>
-                  <label style={labelStyle}>Tanggal Efektif Keluar <span style={{ color: '#ef4444' }}>*</span></label>
+                  <label style={labelStyle}>Tanggal Efektif Keluar <span style={{ color: 'var(--color-danger)' }}>*</span></label>
                   <input
                     type="date"
                     style={inputStyle}
@@ -601,7 +691,7 @@ export default function ResignedEmployees() {
 
               <div>
                 <label style={labelStyle}>
-                  {recordForm.status === 'Resign' ? 'Alasan Mengundurkan Diri' : 'Alasan Dikeluarkan / Diberhentikan'} <span style={{ color: '#ef4444' }}>*</span>
+                  {recordForm.status === 'Resign' ? 'Alasan Mengundurkan Diri' : 'Alasan Dikeluarkan / Diberhentikan'} <span style={{ color: 'var(--color-danger)' }}>*</span>
                 </label>
                 <select
                   style={inputStyle}
@@ -677,6 +767,7 @@ export default function ResignedEmployees() {
       {/* Modal: Edit Alasan / Status Keluar */}
       {editingEmp && createPortal(
         <div
+          onClick={(e) => { if (e.target === e.currentTarget) setEditingEmp(null); }}
           style={{
             position: 'fixed',
             inset: 0,
@@ -684,34 +775,47 @@ export default function ResignedEmployees() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            zIndex: 1001,
+            zIndex: 3000,
             backdropFilter: 'blur(6px)',
             padding: '16px',
+            overscrollBehavior: 'contain',
           }}
         >
           <div
             style={{
               width: '100%',
               maxWidth: '480px',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              overscrollBehavior: 'contain',
               background: 'var(--bg-surface-opaque)',
               border: '1px solid var(--border-color)',
               borderRadius: '20px',
               boxShadow: '0 24px 48px rgba(0,0,0,0.35)',
             }}
           >
-            <div style={{ padding: '22px 26px 18px', borderBottom: '1px solid var(--border-color)' }}>
-              <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                Edit Detail Resign / Dikeluarkan
-              </h3>
-              <p style={{ margin: '4px 0 0', fontSize: '13px', color: 'var(--text-muted)' }}>
-                {editingEmp.name} {editingEmp.branch_name ? `· ${editingEmp.branch_name}` : ''}
-              </p>
+            <div style={{ padding: '22px 26px 18px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                  Edit Detail Resign / Dikeluarkan
+                </h3>
+                <p style={{ margin: '4px 0 0', fontSize: '13px', color: 'var(--text-muted)' }}>
+                  {editingEmp.name} {editingEmp.branch_name ? `· ${editingEmp.branch_name}` : ''}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingEmp(null)}
+                style={{ background: 'var(--bg-hover)', border: 'none', borderRadius: '8px', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '18px', width: '32px', height: '32px', flexShrink: 0 }}
+              >
+                ×
+              </button>
             </div>
 
             <form onSubmit={handleEditSubmit} style={{ padding: '22px 26px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <div className="responsive-grid-2" style={{ gap: '12px' }}>
                 <div>
-                  <label style={labelStyle}>Status Keluar <span style={{ color: '#ef4444' }}>*</span></label>
+                  <label style={labelStyle}>Status Keluar <span style={{ color: 'var(--color-danger)' }}>*</span></label>
                   <select
                     style={inputStyle}
                     value={editForm.status}
@@ -726,7 +830,7 @@ export default function ResignedEmployees() {
                   </select>
                 </div>
                 <div>
-                  <label style={labelStyle}>Tanggal Keluar <span style={{ color: '#ef4444' }}>*</span></label>
+                  <label style={labelStyle}>Tanggal Keluar <span style={{ color: 'var(--color-danger)' }}>*</span></label>
                   <input
                     type="date"
                     style={inputStyle}
@@ -738,13 +842,13 @@ export default function ResignedEmployees() {
               </div>
 
               <div>
-                <label style={labelStyle}>Kategori Alasan <span style={{ color: '#ef4444' }}>*</span></label>
+                <label style={labelStyle}>Kategori Alasan <span style={{ color: 'var(--color-danger)' }}>*</span></label>
                 <select
                   style={inputStyle}
                   value={editForm.resign_reason}
                   onChange={e => setEditForm(p => ({ ...p, resign_reason: e.target.value }))}
                 >
-                  {(editForm.status === 'Resign' ? RESIGN_REASONS : TERMINATED_REASONS).map(r => (
+                  {editReasonOptions.map(r => (
                     <option key={r} value={r}>{r}</option>
                   ))}
                 </select>

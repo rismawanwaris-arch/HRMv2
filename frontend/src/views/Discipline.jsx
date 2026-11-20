@@ -5,16 +5,16 @@ import { disciplineApi, staffApi } from '../services/api';
 const TYPE_OPTIONS = ['Teguran Lisan', 'Teguran Tertulis', 'SP-1', 'SP-2', 'SP-3'];
 
 const TYPE_COLOR = {
-  'Teguran Lisan':    { bg: 'rgba(251,191,36,0.15)',  color: '#f59e0b', border: 'rgba(251,191,36,0.4)' },
-  'Teguran Tertulis': { bg: 'rgba(249,115,22,0.15)',  color: '#fb923c', border: 'rgba(249,115,22,0.4)' },
-  'SP-1':             { bg: 'rgba(239,68,68,0.12)',   color: '#ef4444', border: 'rgba(239,68,68,0.4)' },
-  'SP-2':             { bg: 'rgba(220,38,38,0.18)',   color: '#f87171', border: 'rgba(220,38,38,0.5)' },
-  'SP-3':             { bg: 'rgba(239,68,68,0.22)',   color: '#fca5a5', border: 'rgba(239,68,68,0.6)' },
+  'Teguran Lisan':    { bg: 'var(--color-warning-bg)', color: 'var(--color-warning)', border: 'rgba(245,158,11,0.4)' },
+  'Teguran Tertulis': { bg: 'var(--color-warning-bg)', color: '#d97706', border: 'rgba(249,115,22,0.4)' },
+  'SP-1':             { bg: 'var(--color-danger-bg)', color: 'var(--color-danger)', border: 'rgba(239,68,68,0.4)' },
+  'SP-2':             { bg: 'var(--color-danger-bg)', color: 'var(--color-danger)', border: 'rgba(220,38,38,0.5)' },
+  'SP-3':             { bg: 'var(--color-danger-bg)', color: 'var(--color-danger)', border: 'rgba(239,68,68,0.6)' },
 };
 
 const STATUS_COLOR = {
-  Aktif:    { bg: 'rgba(239,68,68,0.12)',  color: '#dc2626' },
-  Resolved: { bg: 'rgba(16,185,129,0.12)', color: '#059669' },
+  Aktif:    { bg: 'var(--color-danger-bg)',  color: 'var(--color-danger)' },
+  Resolved: { bg: 'var(--color-success-bg)', color: 'var(--color-success)' },
 };
 
 const iStyle = {
@@ -24,12 +24,24 @@ const iStyle = {
 };
 const lStyle = { display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px', textTransform: 'uppercase', letterSpacing: '0.5px' };
 
-const EMPTY_FORM = { employee_id: '', type: 'SP-1', date: new Date().toISOString().slice(0, 10), description: '', issued_by: '' };
+function getTodayLocalDateStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+const getEmptyForm = () => ({
+  employee_id: '',
+  type: 'SP-1',
+  date: getTodayLocalDateStr(),
+  description: '',
+  issued_by: '',
+});
 
 export default function Discipline() {
   const [records, setRecords]     = useState([]);
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading]     = useState(true);
+  const [fetchError, setFetchError] = useState('');
   const [stats, setStats]         = useState([]);
 
   const [filterEmp, setFilterEmp]       = useState('');
@@ -37,7 +49,7 @@ export default function Discipline() {
   const [filterType, setFilterType]     = useState('');
 
   const [showForm, setShowForm]   = useState(false);
-  const [form, setForm]           = useState(EMPTY_FORM);
+  const [form, setForm]           = useState(getEmptyForm);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState('');
 
@@ -48,8 +60,21 @@ export default function Discipline() {
 
   const [message, setMessage] = useState(null);
 
+  useEffect(() => {
+    if (!showForm && !resolveRec) return;
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        if (resolveRec && !resolving) setResolveRec(null);
+        else if (showForm && !submitting) setShowForm(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [showForm, resolveRec, submitting, resolving]);
+
   const fetchAll = useCallback(async () => {
     setLoading(true);
+    setFetchError('');
     try {
       const params = {};
       if (filterEmp)    params.employee_id = filterEmp;
@@ -59,10 +84,14 @@ export default function Discipline() {
         disciplineApi.getAll(params),
         disciplineApi.getStats(),
       ]);
-      if (recRes.success) setRecords(recRes.data);
-      if (statsRes.success) setStats(statsRes.data);
-    } catch { /* silent */ }
-    setLoading(false);
+      if (recRes.success) setRecords(recRes.data || []);
+      else setFetchError(recRes.message || 'Gagal memuat catatan pelanggaran.');
+      if (statsRes.success) setStats(statsRes.data || []);
+    } catch (err) {
+      setFetchError(err.message || 'Gagal memuat catatan pelanggaran.');
+    } finally {
+      setLoading(false);
+    }
   }, [filterEmp, filterStatus, filterType]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
@@ -84,13 +113,16 @@ export default function Discipline() {
       if (res.success) {
         setMessage({ type: 'success', text: res.message });
         setShowForm(false);
-        setForm(EMPTY_FORM);
+        setForm(getEmptyForm());
         fetchAll();
       } else {
-        setFormError(res.message);
+        setFormError(res.message || 'Gagal menyimpan catatan pelanggaran.');
       }
-    } catch { setFormError('Terjadi kesalahan. Coba lagi.'); }
-    finally { setSubmitting(false); }
+    } catch (err) {
+      setFormError(err.message || 'Terjadi kesalahan. Coba lagi.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleResolve = async (e) => {
@@ -106,10 +138,13 @@ export default function Discipline() {
         setResolveNote('');
         fetchAll();
       } else {
-        setResolveError(res.message);
+        setResolveError(res.message || 'Gagal menyelesaikan sanksi.');
       }
-    } catch { setResolveError('Terjadi kesalahan.'); }
-    finally { setResolving(false); }
+    } catch (err) {
+      setResolveError(err.message || 'Terjadi kesalahan.');
+    } finally {
+      setResolving(false);
+    }
   };
 
   const handleDelete = async (rec) => {
@@ -117,15 +152,21 @@ export default function Discipline() {
     try {
       const res = await disciplineApi.remove(rec.id);
       if (res.success) { setMessage({ type: 'success', text: res.message }); fetchAll(); }
-      else alert(res.message);
-    } catch { alert('Gagal menghapus catatan.'); }
+      else alert(res.message || 'Gagal menghapus catatan.');
+    } catch (err) { alert(err.message || 'Gagal menghapus catatan.'); }
   };
 
-  const totalAktif    = records.filter(r => r.status === 'Aktif').length;
-  const totalResolved = records.filter(r => r.status === 'Resolved').length;
-  const totalSP3      = records.filter(r => r.type === 'SP-3' && r.status === 'Aktif').length;
+  const totalAktif = stats
+    .filter(s => s.status === 'Aktif')
+    .reduce((sum, s) => sum + (Number(s.count) || 0), 0);
+  const totalResolved = stats
+    .filter(s => s.status === 'Resolved')
+    .reduce((sum, s) => sum + (Number(s.count) || 0), 0);
+  const totalSP3 = stats
+    .filter(s => s.type === 'SP-3' && s.status === 'Aktif')
+    .reduce((sum, s) => sum + (Number(s.count) || 0), 0);
 
-  const modalBack = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px', backdropFilter: 'blur(6px)' };
+  const modalBack = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 3000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px', backdropFilter: 'blur(6px)', overscrollBehavior: 'contain' };
   const modalBox  = { background: 'var(--bg-surface-opaque)', border: '1px solid var(--border-color)', borderRadius: '20px', padding: '28px', width: '100%', maxWidth: '520px', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 24px 60px rgba(0,0,0,0.4)' };
 
   return (
@@ -135,25 +176,32 @@ export default function Discipline() {
           <h1 className="page-title">Disiplin & Pelanggaran</h1>
           <p className="page-subtitle">Pencatatan SP, teguran, dan riwayat pelanggaran karyawan.</p>
         </div>
-        <button className="btn btn-primary" onClick={() => { setShowForm(true); setFormError(''); setForm(EMPTY_FORM); }}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '6px' }}><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          + Catat Sanksi
+        <button type="button" className="btn btn-primary" onClick={() => { setShowForm(true); setFormError(''); setForm(getEmptyForm()); }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Catat Sanksi
         </button>
       </div>
 
       {message && (
-        <div style={{ padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', backgroundColor: message.type === 'success' ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)', color: message.type === 'success' ? '#047857' : '#b91c1c', border: `1px solid ${message.type === 'success' ? '#10b981' : '#ef4444'}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', backgroundColor: message.type === 'success' ? 'var(--color-success-bg)' : 'var(--color-danger-bg)', color: message.type === 'success' ? 'var(--color-success)' : 'var(--color-danger)', border: `1px solid ${message.type === 'success' ? 'var(--color-success)' : 'var(--color-danger)'}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span>{message.text}</span>
-          <button onClick={() => setMessage(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontSize: '16px' }}>&times;</button>
+          <button type="button" onClick={() => setMessage(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontSize: '16px' }}>&times;</button>
+        </div>
+      )}
+
+      {fetchError && (
+        <div className="glass-panel" style={{ padding: '12px 16px', marginBottom: '16px', border: '1px solid rgba(239,68,68,0.35)', background: 'var(--color-danger-bg)', color: 'var(--color-danger)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '13px', fontWeight: 600 }}>⚠ {fetchError}</span>
+          <button type="button" onClick={fetchAll} className="btn btn-secondary" style={{ fontSize: '12px', padding: '6px 12px' }}>Coba Lagi</button>
         </div>
       )}
 
       {/* Stats */}
-      <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)', marginBottom: '20px' }}>
+      <div className="stats-grid responsive-grid-3" style={{ marginBottom: '20px' }}>
         {[
-          { label: 'Sanksi Aktif',  value: totalAktif,    color: '#ef4444' },
-          { label: 'Diselesaikan',  value: totalResolved,  color: '#10b981' },
-          { label: 'SP-3 Aktif',    value: totalSP3,       color: '#f87171' },
+          { label: 'Sanksi Aktif',  value: totalAktif,    color: 'var(--color-danger)' },
+          { label: 'Diselesaikan',  value: totalResolved, color: 'var(--color-success)' },
+          { label: 'SP-3 Aktif',    value: totalSP3,      color: 'var(--color-danger)' },
         ].map(s => (
           <div key={s.label} className="glass-panel stat-card">
             <div className="stat-card-title">{s.label}</div>
@@ -178,7 +226,7 @@ export default function Discipline() {
           <option value="Resolved">Resolved</option>
         </select>
         {(filterEmp || filterType || filterStatus) && (
-          <button className="btn btn-secondary" onClick={() => { setFilterEmp(''); setFilterType(''); setFilterStatus(''); }}>Reset Filter</button>
+          <button type="button" className="btn btn-secondary" onClick={() => { setFilterEmp(''); setFilterType(''); setFilterStatus(''); }}>Reset Filter</button>
         )}
       </div>
 
@@ -207,7 +255,7 @@ export default function Discipline() {
                 return (
                   <tr key={rec.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
                     <td style={{ padding: '12px', verticalAlign: 'top' }}>
-                      <div style={{ fontWeight: 600, fontSize: '13px' }}>{rec.employee_name}</div>
+                      <div style={{ fontWeight: 600, fontSize: '13px', color: 'var(--text-primary)' }}>{rec.employee_name}</div>
                       <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{rec.employee_type} · {rec.branch_name || '—'}</div>
                     </td>
                     <td style={{ padding: '12px', verticalAlign: 'top' }}>
@@ -217,7 +265,7 @@ export default function Discipline() {
                     <td style={{ padding: '12px', verticalAlign: 'top', fontSize: '13px', maxWidth: '240px' }}>
                       <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={rec.description}>{rec.description}</div>
                       {rec.status === 'Resolved' && rec.resolution_note && (
-                        <div style={{ fontSize: '11px', color: '#059669', marginTop: '4px' }}>✓ {rec.resolution_note}</div>
+                        <div style={{ fontSize: '11px', color: 'var(--color-success)', marginTop: '4px' }}>✓ {rec.resolution_note}</div>
                       )}
                     </td>
                     <td style={{ padding: '12px', verticalAlign: 'top', fontSize: '13px', color: 'var(--text-secondary)' }}>{rec.issued_by || '—'}</td>
@@ -230,15 +278,17 @@ export default function Discipline() {
                     <td style={{ padding: '12px', verticalAlign: 'top', whiteSpace: 'nowrap' }}>
                       {rec.status === 'Aktif' && (
                         <button
+                          type="button"
                           onClick={() => { setResolveRec(rec); setResolveNote(''); setResolveError(''); }}
-                          style={{ padding: '5px 12px', borderRadius: '6px', border: '1px solid #10b981', background: 'rgba(16,185,129,0.1)', color: '#059669', cursor: 'pointer', fontSize: '12px', fontWeight: 600, marginRight: '6px', fontFamily: 'inherit' }}
+                          style={{ padding: '5px 12px', borderRadius: '6px', border: '1px solid var(--color-success)', background: 'var(--color-success-bg)', color: 'var(--color-success)', cursor: 'pointer', fontSize: '12px', fontWeight: 600, marginRight: '6px', fontFamily: 'inherit' }}
                         >
                           Resolve
                         </button>
                       )}
                       <button
+                        type="button"
                         onClick={() => handleDelete(rec)}
-                        style={{ padding: '5px 10px', borderRadius: '6px', border: '1px solid rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.08)', color: '#dc2626', cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit' }}
+                        style={{ padding: '5px 10px', borderRadius: '6px', border: '1px solid rgba(239,68,68,0.3)', background: 'var(--color-danger-bg)', color: 'var(--color-danger)', cursor: 'pointer', fontSize: '12px', fontFamily: 'inherit' }}
                       >
                         Hapus
                       </button>
@@ -253,31 +303,34 @@ export default function Discipline() {
 
       {/* Add record modal */}
       {showForm && createPortal(
-        <div style={modalBack} onClick={e => { if (e.target === e.currentTarget) setShowForm(false); }}>
-          <div style={modalBox}>
-            <h3 style={{ margin: '0 0 20px', fontSize: '18px', fontWeight: 700 }}>Catat Sanksi / Pelanggaran</h3>
+        <div style={modalBack} onClick={e => { if (e.target === e.currentTarget && !submitting) setShowForm(false); }}>
+          <div style={modalBox} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)' }}>Catat Sanksi / Pelanggaran</h3>
+              <button type="button" disabled={submitting} onClick={() => setShowForm(false)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '20px', cursor: 'pointer', lineHeight: 1 }}>&times;</button>
+            </div>
             <form onSubmit={handleCreate} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div>
-                <label style={lStyle}>Karyawan <span style={{ color: '#ef4444' }}>*</span></label>
+                <label style={lStyle}>Karyawan <span style={{ color: 'var(--color-danger)' }}>*</span></label>
                 <select style={iStyle} value={form.employee_id} onChange={e => setForm(p => ({ ...p, employee_id: e.target.value }))} required>
                   <option value="">— Pilih Karyawan —</option>
                   {employees.map(emp => <option key={emp.id} value={emp.id}>{emp.name} ({emp.employee_type} · {emp.branch_name || 'Tanpa Cabang'})</option>)}
                 </select>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+              <div className="responsive-grid-2" style={{ gap: '14px' }}>
                 <div>
-                  <label style={lStyle}>Tipe Sanksi <span style={{ color: '#ef4444' }}>*</span></label>
+                  <label style={lStyle}>Tipe Sanksi <span style={{ color: 'var(--color-danger)' }}>*</span></label>
                   <select style={iStyle} value={form.type} onChange={e => setForm(p => ({ ...p, type: e.target.value }))}>
                     {TYPE_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label style={lStyle}>Tanggal <span style={{ color: '#ef4444' }}>*</span></label>
+                  <label style={lStyle}>Tanggal <span style={{ color: 'var(--color-danger)' }}>*</span></label>
                   <input type="date" style={iStyle} value={form.date} onChange={e => setForm(p => ({ ...p, date: e.target.value }))} required />
                 </div>
               </div>
               <div>
-                <label style={lStyle}>Keterangan Pelanggaran <span style={{ color: '#ef4444' }}>*</span></label>
+                <label style={lStyle}>Keterangan Pelanggaran <span style={{ color: 'var(--color-danger)' }}>*</span></label>
                 <textarea style={{ ...iStyle, resize: 'vertical', minHeight: '80px' }} rows={3}
                   placeholder="Tuliskan keterangan pelanggaran secara singkat dan jelas..."
                   value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} required />
@@ -286,9 +339,9 @@ export default function Discipline() {
                 <label style={lStyle}>Dikeluarkan Oleh</label>
                 <input style={iStyle} placeholder="Nama HRD / Atasan" value={form.issued_by} onChange={e => setForm(p => ({ ...p, issued_by: e.target.value }))} />
               </div>
-              {formError && <p style={{ margin: 0, color: '#dc2626', fontSize: '13px' }}>{formError}</p>}
+              {formError && <p style={{ margin: 0, color: 'var(--color-danger)', fontSize: '13px' }}>{formError}</p>}
               <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '4px' }}>
-                <button type="button" className="btn btn-secondary" onClick={() => setShowForm(false)}>Batal</button>
+                <button type="button" className="btn btn-secondary" disabled={submitting} onClick={() => setShowForm(false)}>Batal</button>
                 <button type="submit" className="btn btn-primary" disabled={submitting}>{submitting ? 'Menyimpan...' : 'Simpan'}</button>
               </div>
             </form>
@@ -299,22 +352,25 @@ export default function Discipline() {
 
       {/* Resolve modal */}
       {resolveRec && createPortal(
-        <div style={modalBack} onClick={e => { if (e.target === e.currentTarget) setResolveRec(null); }}>
-          <div style={modalBox}>
-            <h3 style={{ margin: '0 0 8px', fontSize: '18px', fontWeight: 700 }}>Resolve Sanksi</h3>
+        <div style={modalBack} onClick={e => { if (e.target === e.currentTarget && !resolving) setResolveRec(null); }}>
+          <div style={modalBox} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)' }}>Resolve Sanksi</h3>
+              <button type="button" disabled={resolving} onClick={() => setResolveRec(null)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '20px', cursor: 'pointer', lineHeight: 1 }}>&times;</button>
+            </div>
             <p style={{ margin: '0 0 20px', fontSize: '13px', color: 'var(--text-secondary)' }}>
               <strong>{resolveRec.type}</strong> — {resolveRec.employee_name} ({resolveRec.date})
             </p>
             <form onSubmit={handleResolve} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div>
-                <label style={lStyle}>Catatan Penyelesaian <span style={{ color: '#ef4444' }}>*</span></label>
+                <label style={lStyle}>Catatan Penyelesaian <span style={{ color: 'var(--color-danger)' }}>*</span></label>
                 <textarea style={{ ...iStyle, resize: 'vertical', minHeight: '80px' }} rows={3}
                   placeholder="Contoh: Karyawan telah menerima pembinaan dan berjanji tidak mengulangi..."
                   value={resolveNote} onChange={e => setResolveNote(e.target.value)} required autoFocus />
               </div>
-              {resolveError && <p style={{ margin: 0, color: '#dc2626', fontSize: '13px' }}>{resolveError}</p>}
+              {resolveError && <p style={{ margin: 0, color: 'var(--color-danger)', fontSize: '13px' }}>{resolveError}</p>}
               <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-                <button type="button" className="btn btn-secondary" onClick={() => setResolveRec(null)}>Batal</button>
+                <button type="button" className="btn btn-secondary" disabled={resolving} onClick={() => setResolveRec(null)}>Batal</button>
                 <button type="submit" className="btn btn-primary" disabled={resolving} style={{ background: '#10b981', borderColor: '#10b981' }}>{resolving ? 'Menyimpan...' : 'Tandai Selesai'}</button>
               </div>
             </form>

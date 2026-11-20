@@ -1,7 +1,29 @@
 const { query } = require('../db');
-const { outletPhotosDir } = require('../utils/helpers');
+const { outletPhotosDir, cleanupUploadedFiles } = require('../utils/helpers');
 const fs = require('fs');
 const path = require('path');
+
+function safeParseJsonArray(str) {
+  if (!str) return [];
+  if (Array.isArray(str)) return str;
+  try {
+    const parsed = JSON.parse(str);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function safeParseJsonObject(str) {
+  if (!str) return {};
+  if (typeof str === 'object' && !Array.isArray(str)) return str;
+  try {
+    const parsed = JSON.parse(str);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
 
 // Helper to format Indonesian date (e.g., "Rabu, 21 Oktober 2026")
 function formatIndonesianDate(dateStr) {
@@ -54,26 +76,29 @@ exports.getDailySummary = async (req, res) => {
     // Parse photos and checklist_data for each visit
     const parsedVisits = visits.map(v => ({
       ...v,
-      photos: v.photos ? JSON.parse(v.photos) : [],
-      checklist_data: v.checklist_data ? JSON.parse(v.checklist_data) : {}
+      photos: safeParseJsonArray(v.photos),
+      checklist_data: safeParseJsonObject(v.checklist_data)
     }));
 
-    // Fetch incidents on this date
+    // Fetch incidents on this date (true severity precedence: Critical > High > Medium > Low)
     const incidents = await query.all(
       `SELECT i.*, b.name as branch_name, b.code as branch_code, b.city as branch_city
        FROM outlet_incidents i
        JOIN branches b ON i.branch_id = b.id
        WHERE i.incident_date = ?
-       ORDER BY i.severity DESC, i.id DESC`,
+       ORDER BY CASE i.severity WHEN 'Critical' THEN 1 WHEN 'High' THEN 2 WHEN 'Medium' THEN 3 ELSE 4 END, i.id DESC`,
       [date]
     );
 
     const parsedIncidents = incidents.map(i => ({
       ...i,
-      photos: i.photos ? JSON.parse(i.photos) : []
+      photos: safeParseJsonArray(i.photos)
     }));
 
-    // Fetch active action items (pending/in-progress) across all branches
+    // Fetch active action items (pending/in-progress) across all branches + true total count
+    const activeActionCountRow = await query.get(
+      "SELECT COUNT(*) as cnt FROM outlet_action_items WHERE status != 'Done'"
+    );
     const activeActionItems = await query.all(
       `SELECT a.*, b.name as branch_name, b.code as branch_code
        FROM outlet_action_items a
@@ -165,7 +190,7 @@ exports.getDailySummary = async (req, res) => {
           avgScore,
           totalIncidents,
           criticalIncidents,
-          openActionItemsCount: activeActionItems.length
+          openActionItemsCount: activeActionCountRow ? activeActionCountRow.cnt : activeActionItems.length
         },
         visits: parsedVisits,
         incidents: parsedIncidents,
@@ -305,10 +330,17 @@ exports.createVisit = async (req, res) => {
     } = req.body;
 
     if (!branch_id || !visit_date || !purpose) {
+      cleanupUploadedFiles(req.files);
       return res.status(400).json({
         success: false,
         message: 'Cabang outlet, tanggal kunjungan, dan tujuan kunjungan wajib diisi.'
       });
+    }
+    const branchIdInt = parseInt(branch_id, 10);
+    const branchExists = await query.get('SELECT id FROM branches WHERE id = ?', [branchIdInt]);
+    if (!branchExists) {
+      cleanupUploadedFiles(req.files);
+      return res.status(400).json({ success: false, message: 'Cabang outlet tidak ditemukan.' });
     }
 
     // Calculate overall score if subscores are provided
@@ -372,6 +404,7 @@ exports.createVisit = async (req, res) => {
       id: createdId
     });
   } catch (error) {
+    cleanupUploadedFiles(req.files);
     console.error('API Error (createVisit):', error);
     res.status(500).json({ success: false, message: 'Gagal menyimpan data kunjungan outlet.' });
   }
@@ -385,6 +418,7 @@ exports.updateVisit = async (req, res) => {
     const id = parseInt(req.params.id, 10);
     const existing = await query.get('SELECT * FROM outlet_visits WHERE id = ?', [id]);
     if (!existing) {
+      cleanupUploadedFiles(req.files);
       return res.status(404).json({ success: false, message: 'Kunjungan tidak ditemukan.' });
     }
 
@@ -416,16 +450,39 @@ exports.updateVisit = async (req, res) => {
       ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length)
       : (parseInt(req.body.overall_score ?? existing.overall_score, 10) || 0);
 
-    // Photos: keep existing and add new if uploaded
-    let currentPhotos = existing.photos ? JSON.parse(existing.photos) : [];
+    // Photos: keep existing, delete removed from disk, and add new if uploaded
+    let currentPhotos = safeParseJsonArray(existing.photos);
     if (req.body.delete_photos) {
-      const toDelete = Array.isArray(req.body.delete_photos) ? req.body.delete_photos : [req.body.delete_photos];
-      currentPhotos = currentPhotos.filter(p => !toDelete.includes(p));
+      let toDelete = [];
+      if (Array.isArray(req.body.delete_photos)) {
+        toDelete = req.body.delete_photos;
+      } else if (typeof req.body.delete_photos === 'string') {
+        try {
+          const parsedDel = JSON.parse(req.body.delete_photos);
+          toDelete = Array.isArray(parsedDel) ? parsedDel : [req.body.delete_photos];
+        } catch {
+          toDelete = [req.body.delete_photos];
+        }
+      }
+      if (toDelete.length > 0) {
+        for (const p of toDelete) {
+          if (currentPhotos.includes(p)) {
+            const fp = path.join(outletPhotosDir, path.basename(String(p)));
+            if (fs.existsSync(fp)) { try { fs.unlinkSync(fp); } catch {} }
+          }
+        }
+        currentPhotos = currentPhotos.filter(p => !toDelete.includes(p));
+      }
     }
     if (req.files && Array.isArray(req.files) && req.files.length > 0) {
       const newFiles = req.files.map(f => f.filename);
       currentPhotos = [...currentPhotos, ...newFiles];
     }
+
+    const parsedBranchId = (branch_id !== undefined && branch_id !== null && String(branch_id).trim() !== '')
+      ? parseInt(branch_id, 10)
+      : existing.branch_id;
+    const nextBranchId = Number.isNaN(parsedBranchId) ? existing.branch_id : parsedBranchId;
 
     const updateSql = `
       UPDATE outlet_visits
@@ -436,7 +493,7 @@ exports.updateVisit = async (req, res) => {
     `;
 
     await query.run(updateSql, [
-      parseInt(branch_id ?? existing.branch_id, 10),
+      nextBranchId,
       visit_date ?? existing.visit_date,
       visit_time ?? existing.visit_time,
       visitor_name ?? existing.visitor_name,
@@ -459,6 +516,7 @@ exports.updateVisit = async (req, res) => {
 
     res.json({ success: true, message: 'Data kunjungan berhasil diperbarui.' });
   } catch (error) {
+    cleanupUploadedFiles(req.files);
     console.error('API Error (updateVisit):', error);
     res.status(500).json({ success: false, message: 'Gagal memperbarui data kunjungan.' });
   }
@@ -564,10 +622,17 @@ exports.createIncident = async (req, res) => {
     } = req.body;
 
     if (!branch_id || !title || !description) {
+      cleanupUploadedFiles(req.files);
       return res.status(400).json({
         success: false,
         message: 'Cabang outlet, judul kejadian, dan deskripsi wajib diisi.'
       });
+    }
+    const branchIdInt = parseInt(branch_id, 10);
+    const branchExists = await query.get('SELECT id FROM branches WHERE id = ?', [branchIdInt]);
+    if (!branchExists) {
+      cleanupUploadedFiles(req.files);
+      return res.status(400).json({ success: false, message: 'Cabang outlet tidak ditemukan.' });
     }
 
     let photosList = [];
@@ -606,6 +671,7 @@ exports.createIncident = async (req, res) => {
       id: result.id
     });
   } catch (error) {
+    cleanupUploadedFiles(req.files);
     console.error('API Error (createIncident):', error);
     res.status(500).json({ success: false, message: 'Gagal mencatat kejadian outlet.' });
   }
@@ -619,6 +685,7 @@ exports.updateIncident = async (req, res) => {
     const id = parseInt(req.params.id, 10);
     const existing = await query.get('SELECT * FROM outlet_incidents WHERE id = ?', [id]);
     if (!existing) {
+      cleanupUploadedFiles(req.files);
       return res.status(404).json({ success: false, message: 'Data kejadian tidak ditemukan.' });
     }
 
@@ -634,13 +701,21 @@ exports.updateIncident = async (req, res) => {
       linked_employee_id
     } = req.body;
 
-    let currentPhotos = existing.photos ? JSON.parse(existing.photos) : [];
+    let currentPhotos = safeParseJsonArray(existing.photos);
     if (req.files && Array.isArray(req.files) && req.files.length > 0) {
       const newFiles = req.files.map(f => f.filename);
       currentPhotos = [...currentPhotos, ...newFiles];
     }
 
-    const resolved = status === 'Resolved' ? (resolved_date || getTodayDateStr()) : null;
+    const finalStatus = status ?? existing.status;
+    const resolved = finalStatus === 'Resolved'
+      ? (resolved_date || existing.resolved_date || getTodayDateStr())
+      : null;
+
+    const parsedBranchId = (branch_id !== undefined && branch_id !== null && String(branch_id).trim() !== '')
+      ? parseInt(branch_id, 10)
+      : existing.branch_id;
+    const nextBranchId = Number.isNaN(parsedBranchId) ? existing.branch_id : parsedBranchId;
 
     const updateSql = `
       UPDATE outlet_incidents
@@ -651,13 +726,13 @@ exports.updateIncident = async (req, res) => {
     `;
 
     await query.run(updateSql, [
-      parseInt(branch_id ?? existing.branch_id, 10),
+      nextBranchId,
       category ?? existing.category,
       severity ?? existing.severity,
       title ?? existing.title,
       description ?? existing.description,
       action_taken ?? existing.action_taken,
-      status ?? existing.status,
+      finalStatus,
       resolved,
       linked_employee_id !== undefined ? (linked_employee_id ? parseInt(linked_employee_id, 10) : null) : existing.linked_employee_id,
       JSON.stringify(currentPhotos),
@@ -666,6 +741,7 @@ exports.updateIncident = async (req, res) => {
 
     res.json({ success: true, message: 'Data kejadian berhasil diperbarui.' });
   } catch (error) {
+    cleanupUploadedFiles(req.files);
     console.error('API Error (updateIncident):', error);
     res.status(500).json({ success: false, message: 'Gagal memperbarui kejadian.' });
   }
@@ -677,6 +753,14 @@ exports.updateIncident = async (req, res) => {
 exports.deleteIncident = async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
+    const existing = await query.get('SELECT id, photos FROM outlet_incidents WHERE id = ?', [id]);
+    if (!existing) {
+      return res.status(404).json({ success: false, message: 'Data kejadian tidak ditemukan.' });
+    }
+    for (const filename of safeParseJsonArray(existing.photos)) {
+      const fp = path.join(outletPhotosDir, path.basename(String(filename)));
+      if (fs.existsSync(fp)) { try { fs.unlinkSync(fp); } catch {} }
+    }
     await query.run('DELETE FROM outlet_incidents WHERE id = ?', [id]);
     res.json({ success: true, message: 'Data kejadian berhasil dihapus.' });
   } catch (error) {
@@ -829,15 +913,24 @@ exports.getBranchHistory = async (req, res) => {
       [branchId]
     );
 
+    const visitsCountRow = await query.get(
+      'SELECT COUNT(*) as cnt FROM outlet_visits WHERE branch_id = ?',
+      [branchId]
+    );
+    const openIncCountRow = await query.get(
+      "SELECT COUNT(*) as cnt FROM outlet_incidents WHERE branch_id = ? AND status != 'Resolved'",
+      [branchId]
+    );
+
     // Calculate branch statistics
-    const totalVisits = visits.length;
+    const totalVisits = visitsCountRow ? visitsCountRow.cnt : visits.length;
     const scoredVisits = visits.filter(v => v.overall_score > 0);
     const avgScore = scoredVisits.length > 0
       ? Math.round(scoredVisits.reduce((acc, curr) => acc + curr.overall_score, 0) / scoredVisits.length)
       : 0;
 
     const lastVisit = visits[0] || null;
-    const openIncidents = incidents.filter(i => i.status !== 'Resolved').length;
+    const openIncidents = openIncCountRow ? openIncCountRow.cnt : incidents.filter(i => i.status !== 'Resolved').length;
     const pendingActions = actionItems.filter(a => a.status !== 'Done').length;
 
     res.json({

@@ -1,5 +1,12 @@
 const { query } = require('../db');
 const { calcTHP, getPeriodLabel } = require('../utils/payrollCalc');
+const { decryptRow } = require('../utils/fieldCrypto');
+
+const numOr = (val, fallback) => {
+  if (val === undefined || val === null || val === '') return fallback;
+  const n = Number(val);
+  return Number.isFinite(n) ? n : fallback;
+};
 
 async function getSettings() {
   const rows = await query.all('SELECT key, value FROM system_settings');
@@ -7,15 +14,11 @@ async function getSettings() {
 }
 
 async function getOrCreatePeriod(period) {
-  let pp = await query.get('SELECT * FROM payroll_periods WHERE period = ?', [period]);
-  if (!pp) {
-    const res = await query.run(
-      "INSERT INTO payroll_periods (period, status) VALUES (?, 'Draft')",
-      [period]
-    );
-    pp = await query.get('SELECT * FROM payroll_periods WHERE id = ?', [res.id]);
-  }
-  return pp;
+  await query.run(
+    "INSERT OR IGNORE INTO payroll_periods (period, status) VALUES (?, 'Draft')",
+    [period]
+  );
+  return query.get('SELECT * FROM payroll_periods WHERE period = ?', [period]);
 }
 
 /**
@@ -59,44 +62,51 @@ exports.generateEntries = async (req, res) => {
     );
 
     let created = 0, updated = 0;
-    for (const emp of employees) {
-      const att = await query.get(
-        'SELECT * FROM attendance_records WHERE employee_id = ? AND period = ?',
-        [emp.id, period]
-      );
-
-      const deduction_kasbon = att ? att.cash_advance : 0;
-      const deduction_absent = att ? att.deduction_absent : 0;
-      const deduction_late = att ? att.deduction_late : 0;
-      const deduction_fake_money = att ? att.fake_money : 0;
-
-      const existing = await query.get(
-        'SELECT * FROM payroll_entries WHERE payroll_period_id = ? AND employee_id = ?',
-        [pp.id, emp.id]
-      );
-
-      if (existing) {
-        const thp = calcTHP({ ...existing, salary: emp.salary, allowance: emp.allowance, deduction_kasbon, deduction_absent, deduction_late, deduction_fake_money });
-        await query.run(
-          `UPDATE payroll_entries SET
-            salary=?, allowance=?, employee_type=?,
-            deduction_kasbon=?, deduction_absent=?, deduction_late=?, deduction_fake_money=?,
-            take_home_pay=?, updated_at=CURRENT_TIMESTAMP
-           WHERE id=?`,
-          [emp.salary, emp.allowance, emp.employee_type, deduction_kasbon, deduction_absent, deduction_late, deduction_fake_money, thp, existing.id]
+    await query.run('BEGIN TRANSACTION');
+    try {
+      for (const emp of employees) {
+        const att = await query.get(
+          'SELECT * FROM attendance_records WHERE employee_id = ? AND period = ?',
+          [emp.id, period]
         );
-        updated++;
-      } else {
-        const thp = calcTHP({ salary: emp.salary, allowance: emp.allowance, bonus_penjualan: 0, bonus_tartun: 0, bonus_lain: 0, deduction_kasbon, deduction_absent, deduction_late, deduction_fake_money });
-        await query.run(
-          `INSERT INTO payroll_entries
-            (payroll_period_id, period, employee_id, branch_id, employee_type,
-             salary, allowance, deduction_kasbon, deduction_absent, deduction_late, deduction_fake_money, take_home_pay)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
-          [pp.id, period, emp.id, emp.branch_id, emp.employee_type, emp.salary, emp.allowance, deduction_kasbon, deduction_absent, deduction_late, deduction_fake_money, thp]
+
+        const deduction_kasbon = att ? att.cash_advance : 0;
+        const deduction_absent = att ? att.deduction_absent : 0;
+        const deduction_late = att ? att.deduction_late : 0;
+        const deduction_fake_money = att ? att.fake_money : 0;
+
+        const existing = await query.get(
+          'SELECT * FROM payroll_entries WHERE payroll_period_id = ? AND employee_id = ?',
+          [pp.id, emp.id]
         );
-        created++;
+
+        if (existing) {
+          const thp = calcTHP({ ...existing, salary: emp.salary, allowance: emp.allowance, deduction_kasbon, deduction_absent, deduction_late, deduction_fake_money });
+          await query.run(
+            `UPDATE payroll_entries SET
+              branch_id=?, salary=?, allowance=?, employee_type=?,
+              deduction_kasbon=?, deduction_absent=?, deduction_late=?, deduction_fake_money=?,
+              take_home_pay=?, updated_at=CURRENT_TIMESTAMP
+             WHERE id=?`,
+            [emp.branch_id, emp.salary, emp.allowance, emp.employee_type, deduction_kasbon, deduction_absent, deduction_late, deduction_fake_money, thp, existing.id]
+          );
+          updated++;
+        } else {
+          const thp = calcTHP({ salary: emp.salary, allowance: emp.allowance, bonus_penjualan: 0, bonus_tartun: 0, bonus_lain: 0, deduction_kasbon, deduction_absent, deduction_late, deduction_fake_money });
+          await query.run(
+            `INSERT INTO payroll_entries
+              (payroll_period_id, period, employee_id, branch_id, employee_type,
+               salary, allowance, deduction_kasbon, deduction_absent, deduction_late, deduction_fake_money, take_home_pay)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+            [pp.id, period, emp.id, emp.branch_id, emp.employee_type, emp.salary, emp.allowance, deduction_kasbon, deduction_absent, deduction_late, deduction_fake_money, thp]
+          );
+          created++;
+        }
       }
+      await query.run('COMMIT');
+    } catch (txErr) {
+      await query.run('ROLLBACK').catch(() => {});
+      throw txErr;
     }
 
     res.json({ success: true, message: `Payroll di-generate: ${created} baru, ${updated} diperbarui.`, created, updated });
@@ -149,20 +159,23 @@ exports.getEntries = async (req, res) => {
  */
 exports.updateEntry = async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
-    const entry = await query.get('SELECT * FROM payroll_entries pe JOIN payroll_periods pp ON pe.payroll_period_id=pp.id WHERE pe.id=?', [id]);
+    const id = parseInt(req.params.id, 10);
+    const entry = await query.get(
+      'SELECT pe.*, pp.status AS period_status FROM payroll_entries pe JOIN payroll_periods pp ON pe.payroll_period_id = pp.id WHERE pe.id = ?',
+      [id]
+    );
     if (!entry) return res.status(404).json({ success: false, message: 'Entry tidak ditemukan.' });
-    if (entry.status !== 'Draft') return res.status(400).json({ success: false, message: 'Payroll sudah dikunci.' });
+    if (entry.period_status !== 'Draft') return res.status(400).json({ success: false, message: 'Payroll sudah dikunci.' });
 
     const { bonus_penjualan, bonus_tartun, bonus_lain, bonus_lain_label, bonus_ditahan, notes } = req.body;
 
     const updated = {
       ...entry,
-      bonus_penjualan: parseFloat(bonus_penjualan) || entry.bonus_penjualan,
-      bonus_tartun: parseFloat(bonus_tartun) || entry.bonus_tartun,
-      bonus_lain: parseFloat(bonus_lain) || entry.bonus_lain,
+      bonus_penjualan: numOr(bonus_penjualan, entry.bonus_penjualan),
+      bonus_tartun: numOr(bonus_tartun, entry.bonus_tartun),
+      bonus_lain: numOr(bonus_lain, entry.bonus_lain),
       bonus_lain_label: bonus_lain_label !== undefined ? bonus_lain_label : entry.bonus_lain_label,
-      bonus_ditahan: parseFloat(bonus_ditahan) || entry.bonus_ditahan,
+      bonus_ditahan: numOr(bonus_ditahan, entry.bonus_ditahan),
       notes: notes !== undefined ? notes : entry.notes,
     };
     updated.take_home_pay = calcTHP(updated);
@@ -190,7 +203,7 @@ exports.updateEntry = async (req, res) => {
  */
 exports.getSlip = async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(req.params.id, 10);
     const entry = await query.get(`
       SELECT pe.*,
         e.name AS employee_name, e.position, e.phone, e.bank_name, e.bank_account,
@@ -202,6 +215,7 @@ exports.getSlip = async (req, res) => {
     `, [id]);
     if (!entry) return res.status(404).json({ success: false, message: 'Entry tidak ditemukan.' });
 
+    decryptRow(entry);
     const settings = await getSettings();
     const label = getPeriodLabel(entry.period, parseInt(settings.payroll_period_start_day) || 29, parseInt(settings.payroll_period_end_day) || 28);
 
@@ -220,7 +234,7 @@ exports.getSummary = async (req, res) => {
   try {
     const { period } = req.params;
     const pp = await query.get('SELECT * FROM payroll_periods WHERE period = ?', [period]);
-    if (!pp) return res.json({ success: true, data: [], total_thp: 0 });
+    if (!pp) return res.json({ success: true, data: [], grand_total: 0, period_info: null });
 
     const byBranch = await query.all(`
       SELECT pe.employee_type, pe.branch_id, b.name AS branch_name, b.code AS branch_code,

@@ -1,12 +1,22 @@
 const { query } = require('../db');
-const { STAFF_ALL_FIELDS, STAFF_BIODATA_FIELDS, STAFF_WORK_FIELDS, buildInsert, buildUpdate } = require('../utils/staffFields');
-const { decryptRow, blindIndex } = require('../utils/fieldCrypto');
-
-const ENCRYPTED_COLS = ['nik', 'npwp', 'bank_account', 'bpjs_health', 'bpjs_employment', 'health_history', 'allergies', 'medications'];
+const { STAFF_ALL_FIELDS, buildInsert, buildUpdate } = require('../utils/staffFields');
+const { decryptRow, blindIndex, isEnabled } = require('../utils/fieldCrypto');
 
 function sanitizeEmployee(e) {
   decryptRow(e);
   delete e.nik_bidx;
+}
+
+async function hasDuplicateNik(nik, excludeId = null) {
+  const cleanNik = nik !== undefined && nik !== null ? String(nik).trim() : '';
+  if (!cleanNik) return false;
+  const sql = isEnabled()
+    ? `SELECT id FROM employees WHERE nik_bidx = ?${excludeId ? ' AND id != ?' : ''}`
+    : `SELECT id FROM employees WHERE nik = ?${excludeId ? ' AND id != ?' : ''}`;
+  const param = isEnabled() ? blindIndex(cleanNik) : cleanNik;
+  if (!param) return false;
+  const row = await query.get(sql, excludeId ? [param, excludeId] : [param]);
+  return !!row;
 }
 
 exports.getAll = async (req, res) => {
@@ -22,8 +32,8 @@ exports.getAll = async (req, res) => {
     const params = [];
 
     if (search) {
-      sql += ' AND (e.name LIKE ? OR e.phone LIKE ? OR e.nik_bidx = ? OR b.name LIKE ? OR e.resign_reason LIKE ? OR e.resign_notes LIKE ?)';
-      params.push(`%${search}%`, `%${search}%`, blindIndex(search), `%${search}%`, `%${search}%`, `%${search}%`);
+      sql += ' AND (e.name LIKE ? OR e.phone LIKE ? OR e.nik LIKE ? OR e.nik_bidx = ? OR b.name LIKE ? OR e.resign_reason LIKE ? OR e.resign_notes LIKE ?)';
+      params.push(`%${search}%`, `%${search}%`, `%${search}%`, blindIndex(search), `%${search}%`, `%${search}%`, `%${search}%`);
     }
     if (branch_id) {
       sql += ' AND e.branch_id = ?';
@@ -71,15 +81,18 @@ exports.getById = async (req, res) => {
 
 exports.create = async (req, res) => {
   try {
-    if (!req.body.name) {
+    if (!req.body.name || !String(req.body.name).trim()) {
       return res.status(400).json({ success: false, message: 'Nama karyawan wajib diisi.' });
+    }
+    if (await hasDuplicateNik(req.body.nik)) {
+      return res.status(400).json({ success: false, message: 'NIK sudah terdaftar di sistem.' });
     }
     const { columns, placeholders, values } = buildInsert(STAFF_ALL_FIELDS, req.body);
     const result = await query.run(
       `INSERT INTO employees (${columns}, created_at, updated_at) VALUES (${placeholders}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
       values
     );
-    res.json({ success: true, message: `Karyawan "${req.body.name.trim()}" berhasil ditambahkan.`, employeeId: result.id });
+    res.json({ success: true, message: `Karyawan "${String(req.body.name).trim()}" berhasil ditambahkan.`, employeeId: result.id });
   } catch (error) {
     if (error.message && /UNIQUE constraint failed.*employees\.nik_bidx/.test(error.message)) {
       return res.status(400).json({ success: false, message: 'NIK sudah terdaftar di sistem.' });
@@ -92,11 +105,14 @@ exports.create = async (req, res) => {
 exports.update = async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
-    if (!req.body.name) {
+    if (!req.body.name || !String(req.body.name).trim()) {
       return res.status(400).json({ success: false, message: 'Nama karyawan wajib diisi.' });
     }
     const existing = await query.get('SELECT id FROM employees WHERE id = ?', [id]);
     if (!existing) return res.status(404).json({ success: false, message: 'Karyawan tidak ditemukan.' });
+    if (await hasDuplicateNik(req.body.nik, id)) {
+      return res.status(400).json({ success: false, message: 'NIK sudah terdaftar di sistem.' });
+    }
 
     const { assignments, values } = buildUpdate(STAFF_ALL_FIELDS, req.body);
     await query.run(
@@ -120,11 +136,21 @@ exports.deactivate = async (req, res) => {
     if (!['Resign', 'Terminated', 'Active'].includes(status)) {
       return res.status(400).json({ success: false, message: 'Status harus Active, Resign, atau Terminated.' });
     }
+    const existing = await query.get('SELECT id, candidate_id FROM employees WHERE id = ?', [id]);
+    if (!existing) {
+      return res.status(404).json({ success: false, message: 'Karyawan tidak ditemukan.' });
+    }
     if (status === 'Active') {
       await query.run(
         'UPDATE employees SET status = ?, resign_date = NULL, resign_reason = NULL, resign_notes = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
         ['Active', id]
       );
+      if (existing.candidate_id) {
+        await query.run(
+          "UPDATE candidates SET status = 'Hired', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+          [existing.candidate_id]
+        );
+      }
       return res.json({ success: true, message: 'Karyawan berhasil diaktifkan kembali.' });
     }
     await query.run(
@@ -137,6 +163,12 @@ exports.deactivate = async (req, res) => {
         id,
       ]
     );
+    if (existing.candidate_id) {
+      await query.run(
+        "UPDATE candidates SET status = 'Resigned', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'Hired'",
+        [existing.candidate_id]
+      );
+    }
     res.json({ success: true, message: 'Status dan alasan keluar karyawan berhasil disimpan.' });
   } catch (error) {
     console.error('API Error (deactivate staff):', error);
@@ -157,9 +189,13 @@ exports.promoteFromCandidate = async (req, res) => {
     if (!candidate) {
       return res.status(404).json({ success: false, message: 'Kandidat Hired tidak ditemukan.' });
     }
+    decryptRow(candidate);
     const alreadyPromoted = await query.get('SELECT id FROM employees WHERE candidate_id = ?', [candidateId]);
     if (alreadyPromoted) {
       return res.status(400).json({ success: false, message: 'Kandidat ini sudah dipromosikan menjadi karyawan.' });
+    }
+    if (await hasDuplicateNik(candidate.nik)) {
+      return res.status(400).json({ success: false, message: 'NIK sudah terdaftar di tabel karyawan.' });
     }
 
     const body = {

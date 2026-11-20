@@ -1,12 +1,15 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { stageApi } from '../services/api';
 
-function StageManagement({ setView }) {
+function StageManagement() {
   const [stages, setStages] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [reordering, setReordering] = useState(false);
   const [form, setForm] = useState({ name: '' });
   const [editForm, setEditForm] = useState({ id: null, name: '' });
   const [error, setError] = useState('');
@@ -15,15 +18,29 @@ function StageManagement({ setView }) {
     fetchStages();
   }, []);
 
+  useEffect(() => {
+    if (!showAddModal && !showEditModal) return undefined;
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return;
+      if (showEditModal) { setShowEditModal(false); setError(''); }
+      else if (showAddModal) { setShowAddModal(false); setError(''); setForm({ name: '' }); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [showAddModal, showEditModal]);
+
   const fetchStages = async () => {
     try {
       setLoading(true);
+      setFetchError('');
       const res = await stageApi.getAll();
       if (res.success) {
-        setStages(res.data);
+        setStages(res.data || []);
+      } else {
+        setFetchError(res.message || 'Gagal memuat daftar tahap seleksi.');
       }
     } catch (err) {
-      console.error('Error fetching stages:', err);
+      setFetchError(err.message || 'Gagal terhubung ke server.');
     } finally {
       setLoading(false);
     }
@@ -32,13 +49,14 @@ function StageManagement({ setView }) {
   const handleAdd = async (e) => {
     e.preventDefault();
     setError('');
-    if (!form.name.trim()) {
+    const cleanName = form.name.trim();
+    if (!cleanName) {
       setError('Nama tahap seleksi wajib diisi.');
       return;
     }
     try {
       setSubmitting(true);
-      const res = await stageApi.create({ name: form.name });
+      const res = await stageApi.create({ name: cleanName });
       if (res.success) {
         setStages(prev => [...prev, res.data]);
         setShowAddModal(false);
@@ -47,7 +65,7 @@ function StageManagement({ setView }) {
         setError(res.message || 'Gagal menambahkan tahap.');
       }
     } catch (err) {
-      setError('Gagal terhubung ke server.');
+      setError(err.message || 'Gagal terhubung ke server.');
     } finally {
       setSubmitting(false);
     }
@@ -56,21 +74,22 @@ function StageManagement({ setView }) {
   const handleEditSubmit = async (e) => {
     e.preventDefault();
     setError('');
-    if (!editForm.name.trim()) {
+    const cleanName = editForm.name.trim();
+    if (!cleanName) {
       setError('Nama tahap seleksi wajib diisi.');
       return;
     }
     try {
       setSubmitting(true);
-      const res = await stageApi.update(editForm.id, { name: editForm.name });
+      const res = await stageApi.update(editForm.id, { name: cleanName });
       if (res.success) {
-        setStages(prev => prev.map(s => s.id === editForm.id ? { ...s, name: editForm.name } : s));
+        setStages(prev => prev.map(s => s.id === editForm.id ? { ...s, name: cleanName } : s));
         setShowEditModal(false);
       } else {
         setError(res.message || 'Gagal memperbarui tahap.');
       }
     } catch (err) {
-      setError('Gagal terhubung ke server.');
+      setError(err.message || 'Gagal terhubung ke server.');
     } finally {
       setSubmitting(false);
     }
@@ -86,23 +105,31 @@ function StageManagement({ setView }) {
         alert(res.message || 'Gagal menghapus tahap seleksi.');
       }
     } catch (err) {
-      alert('Gagal terhubung ke server.');
+      alert(err.message || 'Gagal terhubung ke server.');
     }
   };
 
   const handleToggleActive = async (stage) => {
+    const activeCount = stages.filter(s => s.is_active === 1).length;
+    if (stage.is_active === 1 && activeCount <= 1) {
+      alert('Minimal harus ada 1 tahap seleksi yang aktif.');
+      return;
+    }
     try {
       const nextActive = stage.is_active ? 0 : 1;
       const res = await stageApi.update(stage.id, { is_active: nextActive });
       if (res.success) {
         setStages(prev => prev.map(s => s.id === stage.id ? { ...s, is_active: nextActive } : s));
+      } else {
+        alert(res.message || 'Gagal mengubah status aktif.');
       }
     } catch (err) {
-      alert('Gagal mengubah status aktif.');
+      alert(err.message || 'Gagal mengubah status aktif.');
     }
   };
 
   const handleMove = async (index, direction) => {
+    if (reordering) return;
     const updated = [...stages];
     if (direction === 'up' && index > 0) {
       [updated[index], updated[index - 1]] = [updated[index - 1], updated[index]];
@@ -112,12 +139,18 @@ function StageManagement({ setView }) {
       return;
     }
     setStages(updated);
+    setReordering(true);
     try {
-      await stageApi.reorder(updated.map(s => s.id));
+      const res = await stageApi.reorder(updated.map(s => s.id));
+      if (!res?.success) {
+        alert(res?.message || 'Gagal menyimpan urutan baru.');
+        fetchStages();
+      }
     } catch (err) {
-      console.error(err);
-      alert('Gagal menyimpan urutan baru.');
-      fetchStages(); // Rollback
+      alert(err.message || 'Gagal menyimpan urutan baru.');
+      fetchStages();
+    } finally {
+      setReordering(false);
     }
   };
 
@@ -132,24 +165,32 @@ function StageManagement({ setView }) {
           <p className="page-subtitle">Sesuaikan alur proses rekrutmen perusahaan Anda.</p>
         </div>
         <button
+          type="button"
           className="btn btn-primary"
-          onClick={() => { setShowAddModal(true); setError(''); }}
+          onClick={() => { setShowAddModal(true); setError(''); setForm({ name: '' }); }}
         >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '6px' }}><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           Tambah Tahap Baru
         </button>
       </div>
 
       {/* Info Card */}
       <div className="glass-panel" style={{ padding: '20px', marginBottom: '24px', display: 'flex', gap: '16px', alignItems: 'center' }}>
-        <div style={{ background: 'rgba(139,92,246,0.15)', color: 'var(--color-primary)', width: '48px', height: '48px', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px' }}>⚙️</div>
+        <div style={{ background: 'rgba(139,92,246,0.15)', color: 'var(--color-primary)', width: '48px', height: '48px', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px', flexShrink: 0 }}>⚙️</div>
         <div>
-          <h3 style={{ margin: 0, fontSize: '15px', color: 'white' }}>Panduan Pipeline Seleksi</h3>
+          <h3 style={{ margin: 0, fontSize: '15px', color: 'var(--text-primary)' }}>Panduan Pipeline Seleksi</h3>
           <p style={{ margin: '4px 0 0', fontSize: '13px', color: 'var(--text-muted)' }}>
             Tahap bawaan sistem (System Built-in) memiliki form penilaian khusus. Tahap kustom/tambahan akan menggunakan form evaluasi generic. Anda dapat menonaktifkan tahap bawaan jika tidak diperlukan di perusahaan Anda.
           </p>
         </div>
       </div>
+
+      {fetchError && (
+        <div style={{ padding: '12px 16px', borderRadius: '10px', marginBottom: '16px', backgroundColor: 'var(--color-danger-bg)', color: 'var(--color-danger)', border: '1px solid var(--color-danger)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', fontSize: '13px' }}>
+          <span>{fetchError}</span>
+          <button type="button" className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: '12px' }} onClick={fetchStages}>Coba Lagi</button>
+        </div>
+      )}
 
       {/* Stages Table */}
       <div className="glass-panel">
@@ -191,8 +232,8 @@ function StageManagement({ setView }) {
                           borderRadius: '6px',
                           fontSize: '11px',
                           fontWeight: 700,
-                          background: isBuiltIn ? 'rgba(59,130,246,0.15)' : 'rgba(245,158,11,0.15)',
-                          color: isBuiltIn ? 'var(--color-primary)' : '#f59e0b',
+                          background: isBuiltIn ? 'var(--color-info-bg)' : 'var(--color-warning-bg)',
+                          color: isBuiltIn ? 'var(--color-info)' : 'var(--color-warning)',
                           textTransform: 'uppercase'
                         }}>
                           {isBuiltIn ? 'Sistem (Built-in)' : 'Kustom'}
@@ -200,9 +241,10 @@ function StageManagement({ setView }) {
                       </td>
                       <td>
                         <button
+                          type="button"
                           onClick={() => handleToggleActive(stage)}
                           style={{
-                            background: stage.is_active ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)',
+                            background: stage.is_active ? 'var(--color-success-bg)' : 'var(--color-danger-bg)',
                             color: stage.is_active ? 'var(--color-success)' : 'var(--color-danger)',
                             border: 'none',
                             padding: '4px 12px',
@@ -221,19 +263,21 @@ function StageManagement({ setView }) {
                       <td style={{ textAlign: 'center' }}>
                         <div style={{ display: 'inline-flex', gap: '6px' }}>
                           <button
+                            type="button"
                             onClick={() => handleMove(idx, 'up')}
-                            disabled={idx === 0}
+                            disabled={idx === 0 || reordering}
                             className="btn btn-secondary"
-                            style={{ padding: '4px 10px', fontSize: '12px', minWidth: '40px', cursor: idx === 0 ? 'not-allowed' : 'pointer' }}
+                            style={{ padding: '4px 10px', fontSize: '12px', minWidth: '40px', cursor: idx === 0 || reordering ? 'not-allowed' : 'pointer' }}
                             title="Pindah ke Atas"
                           >
                             ▲
                           </button>
                           <button
+                            type="button"
                             onClick={() => handleMove(idx, 'down')}
-                            disabled={idx === stages.length - 1}
+                            disabled={idx === stages.length - 1 || reordering}
                             className="btn btn-secondary"
-                            style={{ padding: '4px 10px', fontSize: '12px', minWidth: '40px', cursor: idx === stages.length - 1 ? 'not-allowed' : 'pointer' }}
+                            style={{ padding: '4px 10px', fontSize: '12px', minWidth: '40px', cursor: idx === stages.length - 1 || reordering ? 'not-allowed' : 'pointer' }}
                             title="Pindah ke Bawah"
                           >
                             ▼
@@ -243,6 +287,7 @@ function StageManagement({ setView }) {
                       <td style={{ textAlign: 'center' }}>
                         <div style={{ display: 'inline-flex', gap: '8px' }}>
                           <button
+                            type="button"
                             onClick={() => {
                               setEditForm({ id: stage.id, name: stage.name });
                               setShowEditModal(true);
@@ -261,23 +306,21 @@ function StageManagement({ setView }) {
                           </button>
                           {!isBuiltIn && (
                             <button
+                              type="button"
                               onClick={() => handleDelete(stage)}
                               style={{
-                                background: 'rgba(239,68,68,0.12)',
+                                background: 'var(--color-danger-bg)',
                                 border: '1px solid rgba(239,68,68,0.25)',
-                                color: '#ef4444',
+                                color: 'var(--color-danger)',
                                 padding: '6px 12px',
                                 borderRadius: '8px',
                                 cursor: 'pointer',
                                 fontSize: '13px',
                                 fontWeight: 600,
-                                transition: 'all 0.2s',
                                 display: 'inline-flex',
                                 alignItems: 'center',
                                 gap: '4px'
                               }}
-                              onMouseOver={e => e.currentTarget.style.background = 'rgba(239,68,68,0.22)'}
-                              onMouseOut={e => e.currentTarget.style.background = 'rgba(239,68,68,0.12)'}
                             >
                               🗑️ Hapus
                             </button>
@@ -294,35 +337,39 @@ function StageManagement({ setView }) {
       </div>
 
       {/* Add Stage Modal */}
-      {showAddModal && (
-        <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          zIndex: 1000, padding: '20px', backdropFilter: 'blur(6px)'
-        }}>
+      {showAddModal && createPortal(
+        <div
+          onClick={(e) => { if (e.target === e.currentTarget) { setShowAddModal(false); setError(''); setForm({ name: '' }); } }}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            zIndex: 3000, padding: '20px', backdropFilter: 'blur(6px)', overscrollBehavior: 'contain'
+          }}
+        >
           <div style={{
-            width: '100%', maxWidth: '420px',
-            background: 'linear-gradient(160deg, rgba(15,15,30,0.98) 0%, rgba(20,12,40,0.98) 100%)',
-            border: '1px solid rgba(139,92,246,0.3)', borderRadius: '24px',
-            boxShadow: '0 32px 64px rgba(0,0,0,0.6)'
+            width: '100%', maxWidth: '420px', maxHeight: '90vh', overflowY: 'auto', overscrollBehavior: 'contain',
+            background: 'var(--bg-surface-opaque)',
+            border: '1px solid var(--border-color)', borderRadius: '24px',
+            boxShadow: '0 32px 64px rgba(0,0,0,0.35)'
           }}>
-            <div style={{ padding: '24px 28px', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3 style={{ margin: 0, fontSize: '18px', color: 'white' }}>Tambah Tahap Seleksi Baru</h3>
+            <div style={{ padding: '24px 28px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0, fontSize: '18px', color: 'var(--text-primary)' }}>Tambah Tahap Seleksi Baru</h3>
               <button
+                type="button"
                 onClick={() => { setShowAddModal(false); setError(''); setForm({ name: '' }); }}
-                style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.5)', cursor: 'pointer', fontSize: '20px' }}
+                style={{ background: 'var(--bg-hover)', border: 'none', borderRadius: '8px', width: '32px', height: '32px', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
               >×</button>
             </div>
 
             {error && (
-              <div style={{ margin: '16px 28px 0', background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '10px', padding: '10px 14px', color: '#f87171', fontSize: '13px' }}>
+              <div style={{ margin: '16px 28px 0', background: 'var(--color-danger-bg)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '10px', padding: '10px 14px', color: 'var(--color-danger)', fontSize: '13px' }}>
                 {error}
               </div>
             )}
 
             <form onSubmit={handleAdd} style={{ padding: '20px 28px 28px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div>
-                <label style={{ display: 'block', fontSize: '12px', color: 'rgba(255,255,255,0.6)', marginBottom: '6px' }}>Nama Tahap *</label>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>Nama Tahap *</label>
                 <input
                   style={{ width: '100%', boxSizing: 'border-box', background: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '10px 14px', color: 'var(--text-primary)', outline: 'none' }}
                   placeholder="Contoh: Tes Wawancara Psikolog"
@@ -337,7 +384,7 @@ function StageManagement({ setView }) {
                   type="button"
                   onClick={() => { setShowAddModal(false); setError(''); setForm({ name: '' }); }}
                   className="btn btn-secondary"
-                  style={{ flex: 1, padding: '10px 0' }}
+                  style={{ flex: 1, padding: '10px 0', justifyContent: 'center' }}
                 >
                   Batal
                 </button>
@@ -345,46 +392,51 @@ function StageManagement({ setView }) {
                   type="submit"
                   disabled={submitting}
                   className="btn btn-primary"
-                  style={{ flex: 2, padding: '10px 0' }}
+                  style={{ flex: 2, padding: '10px 0', justifyContent: 'center' }}
                 >
                   {submitting ? 'Menyimpan...' : 'Tambah Tahap'}
                 </button>
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Edit Stage Modal */}
-      {showEditModal && (
-        <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          zIndex: 1000, padding: '20px', backdropFilter: 'blur(6px)'
-        }}>
+      {showEditModal && createPortal(
+        <div
+          onClick={(e) => { if (e.target === e.currentTarget) { setShowEditModal(false); setError(''); } }}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            zIndex: 3000, padding: '20px', backdropFilter: 'blur(6px)', overscrollBehavior: 'contain'
+          }}
+        >
           <div style={{
-            width: '100%', maxWidth: '420px',
-            background: 'linear-gradient(160deg, rgba(15,15,30,0.98) 0%, rgba(20,12,40,0.98) 100%)',
-            border: '1px solid rgba(139,92,246,0.3)', borderRadius: '24px',
-            boxShadow: '0 32px 64px rgba(0,0,0,0.6)'
+            width: '100%', maxWidth: '420px', maxHeight: '90vh', overflowY: 'auto', overscrollBehavior: 'contain',
+            background: 'var(--bg-surface-opaque)',
+            border: '1px solid var(--border-color)', borderRadius: '24px',
+            boxShadow: '0 32px 64px rgba(0,0,0,0.35)'
           }}>
-            <div style={{ padding: '24px 28px', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3 style={{ margin: 0, fontSize: '18px', color: 'white' }}>Ubah Nama Tahap Seleksi</h3>
+            <div style={{ padding: '24px 28px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0, fontSize: '18px', color: 'var(--text-primary)' }}>Ubah Nama Tahap Seleksi</h3>
               <button
+                type="button"
                 onClick={() => { setShowEditModal(false); setError(''); }}
-                style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.5)', cursor: 'pointer', fontSize: '20px' }}
+                style={{ background: 'var(--bg-hover)', border: 'none', borderRadius: '8px', width: '32px', height: '32px', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
               >×</button>
             </div>
 
             {error && (
-              <div style={{ margin: '16px 28px 0', background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '10px', padding: '10px 14px', color: '#f87171', fontSize: '13px' }}>
+              <div style={{ margin: '16px 28px 0', background: 'var(--color-danger-bg)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '10px', padding: '10px 14px', color: 'var(--color-danger)', fontSize: '13px' }}>
                 {error}
               </div>
             )}
 
             <form onSubmit={handleEditSubmit} style={{ padding: '20px 28px 28px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div>
-                <label style={{ display: 'block', fontSize: '12px', color: 'rgba(255,255,255,0.6)', marginBottom: '6px' }}>Nama Tahap *</label>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>Nama Tahap *</label>
                 <input
                   style={{ width: '100%', boxSizing: 'border-box', background: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '10px 14px', color: 'var(--text-primary)', outline: 'none' }}
                   value={editForm.name}
@@ -398,7 +450,7 @@ function StageManagement({ setView }) {
                   type="button"
                   onClick={() => setShowEditModal(false)}
                   className="btn btn-secondary"
-                  style={{ flex: 1, padding: '10px 0' }}
+                  style={{ flex: 1, padding: '10px 0', justifyContent: 'center' }}
                 >
                   Batal
                 </button>
@@ -406,14 +458,15 @@ function StageManagement({ setView }) {
                   type="submit"
                   disabled={submitting}
                   className="btn btn-primary"
-                  style={{ flex: 2, padding: '10px 0' }}
+                  style={{ flex: 2, padding: '10px 0', justifyContent: 'center' }}
                 >
                   {submitting ? 'Menyimpan...' : 'Simpan Perubahan'}
                 </button>
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

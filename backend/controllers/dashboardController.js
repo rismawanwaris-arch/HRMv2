@@ -75,6 +75,7 @@ exports.getMasterSummary = async (req, res) => {
     const branchTotal = await query.get("SELECT COUNT(*) as count FROM branches WHERE status = 'Active'");
     const branchKonter = await query.get("SELECT COUNT(*) as count FROM branches WHERE status = 'Active' AND location_type = 'Konter'");
     const branchGudang = await query.get("SELECT COUNT(*) as count FROM branches WHERE status = 'Active' AND location_type = 'Gudang'");
+    const branchKantor = await query.get("SELECT COUNT(*) as count FROM branches WHERE status = 'Active' AND location_type = 'Kantor/Pusat'");
     const branchPetshop = await query.get("SELECT COUNT(*) as count FROM branches WHERE status = 'Active' AND has_petshop = 1");
     const totalRent = await query.get("SELECT COALESCE(SUM(rent_amount), 0) as total FROM branches WHERE status = 'Active'");
 
@@ -111,6 +112,7 @@ exports.getMasterSummary = async (req, res) => {
           total: branchTotal ? branchTotal.count : 0,
           konter: branchKonter ? branchKonter.count : 0,
           gudang: branchGudang ? branchGudang.count : 0,
+          kantor: branchKantor ? branchKantor.count : 0,
           petshop: branchPetshop ? branchPetshop.count : 0,
           total_rent: totalRent ? totalRent.total : 0,
           list: branchList

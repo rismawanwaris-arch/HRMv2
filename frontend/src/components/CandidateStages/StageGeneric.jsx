@@ -1,6 +1,6 @@
 import React from 'react';
 
-function StageGeneric({ candidate, stageId, stageName, stageData, setStageData, handleStageSubmit }) {
+function StageGeneric({ candidate, stageId, stageName, stageData, setStageData, handleStageSubmit, submitting = false }) {
   return (
     <form onSubmit={(e) => { e.preventDefault(); handleStageSubmit(stageId, stageData); }}>
       <div className="eval-title">
@@ -12,7 +12,7 @@ function StageGeneric({ candidate, stageId, stageName, stageData, setStageData, 
 
       <div className="form-group form-group-full" style={{ marginBottom: '24px' }}>
         <label>Catatan Evaluasi / Keterangan</label>
-        <textarea 
+        <textarea
           value={stageData.notes || ''}
           onChange={(e) => setStageData(p => ({ ...p, notes: e.target.value }))}
           placeholder={`Catatan hasil evaluasi untuk tahap ${stageName}...`}
@@ -30,7 +30,9 @@ function StageGeneric({ candidate, stageId, stageName, stageData, setStageData, 
       </div>
 
       {candidate.status === 'Active' && (
-        <button type="submit" className="btn btn-primary">Simpan Hasil Evaluasi</button>
+        <button type="submit" className="btn btn-primary" disabled={submitting}>
+          {submitting ? 'Menyimpan...' : 'Simpan Hasil Evaluasi'}
+        </button>
       )}
     </form>
   );

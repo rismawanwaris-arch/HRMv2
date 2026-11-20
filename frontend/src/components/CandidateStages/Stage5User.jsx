@@ -1,20 +1,27 @@
 import React from 'react';
 
-function Stage5User({ candidate, stageData, setStageData, handleStageSubmit }) {
+function Stage5User({ candidate, stageId = 5, stageData, setStageData, handleStageSubmit, submitting = false }) {
+  const decision = stageData.decision || 'Pending';
+  const badgeClass = decision === 'Recommended'
+    ? 'badge-hired'
+    : decision === 'Not Recommended'
+    ? 'badge-rejected'
+    : 'badge-active';
+
   return (
-    <form onSubmit={(e) => { e.preventDefault(); handleStageSubmit(5, stageData); }}>
+    <form onSubmit={(e) => { e.preventDefault(); handleStageSubmit(stageId, stageData); }}>
       <div className="eval-title">
         <span>Tahap 5: Wawancara User (Kepala Toko / Area Supervisor)</span>
-        <span className={`badge ${stageData.passed ? 'badge-hired' : 'badge-active'}`}>
-          {stageData.decision === 'Recommended' ? 'Direkomendasikan' : stageData.decision === 'Not Recommended' ? 'Ditolak' : 'Menunggu Umpan Balik'}
+        <span className={`badge ${badgeClass}`}>
+          {decision === 'Recommended' ? 'Direkomendasikan' : decision === 'Not Recommended' ? 'Ditolak' : 'Menunggu Umpan Balik'}
         </span>
       </div>
 
       <div className="form-grid" style={{ marginBottom: '24px' }}>
         <div className="form-group">
           <label>Keputusan Akhir Kepala Toko</label>
-          <select 
-            value={stageData.decision} 
+          <select
+            value={decision}
             onChange={(e) => {
               const d = e.target.value;
               setStageData(p => ({ ...p, decision: d, passed: d === 'Recommended' ? 1 : 0 }));
@@ -29,7 +36,7 @@ function Stage5User({ candidate, stageData, setStageData, handleStageSubmit }) {
 
       <div className="form-group form-group-full" style={{ marginBottom: '24px' }}>
         <label>Catatan User & Kesesuaian Operasional Toko</label>
-        <textarea 
+        <textarea
           value={stageData.notes || ''}
           onChange={(e) => setStageData(p => ({ ...p, notes: e.target.value }))}
           placeholder="Catatan kecocokan pelamar dengan kondisi dan shift gerai retail konter..."
@@ -47,7 +54,9 @@ function Stage5User({ candidate, stageData, setStageData, handleStageSubmit }) {
       </div>
 
       {candidate.status === 'Active' && (
-        <button type="submit" className="btn btn-primary">Simpan Hasil Tahap 5</button>
+        <button type="submit" className="btn btn-primary" disabled={submitting}>
+          {submitting ? 'Menyimpan...' : 'Simpan Hasil Tahap 5'}
+        </button>
       )}
     </form>
   );

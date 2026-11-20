@@ -1,23 +1,64 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { outletActivityApi, branchApi } from '../services/api';
+
+const VISIT_PURPOSE_OPTIONS = [
+  { value: 'Audit Kebersihan & Keamanan', label: 'Audit Kebersihan, 5R & Keamanan' },
+  { value: 'Edukasi & Coaching Kasir', label: 'Edukasi & Coaching Karyawan / Kasir' },
+  { value: 'Stock Opname & Cek Kas', label: 'Stock Opname Barang & Cek Uang Fisik' },
+  { value: 'Patroli & Kunjungan Rutin', label: 'Patroli & Kunjungan Rutin' },
+  { value: 'Investigasi Insiden / Kerusakan', label: 'Investigasi Insiden / Kerusakan Fasilitas' },
+  { value: 'Audit Rutin', label: 'Audit Rutin (Mobile)' },
+  { value: 'Perbaikan/Maintenance', label: 'Perbaikan / Maintenance (Mobile)' },
+  { value: 'Stock Opname Aset', label: 'Stock Opname Aset (Mobile)' },
+  { value: 'Kunjungan Darurat', label: 'Kunjungan Darurat (Mobile)' },
+  { value: 'Lainnya', label: 'Lainnya' },
+];
+
+const INCIDENT_CATEGORY_OPTIONS = [
+  { value: 'Kerusakan Fasilitas', label: 'Kerusakan Fasilitas' },
+  { value: 'Kebersihan', label: 'Kebersihan & 5R' },
+  { value: 'Keamanan & Aset', label: 'Keamanan & Aset' },
+  { value: 'Operasional & Kasir', label: 'Operasional & Kasir' },
+  { value: 'Perilaku Karyawan', label: 'Perilaku Karyawan' },
+  { value: 'Komplain Pelanggan', label: 'Komplain Pelanggan' },
+  { value: 'Fasilitas', label: 'Fasilitas (Mobile)' },
+  { value: 'Kehilangan', label: 'Kehilangan (Mobile)' },
+  { value: 'Operasional', label: 'Operasional (Mobile)' },
+  { value: 'Lainnya', label: 'Lainnya' },
+];
+
+const getTodayStr = () => {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
 
 export default function OutletActivity() {
   const [activeTab, setActiveTab] = useState('summary'); // 'summary' | 'visits' | 'incidents' | 'actions' | 'explorer'
 
-  // Branches master list
+  // Branches master list (Active only)
   const [branches, setBranches] = useState([]);
-  const [branchesLoading, setBranchesLoading] = useState(false);
 
-  // Daily Summary State
-  const getTodayStr = () => {
-    const d = new Date();
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  };
+  const getDefaultVisitForm = useCallback((dateOverride) => ({
+    branch_id: branches[0]?.id ? String(branches[0].id) : '',
+    visit_date: dateOverride || getTodayStr(),
+    visit_time: new Date().toTimeString().slice(0, 5),
+    visitor_name: localStorage.getItem('auth_username') || 'Wisnu',
+    purpose: 'Audit Kebersihan & Keamanan',
+    status: 'Completed',
+    score_cleanliness: 90,
+    score_security: 90,
+    score_display: 90,
+    score_sop: 90,
+    notes: '',
+    action_plan: '',
+    staff_present: '',
+  }), [branches]);
 
-  const [selectedDate, setSelectedDate] = useState(getTodayStr());
+  const [selectedDate, setSelectedDate] = useState(getTodayStr);
   const [summaryData, setSummaryData] = useState(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
@@ -32,7 +73,7 @@ export default function OutletActivity() {
   const [visitSubmitting, setVisitSubmitting] = useState(false);
 
   // Visit Form State
-  const [visitForm, setVisitForm] = useState({
+  const [visitForm, setVisitForm] = useState(() => ({
     branch_id: '',
     visit_date: getTodayStr(),
     visit_time: new Date().toTimeString().slice(0, 5),
@@ -46,7 +87,7 @@ export default function OutletActivity() {
     notes: '',
     action_plan: '',
     staff_present: '',
-  });
+  }));
   const [visitFiles, setVisitFiles] = useState([]);
 
   // Incidents State
@@ -60,7 +101,7 @@ export default function OutletActivity() {
   const [incidentSubmitting, setIncidentSubmitting] = useState(false);
 
   // Incident Form State
-  const [incidentForm, setIncidentForm] = useState({
+  const [incidentForm, setIncidentForm] = useState(() => ({
     branch_id: '',
     incident_date: getTodayStr(),
     category: 'Kerusakan Fasilitas',
@@ -70,7 +111,7 @@ export default function OutletActivity() {
     action_taken: '',
     status: 'Open',
     reported_by: localStorage.getItem('auth_username') || 'Wisnu'
-  });
+  }));
   const [incidentFiles, setIncidentFiles] = useState([]);
 
   // Action Items State
@@ -78,13 +119,14 @@ export default function OutletActivity() {
   const [actionLoading, setActionLoading] = useState(false);
   const [actionFilterStatus, setActionFilterStatus] = useState('');
   const [showActionModal, setShowActionModal] = useState(false);
-  const [actionForm, setActionForm] = useState({
+  const [actionSubmitting, setActionSubmitting] = useState(false);
+  const [actionForm, setActionForm] = useState(() => ({
     branch_id: '',
     task_description: '',
     assigned_to: '',
     due_date: getTodayStr(),
     priority: 'Medium'
-  });
+  }));
 
   // Store Explorer State
   const [selectedBranchId, setSelectedBranchId] = useState('');
@@ -93,33 +135,56 @@ export default function OutletActivity() {
 
   // Notification Toast
   const [toastMsg, setToastMsg] = useState('');
+  const toastTimerRef = useRef(null);
+  const copyTimerRef = useRef(null);
 
-  const showToast = (msg) => {
+  useEffect(() => () => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+  }, []);
+
+  const showToast = useCallback((msg) => {
     setToastMsg(msg);
-    setTimeout(() => setToastMsg(''), 3000);
-  };
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToastMsg(''), 3000);
+  }, []);
 
-  // Load Branches
   useEffect(() => {
-    setBranchesLoading(true);
+    const anyModal = showVisitModal || showIncidentModal || showActionModal;
+    if (!anyModal) return;
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        if (showVisitModal && !visitSubmitting) setShowVisitModal(false);
+        if (showIncidentModal && !incidentSubmitting) setShowIncidentModal(false);
+        if (showActionModal && !actionSubmitting) setShowActionModal(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [showVisitModal, showIncidentModal, showActionModal, visitSubmitting, incidentSubmitting, actionSubmitting]);
+
+  // Load Active Branches
+  useEffect(() => {
     branchApi.getAll()
       .then(res => {
         if (res.success && Array.isArray(res.data)) {
-          setBranches(res.data);
-          if (res.data.length > 0) {
-            setSelectedBranchId(String(res.data[0].id));
-            setVisitForm(prev => ({ ...prev, branch_id: String(res.data[0].id) }));
-            setIncidentForm(prev => ({ ...prev, branch_id: String(res.data[0].id) }));
-            setActionForm(prev => ({ ...prev, branch_id: String(res.data[0].id) }));
+          const activeBranches = res.data.filter(b => b.status === 'Active');
+          setBranches(activeBranches);
+          if (activeBranches.length > 0) {
+            const firstId = String(activeBranches[0].id);
+            setSelectedBranchId(firstId);
+            setVisitForm(prev => ({ ...prev, branch_id: prev.branch_id || firstId }));
+            setIncidentForm(prev => ({ ...prev, branch_id: prev.branch_id || firstId }));
+            setActionForm(prev => ({ ...prev, branch_id: prev.branch_id || firstId }));
           }
         }
       })
-      .catch(err => console.error('Error loading branches:', err))
-      .finally(() => setBranchesLoading(false));
+      .catch(err => console.error('Error loading branches:', err));
   }, []);
 
   // Fetch Daily Summary
-  const fetchSummary = async (date) => {
+  const fetchSummary = useCallback(async (date) => {
+    if (!date) return;
     setSummaryLoading(true);
     try {
       const res = await outletActivityApi.getSummary(date);
@@ -131,38 +196,38 @@ export default function OutletActivity() {
     } finally {
       setSummaryLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     if (activeTab === 'summary') {
       fetchSummary(selectedDate);
     }
-  }, [activeTab, selectedDate]);
+  }, [activeTab, selectedDate, fetchSummary]);
 
   // Fetch Visits
-  const fetchVisits = async () => {
+  const fetchVisits = useCallback(async () => {
     setVisitsLoading(true);
     try {
       const params = {};
       if (visitFilterBranch) params.branch_id = visitFilterBranch;
       if (visitFilterStatus) params.status = visitFilterStatus;
       const res = await outletActivityApi.getVisits(params);
-      if (res.success) setVisits(res.data);
+      if (res.success) setVisits(res.data || []);
     } catch (err) {
       console.error('Error loading visits:', err);
     } finally {
       setVisitsLoading(false);
     }
-  };
+  }, [visitFilterBranch, visitFilterStatus]);
 
   useEffect(() => {
     if (activeTab === 'visits') {
       fetchVisits();
     }
-  }, [activeTab, visitFilterBranch, visitFilterStatus]);
+  }, [activeTab, fetchVisits]);
 
   // Fetch Incidents
-  const fetchIncidents = async () => {
+  const fetchIncidents = useCallback(async () => {
     setIncidentsLoading(true);
     try {
       const params = {};
@@ -170,43 +235,43 @@ export default function OutletActivity() {
       if (incidentFilterStatus) params.status = incidentFilterStatus;
       if (incidentFilterCategory) params.category = incidentFilterCategory;
       const res = await outletActivityApi.getIncidents(params);
-      if (res.success) setIncidents(res.data);
+      if (res.success) setIncidents(res.data || []);
     } catch (err) {
       console.error('Error loading incidents:', err);
     } finally {
       setIncidentsLoading(false);
     }
-  };
+  }, [incidentFilterBranch, incidentFilterStatus, incidentFilterCategory]);
 
   useEffect(() => {
     if (activeTab === 'incidents') {
       fetchIncidents();
     }
-  }, [activeTab, incidentFilterBranch, incidentFilterStatus, incidentFilterCategory]);
+  }, [activeTab, fetchIncidents]);
 
   // Fetch Action Items
-  const fetchActionItems = async () => {
+  const fetchActionItems = useCallback(async () => {
     setActionLoading(true);
     try {
       const params = {};
       if (actionFilterStatus) params.status = actionFilterStatus;
       const res = await outletActivityApi.getActionItems(params);
-      if (res.success) setActionItems(res.data);
+      if (res.success) setActionItems(res.data || []);
     } catch (err) {
       console.error('Error loading action items:', err);
     } finally {
       setActionLoading(false);
     }
-  };
+  }, [actionFilterStatus]);
 
   useEffect(() => {
     if (activeTab === 'actions') {
       fetchActionItems();
     }
-  }, [activeTab, actionFilterStatus]);
+  }, [activeTab, fetchActionItems]);
 
   // Fetch Store Explorer History
-  const fetchBranchHistory = async (branchId) => {
+  const fetchBranchHistory = useCallback(async (branchId) => {
     if (!branchId) return;
     setHistoryLoading(true);
     try {
@@ -219,39 +284,44 @@ export default function OutletActivity() {
     } finally {
       setHistoryLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     if (activeTab === 'explorer' && selectedBranchId) {
       fetchBranchHistory(selectedBranchId);
     }
-  }, [activeTab, selectedBranchId]);
+  }, [activeTab, selectedBranchId, fetchBranchHistory]);
 
   // Handle Copy to WhatsApp
   const handleCopyWhatsApp = async () => {
     if (!summaryData?.whatsappText) return;
     try {
-      await navigator.clipboard.writeText(summaryData.whatsappText);
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(summaryData.whatsappText);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = summaryData.whatsappText;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
       setCopySuccess(true);
       showToast('Laporan berhasil disalin! Silakan paste di WhatsApp.');
-      setTimeout(() => setCopySuccess(false), 3000);
-    } catch (err) {
-      // Fallback
-      const textarea = document.createElement('textarea');
-      textarea.value = summaryData.whatsappText;
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand('copy');
-      document.body.removeChild(textarea);
-      setCopySuccess(true);
-      showToast('Laporan berhasil disalin!');
-      setTimeout(() => setCopySuccess(false), 3000);
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = setTimeout(() => setCopySuccess(false), 3000);
+    } catch {
+      alert('Gagal menyalin teks laporan ke clipboard.');
     }
   };
 
   // Change Date helper (+1 / -1 day)
   const shiftDate = (delta) => {
-    const d = new Date(selectedDate + 'T00:00:00');
+    const base = selectedDate ? new Date(selectedDate + 'T00:00:00') : new Date();
+    const d = Number.isNaN(base.getTime()) ? new Date() : base;
     d.setDate(d.getDate() + delta);
     const year = d.getFullYear();
     const month = String(d.getMonth() + 1).padStart(2, '0');
@@ -262,8 +332,8 @@ export default function OutletActivity() {
   // Save Visit
   const handleSaveVisit = async (e) => {
     e.preventDefault();
-    if (!visitForm.branch_id) {
-      alert('Pilih cabang outlet terlebih dahulu.');
+    if (!visitForm.branch_id || !visitForm.visit_date) {
+      alert('Pilih cabang outlet dan tanggal kunjungan terlebih dahulu.');
       return;
     }
 
@@ -301,7 +371,7 @@ export default function OutletActivity() {
   // Save Incident
   const handleSaveIncident = async (e) => {
     e.preventDefault();
-    if (!incidentForm.branch_id || !incidentForm.title || !incidentForm.description) {
+    if (!incidentForm.branch_id || !incidentForm.title.trim() || !incidentForm.description.trim()) {
       alert('Mohon lengkapi cabang, judul kejadian, dan deskripsi kronologi.');
       return;
     }
@@ -317,7 +387,7 @@ export default function OutletActivity() {
       });
 
       if (editingIncident) {
-        await outletActivityApi.updateIncident(editingIncident.id, incidentForm);
+        await outletActivityApi.updateIncident(editingIncident.id, formData);
         showToast('Kejadian berhasil diperbarui.');
       } else {
         await outletActivityApi.createIncident(formData);
@@ -340,11 +410,12 @@ export default function OutletActivity() {
   // Save Action Item
   const handleSaveAction = async (e) => {
     e.preventDefault();
-    if (!actionForm.branch_id || !actionForm.task_description) {
+    if (!actionForm.branch_id || !actionForm.task_description.trim()) {
       alert('Pilih cabang dan tulis deskripsi tindak lanjut.');
       return;
     }
 
+    setActionSubmitting(true);
     try {
       await outletActivityApi.createActionItem(actionForm);
       showToast('Tindak lanjut (PR) berhasil ditambahkan.');
@@ -355,6 +426,8 @@ export default function OutletActivity() {
       if (activeTab === 'explorer') fetchBranchHistory(selectedBranchId);
     } catch (err) {
       alert(err.message || 'Gagal menambahkan PR.');
+    } finally {
+      setActionSubmitting(false);
     }
   };
 
@@ -368,7 +441,7 @@ export default function OutletActivity() {
       if (activeTab === 'summary') fetchSummary(selectedDate);
       if (activeTab === 'explorer') fetchBranchHistory(selectedBranchId);
     } catch (err) {
-      alert('Gagal mengubah status tugas.');
+      alert(err.message || 'Gagal mengubah status tugas.');
     }
   };
 
@@ -382,7 +455,7 @@ export default function OutletActivity() {
       if (activeTab === 'summary') fetchSummary(selectedDate);
       if (activeTab === 'explorer') fetchBranchHistory(selectedBranchId);
     } catch (err) {
-      alert('Gagal mengubah status insiden.');
+      alert(err.message || 'Gagal mengubah status insiden.');
     }
   };
 
@@ -396,10 +469,10 @@ export default function OutletActivity() {
       visitor_name: v.visitor_name,
       purpose: v.purpose,
       status: v.status || 'Completed',
-      score_cleanliness: v.score_cleanliness || 90,
-      score_security: v.score_security || 90,
-      score_display: v.score_display || 90,
-      score_sop: v.score_sop || 90,
+      score_cleanliness: v.score_cleanliness ?? 90,
+      score_security: v.score_security ?? 90,
+      score_display: v.score_display ?? 90,
+      score_sop: v.score_sop ?? 90,
       notes: v.notes || '',
       action_plan: v.action_plan || '',
       staff_present: v.staff_present || '',
@@ -411,12 +484,12 @@ export default function OutletActivity() {
   return (
     <div style={{ maxWidth: '1200px', margin: '0 auto', paddingBottom: '60px' }}>
       {/* Toast Notification */}
-      {toastMsg && (
+      {toastMsg && createPortal(
         <div style={{
           position: 'fixed',
           bottom: '24px',
           right: '24px',
-          zIndex: 9999,
+          zIndex: 3100,
           background: 'linear-gradient(135deg, #10b981, #059669)',
           color: '#fff',
           padding: '12px 20px',
@@ -429,7 +502,8 @@ export default function OutletActivity() {
         }}>
           <span>✅</span>
           <span>{toastMsg}</span>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Header Banner */}
@@ -461,23 +535,10 @@ export default function OutletActivity() {
         {/* Action Buttons */}
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
           <button
+            type="button"
             onClick={() => {
               setEditingVisit(null);
-              setVisitForm({
-                branch_id: branches[0]?.id ? String(branches[0].id) : '',
-                visit_date: getTodayStr(),
-                visit_time: new Date().toTimeString().slice(0, 5),
-                visitor_name: localStorage.getItem('auth_username') || 'Wisnu',
-                purpose: 'Audit Kebersihan & Keamanan',
-                status: 'Completed',
-                score_cleanliness: 90,
-                score_security: 90,
-                score_display: 90,
-                score_sop: 90,
-                notes: '',
-                action_plan: '',
-                staff_present: '',
-              });
+              setVisitForm(getDefaultVisitForm());
               setVisitFiles([]);
               setShowVisitModal(true);
             }}
@@ -809,7 +870,7 @@ export default function OutletActivity() {
             </div>
 
             <div style={{
-              background: 'rgba(0,0,0,0.25)',
+              background: 'var(--bg-secondary)',
               border: '1px solid var(--border-color)',
               borderRadius: '8px',
               padding: '14px 16px',
@@ -821,7 +882,7 @@ export default function OutletActivity() {
               maxHeight: '280px',
               overflowY: 'auto'
             }}>
-              {summaryData?.whatsappText || 'Memuat laporan...'}
+              {summaryLoading ? 'Memuat laporan...' : (summaryData?.whatsappText || 'Belum ada data laporan.')}
             </div>
           </div>
 
@@ -830,7 +891,7 @@ export default function OutletActivity() {
             <h3 style={{ fontSize: '16px', fontWeight: 700, marginBottom: '12px', color: 'var(--text-primary)' }}>
               Kunjungan Outlet ({summaryData?.visits?.length || 0})
             </h3>
-            {summaryLoading && !summaryData ? (
+            {summaryLoading ? (
               <div className="card" style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)' }}>
                 Memuat data kunjungan...
               </div>
@@ -839,9 +900,11 @@ export default function OutletActivity() {
                 Belum ada catatan kunjungan pada tanggal {summaryData?.formattedDate || selectedDate}.
                 <div style={{ marginTop: '12px' }}>
                   <button
+                    type="button"
                     onClick={() => {
                       setEditingVisit(null);
-                      setVisitForm(prev => ({ ...prev, visit_date: selectedDate }));
+                      setVisitForm(getDefaultVisitForm(selectedDate));
+                      setVisitFiles([]);
                       setShowVisitModal(true);
                     }}
                     className="btn btn-primary"
@@ -866,8 +929,8 @@ export default function OutletActivity() {
                             fontWeight: 700,
                             padding: '2px 8px',
                             borderRadius: '6px',
-                            background: v.status === 'Completed' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(245, 158, 11, 0.15)',
-                            color: v.status === 'Completed' ? '#10b981' : '#f59e0b'
+                            background: v.status === 'Completed' ? 'var(--color-success-bg)' : 'var(--color-warning-bg)',
+                            color: v.status === 'Completed' ? 'var(--color-success)' : 'var(--color-warning)'
                           }}>
                             {v.status === 'Completed' ? 'Selesai' : 'Rencana'}
                           </span>
@@ -879,9 +942,9 @@ export default function OutletActivity() {
 
                       {v.overall_score > 0 && (
                         <div style={{
-                          background: v.overall_score >= 85 ? 'rgba(16,185,129,0.15)' : 'rgba(245,158,11,0.15)',
-                          border: `1px solid ${v.overall_score >= 85 ? '#10b981' : '#f59e0b'}`,
-                          color: v.overall_score >= 85 ? '#10b981' : '#f59e0b',
+                          background: v.overall_score >= 85 ? 'var(--color-success-bg)' : 'var(--color-warning-bg)',
+                          border: `1px solid ${v.overall_score >= 85 ? 'var(--color-success)' : 'var(--color-warning)'}`,
+                          color: v.overall_score >= 85 ? 'var(--color-success)' : 'var(--color-warning)',
                           fontWeight: 800,
                           fontSize: '14px',
                           padding: '4px 10px',
@@ -899,7 +962,7 @@ export default function OutletActivity() {
                     )}
 
                     {v.action_plan && (
-                      <div style={{ marginTop: '6px', fontSize: '12px', color: '#f59e0b' }}>
+                      <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--color-warning)' }}>
                         ↳ <strong>Rencana Tindak Lanjut:</strong> {v.action_plan}
                       </div>
                     )}
@@ -926,6 +989,7 @@ export default function OutletActivity() {
 
                     <div style={{ marginTop: '10px', display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
                       <button
+                        type="button"
                         onClick={() => openEditVisit(v)}
                         style={{
                           background: 'transparent',
@@ -1016,7 +1080,7 @@ export default function OutletActivity() {
                 <div key={v.id} className="card" style={{ padding: '16px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
                     <div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                         <span style={{ fontWeight: 800, fontSize: '15px', color: 'var(--text-primary)' }}>
                           {v.branch_name}
                         </span>
@@ -1026,8 +1090,8 @@ export default function OutletActivity() {
                           fontWeight: 700,
                           padding: '2px 8px',
                           borderRadius: '6px',
-                          background: v.status === 'Completed' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(245, 158, 11, 0.15)',
-                          color: v.status === 'Completed' ? '#10b981' : '#f59e0b'
+                          background: v.status === 'Completed' ? 'var(--color-success-bg)' : 'var(--color-warning-bg)',
+                          color: v.status === 'Completed' ? 'var(--color-success)' : 'var(--color-warning)'
                         }}>
                           {v.status === 'Completed' ? 'Selesai' : 'Rencana'}
                         </span>
@@ -1044,9 +1108,9 @@ export default function OutletActivity() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                       {v.overall_score > 0 && (
                         <div style={{
-                          background: v.overall_score >= 85 ? 'rgba(16, 185, 129, 0.15)' : 'rgba(245, 158, 11, 0.15)',
-                          border: `1px solid ${v.overall_score >= 85 ? '#10b981' : '#f59e0b'}`,
-                          color: v.overall_score >= 85 ? '#10b981' : '#f59e0b',
+                          background: v.overall_score >= 85 ? 'var(--color-success-bg)' : 'var(--color-warning-bg)',
+                          border: `1px solid ${v.overall_score >= 85 ? 'var(--color-success)' : 'var(--color-warning)'}`,
+                          color: v.overall_score >= 85 ? 'var(--color-success)' : 'var(--color-warning)',
                           fontWeight: 800,
                           fontSize: '14px',
                           padding: '4px 10px',
@@ -1057,6 +1121,7 @@ export default function OutletActivity() {
                       )}
 
                       <button
+                        type="button"
                         onClick={() => openEditVisit(v)}
                         style={{
                           background: 'var(--bg-secondary)',
@@ -1072,17 +1137,21 @@ export default function OutletActivity() {
                       </button>
 
                       <button
+                        type="button"
                         onClick={async () => {
-                          if (confirm(`Hapus catatan kunjungan ke ${v.branch_name} pada ${v.visit_date}?`)) {
+                          if (!window.confirm(`Hapus catatan kunjungan ke ${v.branch_name} pada ${v.visit_date}?`)) return;
+                          try {
                             await outletActivityApi.deleteVisit(v.id);
                             showToast('Kunjungan berhasil dihapus.');
                             fetchVisits();
+                          } catch (err) {
+                            alert(err.message || 'Gagal menghapus catatan kunjungan.');
                           }
                         }}
                         style={{
-                          background: 'rgba(239, 68, 68, 0.1)',
+                          background: 'var(--color-danger-bg)',
                           border: '1px solid rgba(239, 68, 68, 0.3)',
-                          color: '#ef4444',
+                          color: 'var(--color-danger)',
                           borderRadius: '6px',
                           padding: '6px 10px',
                           cursor: 'pointer',
@@ -1127,7 +1196,7 @@ export default function OutletActivity() {
                   )}
 
                   {v.action_plan && (
-                    <div style={{ marginTop: '4px', fontSize: '12px', color: '#f59e0b' }}>
+                    <div style={{ marginTop: '4px', fontSize: '12px', color: 'var(--color-warning)' }}>
                       ↳ <strong>Rencana Lanjutan:</strong> {v.action_plan}
                     </div>
                   )}
@@ -1203,13 +1272,9 @@ export default function OutletActivity() {
               }}
             >
               <option value="">Semua Kategori</option>
-              <option value="Kebersihan">Kebersihan</option>
-              <option value="Keamanan & Aset">Keamanan & Aset</option>
-              <option value="Kerusakan Fasilitas">Kerusakan Fasilitas</option>
-              <option value="Operasional & Kasir">Operasional & Kasir</option>
-              <option value="Perilaku Karyawan">Perilaku Karyawan</option>
-              <option value="Komplain Pelanggan">Komplain Pelanggan</option>
-              <option value="Lainnya">Lainnya</option>
+              {INCIDENT_CATEGORY_OPTIONS.map(c => (
+                <option key={c.value} value={c.value}>{c.label}</option>
+              ))}
             </select>
 
             <select
@@ -1262,8 +1327,8 @@ export default function OutletActivity() {
                           fontWeight: 800,
                           padding: '2px 8px',
                           borderRadius: '6px',
-                          background: 'rgba(59, 130, 246, 0.15)',
-                          color: '#3b82f6'
+                          background: 'var(--color-info-bg)',
+                          color: 'var(--color-info)'
                         }}>
                           {inc.branch_name}
                         </span>
@@ -1286,13 +1351,13 @@ export default function OutletActivity() {
                           borderRadius: '4px',
                           textTransform: 'uppercase',
                           background:
-                            inc.severity === 'Critical' ? 'rgba(239, 68, 68, 0.2)' :
+                            inc.severity === 'Critical' ? 'var(--color-danger-bg)' :
                             inc.severity === 'High' ? 'rgba(249, 115, 22, 0.2)' :
-                            inc.severity === 'Medium' ? 'rgba(245, 158, 11, 0.2)' : 'rgba(59, 130, 246, 0.2)',
+                            inc.severity === 'Medium' ? 'var(--color-warning-bg)' : 'var(--color-info-bg)',
                           color:
-                            inc.severity === 'Critical' ? '#ef4444' :
-                            inc.severity === 'High' ? '#f97316' :
-                            inc.severity === 'Medium' ? '#f59e0b' : '#3b82f6'
+                            inc.severity === 'Critical' ? 'var(--color-danger)' :
+                            inc.severity === 'High' ? '#ea580c' :
+                            inc.severity === 'Medium' ? 'var(--color-warning)' : 'var(--color-info)'
                         }}>
                           {inc.severity}
                         </span>
@@ -1302,10 +1367,14 @@ export default function OutletActivity() {
                           fontWeight: 700,
                           padding: '2px 8px',
                           borderRadius: '6px',
-                          background: inc.status === 'Resolved' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-                          color: inc.status === 'Resolved' ? '#10b981' : '#ef4444'
+                          background:
+                            inc.status === 'Resolved' ? 'var(--color-success-bg)' :
+                            inc.status === 'In Progress' ? 'var(--color-warning-bg)' : 'var(--color-danger-bg)',
+                          color:
+                            inc.status === 'Resolved' ? 'var(--color-success)' :
+                            inc.status === 'In Progress' ? 'var(--color-warning)' : 'var(--color-danger)'
                         }}>
-                          {inc.status === 'Resolved' ? 'Terselesaikan' : 'Belum Selesai'}
+                          {inc.status === 'Resolved' ? 'Terselesaikan' : inc.status === 'In Progress' ? 'Sedang Ditangani' : inc.status === 'Open' ? 'Belum Selesai' : inc.status}
                         </span>
                       </div>
 
@@ -1321,10 +1390,11 @@ export default function OutletActivity() {
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <button
+                        type="button"
                         onClick={() => handleToggleIncidentStatus(inc)}
                         style={{
-                          background: inc.status === 'Resolved' ? 'rgba(239,68,68,0.1)' : 'rgba(16, 185, 129, 0.15)',
-                          color: inc.status === 'Resolved' ? '#ef4444' : '#10b981',
+                          background: inc.status === 'Resolved' ? 'var(--color-danger-bg)' : 'var(--color-success-bg)',
+                          color: inc.status === 'Resolved' ? 'var(--color-danger)' : 'var(--color-success)',
                           border: `1px solid ${inc.status === 'Resolved' ? 'rgba(239,68,68,0.3)' : 'rgba(16, 185, 129, 0.4)'}`,
                           borderRadius: '6px',
                           padding: '6px 12px',
@@ -1337,11 +1407,15 @@ export default function OutletActivity() {
                       </button>
 
                       <button
+                        type="button"
                         onClick={async () => {
-                          if (confirm(`Hapus catatan kejadian "${inc.title}"?`)) {
+                          if (!window.confirm(`Hapus catatan kejadian "${inc.title}"?`)) return;
+                          try {
                             await outletActivityApi.deleteIncident(inc.id);
                             showToast('Kejadian berhasil dihapus.');
                             fetchIncidents();
+                          } catch (err) {
+                            alert(err.message || 'Gagal menghapus kejadian.');
                           }
                         }}
                         style={{
@@ -1371,7 +1445,7 @@ export default function OutletActivity() {
                   </div>
 
                   {inc.action_taken && (
-                    <div style={{ marginTop: '8px', fontSize: '12px', color: '#10b981' }}>
+                    <div style={{ marginTop: '8px', fontSize: '12px', color: 'var(--color-success)' }}>
                       ↳ <strong>Tindakan yang Sudah Diambil:</strong> {inc.action_taken}
                     </div>
                   )}
@@ -1436,6 +1510,7 @@ export default function OutletActivity() {
             </div>
 
             <button
+              type="button"
               onClick={() => setShowActionModal(true)}
               style={{
                 background: 'var(--primary)',
@@ -1479,7 +1554,7 @@ export default function OutletActivity() {
 
                     <div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                        <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--primary)', background: 'rgba(59,130,246,0.1)', padding: '2px 6px', borderRadius: '4px' }}>
+                        <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--color-info)', background: 'var(--color-info-bg)', padding: '2px 6px', borderRadius: '4px' }}>
                           {item.branch_name}
                         </span>
                         <span style={{
@@ -1487,8 +1562,8 @@ export default function OutletActivity() {
                           fontWeight: 700,
                           padding: '1px 6px',
                           borderRadius: '4px',
-                          background: item.priority === 'High' ? 'rgba(239,68,68,0.2)' : 'rgba(245,158,11,0.2)',
-                          color: item.priority === 'High' ? '#ef4444' : '#f59e0b'
+                          background: item.priority === 'High' ? 'var(--color-danger-bg)' : 'var(--color-warning-bg)',
+                          color: item.priority === 'High' ? 'var(--color-danger)' : 'var(--color-warning)'
                         }}>
                           {item.priority}
                         </span>
@@ -1511,11 +1586,15 @@ export default function OutletActivity() {
                   </div>
 
                   <button
+                    type="button"
                     onClick={async () => {
-                      if (confirm('Hapus tugas tindak lanjut ini?')) {
+                      if (!window.confirm('Hapus tugas tindak lanjut ini?')) return;
+                      try {
                         await outletActivityApi.deleteActionItem(item.id);
                         showToast('Tugas dihapus.');
                         fetchActionItems();
+                      } catch (err) {
+                        alert(err.message || 'Gagal menghapus tugas.');
                       }
                     }}
                     style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
@@ -1583,24 +1662,59 @@ export default function OutletActivity() {
 
                 <div className="card" style={{ padding: '14px' }}>
                   <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>RATA-RATA SKOR AUDIT</div>
-                  <div style={{ fontSize: '24px', fontWeight: 800, color: '#10b981', marginTop: '4px' }}>
+                  <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--color-success)', marginTop: '4px' }}>
                     {(branchHistory.stats?.avgScore || 0) > 0 ? `${branchHistory.stats.avgScore}/100` : '-'}
                   </div>
                 </div>
 
                 <div className="card" style={{ padding: '14px' }}>
                   <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>INSIDEN BELUM SELESAI</div>
-                  <div style={{ fontSize: '24px', fontWeight: 800, color: (branchHistory.stats?.openIncidents || 0) > 0 ? '#ef4444' : '#10b981', marginTop: '4px' }}>
+                  <div style={{ fontSize: '24px', fontWeight: 800, color: (branchHistory.stats?.openIncidents || 0) > 0 ? 'var(--color-danger)' : 'var(--color-success)', marginTop: '4px' }}>
                     {branchHistory.stats?.openIncidents || 0} Kejadian
                   </div>
                 </div>
 
                 <div className="card" style={{ padding: '14px' }}>
                   <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>PR / PERBAIKAN PENDING</div>
-                  <div style={{ fontSize: '24px', fontWeight: 800, color: '#f59e0b', marginTop: '4px' }}>
+                  <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--color-warning)', marginTop: '4px' }}>
                     {branchHistory.stats?.pendingActions || 0} Tugas
                   </div>
                 </div>
+              </div>
+
+              {/* Action Items at this branch */}
+              <div className="card" style={{ marginBottom: '20px' }}>
+                <h3 style={{ fontSize: '15px', fontWeight: 800, marginBottom: '14px', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>📌</span> Daftar PR & Tindak Lanjut Cabang Ini ({branchHistory.action_items?.length || 0})
+                </h3>
+                {(!branchHistory.action_items || branchHistory.action_items.length === 0) ? (
+                  <div style={{ fontSize: '13px', color: 'var(--text-muted)', padding: '10px 0' }}>
+                    Tidak ada daftar PR atau tindak lanjut untuk cabang ini.
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    {branchHistory.action_items.map(item => (
+                      <div key={item.id} style={{
+                        background: 'var(--bg-secondary)',
+                        padding: '12px 14px',
+                        borderRadius: '8px',
+                        borderLeft: `3px solid ${item.status === 'Done' ? '#10b981' : '#f59e0b'}`
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                          <span style={{ fontWeight: 700, fontSize: '13px', color: 'var(--text-primary)', textDecoration: item.status === 'Done' ? 'line-through' : 'none' }}>
+                            {item.task_description}
+                          </span>
+                          <span style={{ fontSize: '11px', fontWeight: 700, color: item.status === 'Done' ? 'var(--color-success)' : 'var(--color-warning)' }}>
+                            {item.status === 'Done' ? 'Selesai' : `Pending (${item.priority || 'Medium'})`}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                          PIC: <strong>{item.assigned_to || 'Tidak ada'}</strong> • Target: <strong>{item.due_date || 'Fleksibel'}</strong>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Incidents at this branch */}
@@ -1625,8 +1739,8 @@ export default function OutletActivity() {
                           <div>
                             <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)' }}>{inc.incident_date}</span> • <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{inc.title}</span>
                           </div>
-                          <span style={{ fontSize: '11px', fontWeight: 700, color: inc.status === 'Resolved' ? '#10b981' : '#ef4444' }}>
-                            {inc.status}
+                          <span style={{ fontSize: '11px', fontWeight: 700, color: inc.status === 'Resolved' ? 'var(--color-success)' : inc.status === 'In Progress' ? 'var(--color-warning)' : 'var(--color-danger)' }}>
+                            {inc.status === 'Resolved' ? 'Terselesaikan' : inc.status === 'In Progress' ? 'Sedang Ditangani' : inc.status}
                           </span>
                         </div>
                         <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>
@@ -1656,7 +1770,7 @@ export default function OutletActivity() {
                             <strong>{v.visit_date}</strong> {v.visit_time ? `(${v.visit_time})` : ''} • Petugas: {v.visitor_name} • <em>{v.purpose}</em>
                           </div>
                           {v.overall_score > 0 && (
-                            <span style={{ fontWeight: 800, color: '#10b981', fontSize: '13px' }}>
+                            <span style={{ fontWeight: 800, color: 'var(--color-success)', fontSize: '13px' }}>
                               Skor: {v.overall_score}/100
                             </span>
                           )}
@@ -1679,30 +1793,40 @@ export default function OutletActivity() {
       {/* ─────────────────────────────────────────────────────────────
           MODAL: FORM CATAT KUNJUNGAN (STORE VISIT MODAL)
       ─────────────────────────────────────────────────────────────── */}
-      {showVisitModal && (
-        <div style={{
-          position: 'fixed',
-          inset: 0,
-          background: 'rgba(0,0,0,0.75)',
-          backdropFilter: 'blur(4px)',
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          zIndex: 2000,
-          padding: '16px'
-        }}>
-          <div className="card" style={{
-            width: '100%',
-            maxWidth: '680px',
-            maxHeight: '90vh',
-            overflowY: 'auto',
-            background: 'var(--bg-surface)'
-          }}>
+      {showVisitModal && createPortal(
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.75)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            zIndex: 3000,
+            padding: '16px',
+            overscrollBehavior: 'contain'
+          }}
+          onClick={() => !visitSubmitting && setShowVisitModal(false)}
+        >
+          <div
+            className="card"
+            style={{
+              width: '100%',
+              maxWidth: '680px',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              background: 'var(--bg-surface-opaque)'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <h2 style={{ fontSize: '18px', fontWeight: 800, margin: 0, color: 'var(--text-primary)' }}>
                 {editingVisit ? '✏️ Edit Catatan Kunjungan' : '➕ Catat Kunjungan Outlet Baru'}
               </h2>
               <button
+                type="button"
+                disabled={visitSubmitting}
                 onClick={() => setShowVisitModal(false)}
                 style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '20px', cursor: 'pointer' }}
               >
@@ -1837,11 +1961,12 @@ export default function OutletActivity() {
                     marginBottom: '6px'
                   }}
                 >
-                  <option value="Audit Kebersihan & Keamanan">Audit Kebersihan, 5R & Keamanan</option>
-                  <option value="Edukasi & Coaching Kasir">Edukasi & Coaching Karyawan / Kasir</option>
-                  <option value="Stock Opname & Cek Kas">Stock Opname Barang & Cek Uang Fisik</option>
-                  <option value="Patroli & Kunjungan Rutin">Patroli & Kunjungan Rutin</option>
-                  <option value="Investigasi Insiden / Kerusakan">Investigasi Insiden / Kerusakan Fasilitas</option>
+                  {VISIT_PURPOSE_OPTIONS.map(opt => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                  {visitForm.purpose && !VISIT_PURPOSE_OPTIONS.some(opt => opt.value === visitForm.purpose) && (
+                    <option value={visitForm.purpose}>{visitForm.purpose}</option>
+                  )}
                 </select>
               </div>
 
@@ -1969,7 +2094,7 @@ export default function OutletActivity() {
                 />
               </div>
 
-              {/* Upload Foto Dokumentasi (Camera support on mobile) */}
+              {/* Upload Foto Dokumentasi (Camera / Gallery) */}
               <div style={{ marginBottom: '16px' }}>
                 <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
                   📸 Upload Foto Dokumentasi Lapangan (Maks. 5 Foto)
@@ -1978,11 +2103,11 @@ export default function OutletActivity() {
                   type="file"
                   accept="image/*"
                   multiple
-                  capture="environment"
                   onChange={(e) => {
                     if (e.target.files) {
                       setVisitFiles(Array.from(e.target.files));
                     }
+                    e.target.value = '';
                   }}
                   style={{
                     width: '100%',
@@ -1995,8 +2120,8 @@ export default function OutletActivity() {
                   }}
                 />
                 {visitFiles.length > 0 && (
-                  <div style={{ fontSize: '11px', color: '#10b981', marginTop: '4px' }}>
-                    ✓ {visitFiles.length} foto dipilih untuk diunggah ke storage ZimaOS.
+                  <div style={{ fontSize: '11px', color: 'var(--color-success)', marginTop: '4px' }}>
+                    ✓ {visitFiles.length} foto dipilih untuk diunggah.
                   </div>
                 )}
               </div>
@@ -2004,6 +2129,7 @@ export default function OutletActivity() {
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
                 <button
                   type="button"
+                  disabled={visitSubmitting}
                   onClick={() => setShowVisitModal(false)}
                   style={{
                     background: 'var(--bg-secondary)',
@@ -2035,36 +2161,47 @@ export default function OutletActivity() {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* ─────────────────────────────────────────────────────────────
           MODAL: FORM LAPOR KEJADIAN / INSIDEN
       ─────────────────────────────────────────────────────────────── */}
-      {showIncidentModal && (
-        <div style={{
-          position: 'fixed',
-          inset: 0,
-          background: 'rgba(0,0,0,0.75)',
-          backdropFilter: 'blur(4px)',
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          zIndex: 2000,
-          padding: '16px'
-        }}>
-          <div className="card" style={{
-            width: '100%',
-            maxWidth: '560px',
-            maxHeight: '90vh',
-            overflowY: 'auto',
-            background: 'var(--bg-surface)'
-          }}>
+      {showIncidentModal && createPortal(
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.75)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            zIndex: 3000,
+            padding: '16px',
+            overscrollBehavior: 'contain'
+          }}
+          onClick={() => !incidentSubmitting && setShowIncidentModal(false)}
+        >
+          <div
+            className="card"
+            style={{
+              width: '100%',
+              maxWidth: '560px',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              background: 'var(--bg-surface-opaque)'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <h2 style={{ fontSize: '18px', fontWeight: 800, margin: 0, color: '#ef4444' }}>
+              <h2 style={{ fontSize: '18px', fontWeight: 800, margin: 0, color: 'var(--color-danger)' }}>
                 🚨 Lapor Kejadian / Insiden di Outlet
               </h2>
               <button
+                type="button"
+                disabled={incidentSubmitting}
                 onClick={() => setShowIncidentModal(false)}
                 style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '20px', cursor: 'pointer' }}
               >
@@ -2109,13 +2246,12 @@ export default function OutletActivity() {
                     onChange={(e) => setIncidentForm({ ...incidentForm, category: e.target.value })}
                     style={{ width: '100%', padding: '8px', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}
                   >
-                    <option value="Kerusakan Fasilitas">Kerusakan Fasilitas</option>
-                    <option value="Kebersihan">Kebersihan & 5R</option>
-                    <option value="Keamanan & Aset">Keamanan & Aset</option>
-                    <option value="Operasional & Kasir">Operasional & Kasir</option>
-                    <option value="Perilaku Karyawan">Perilaku Karyawan</option>
-                    <option value="Komplain Pelanggan">Komplain Pelanggan</option>
-                    <option value="Lainnya">Lainnya</option>
+                    {INCIDENT_CATEGORY_OPTIONS.map(c => (
+                      <option key={c.value} value={c.value}>{c.label}</option>
+                    ))}
+                    {incidentForm.category && !INCIDENT_CATEGORY_OPTIONS.some(c => c.value === incidentForm.category) && (
+                      <option value={incidentForm.category}>{incidentForm.category}</option>
+                    )}
                   </select>
                 </div>
 
@@ -2184,11 +2320,11 @@ export default function OutletActivity() {
                   type="file"
                   accept="image/*"
                   multiple
-                  capture="environment"
                   onChange={(e) => {
                     if (e.target.files) {
                       setIncidentFiles(Array.from(e.target.files));
                     }
+                    e.target.value = '';
                   }}
                   style={{
                     width: '100%',
@@ -2200,11 +2336,17 @@ export default function OutletActivity() {
                     fontSize: '12px'
                   }}
                 />
+                {incidentFiles.length > 0 && (
+                  <div style={{ fontSize: '11px', color: 'var(--color-success)', marginTop: '4px' }}>
+                    ✓ {incidentFiles.length} foto bukti siap diunggah.
+                  </div>
+                )}
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
                 <button
                   type="button"
+                  disabled={incidentSubmitting}
                   onClick={() => setShowIncidentModal(false)}
                   style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer' }}
                 >
@@ -2220,30 +2362,41 @@ export default function OutletActivity() {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* ─────────────────────────────────────────────────────────────
           MODAL: FORM BUAT PR / TINDAK LANJUT
       ─────────────────────────────────────────────────────────────── */}
-      {showActionModal && (
-        <div style={{
-          position: 'fixed',
-          inset: 0,
-          background: 'rgba(0,0,0,0.75)',
-          backdropFilter: 'blur(4px)',
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          zIndex: 2000,
-          padding: '16px'
-        }}>
-          <div className="card" style={{ width: '100%', maxWidth: '480px', background: 'var(--bg-surface)' }}>
+      {showActionModal && createPortal(
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.75)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            zIndex: 3000,
+            padding: '16px',
+            overscrollBehavior: 'contain'
+          }}
+          onClick={() => !actionSubmitting && setShowActionModal(false)}
+        >
+          <div
+            className="card"
+            style={{ width: '100%', maxWidth: '480px', maxHeight: '90vh', overflowY: 'auto', background: 'var(--bg-surface-opaque)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <h2 style={{ fontSize: '16px', fontWeight: 800, margin: 0, color: 'var(--text-primary)' }}>
                 📌 Tambah PR / Tugas Tindak Lanjut
               </h2>
               <button
+                type="button"
+                disabled={actionSubmitting}
                 onClick={() => setShowActionModal(false)}
                 style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '18px', cursor: 'pointer' }}
               >
@@ -2322,6 +2475,7 @@ export default function OutletActivity() {
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
                 <button
                   type="button"
+                  disabled={actionSubmitting}
                   onClick={() => setShowActionModal(false)}
                   style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer' }}
                 >
@@ -2329,14 +2483,16 @@ export default function OutletActivity() {
                 </button>
                 <button
                   type="submit"
+                  disabled={actionSubmitting}
                   style={{ background: 'var(--primary)', border: 'none', color: '#fff', padding: '8px 20px', borderRadius: '8px', cursor: 'pointer', fontWeight: 700 }}
                 >
-                  Simpan PR
+                  {actionSubmitting ? 'Menyimpan...' : 'Simpan PR'}
                 </button>
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

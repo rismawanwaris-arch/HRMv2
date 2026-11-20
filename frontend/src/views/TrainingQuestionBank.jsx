@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import API_BASE from '../config';
+import { createPortal } from 'react-dom';
+import { adminTrainingApi } from '../services/api';
 
-function TrainingQuestionBank() {
+function TrainingQuestionBank({ currentRole }) {
   const [statements, setStatements] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
 
   // Modal states
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -15,17 +17,27 @@ function TrainingQuestionBank() {
     fetchStatements();
   }, []);
 
+  useEffect(() => {
+    if (!isModalOpen) return undefined;
+    const onKey = (e) => {
+      if (e.key === 'Escape') setIsModalOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isModalOpen]);
+
   const fetchStatements = async () => {
     try {
       setLoading(true);
-      const res = await fetch(`${API_BASE}/admin/training-questions`);
-      const data = await res.json();
+      setError(null);
+      const data = await adminTrainingApi.getQuestions();
       if (data.success) {
-        setStatements(data.questions);
+        setStatements(data.questions || []);
+      } else {
+        setError(data.message || 'Gagal memuat bank pernyataan training.');
       }
     } catch (err) {
-      console.error('Error fetching statements:', err);
-      setError('Gagal memuat bank pernyataan training.');
+      setError(err.message || 'Gagal memuat bank pernyataan training.');
     } finally {
       setLoading(false);
     }
@@ -50,19 +62,12 @@ function TrainingQuestionBank() {
       return;
     }
 
+    setSubmitting(true);
     try {
-      const url = editingStatement
-        ? `${API_BASE}/admin/training-questions/${editingStatement.id}`
-        : `${API_BASE}/admin/training-questions`;
-      
-      const method = editingStatement ? 'PUT' : 'POST';
-
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ statement_text: statementText.trim() })
-      });
-      const data = await res.json();
+      const payload = { statement_text: statementText.trim() };
+      const data = editingStatement
+        ? await adminTrainingApi.updateQuestion(editingStatement.id, payload)
+        : await adminTrainingApi.addQuestion(payload);
 
       if (data.success) {
         alert(editingStatement ? 'Pernyataan berhasil diperbarui!' : 'Pernyataan baru berhasil ditambahkan!');
@@ -72,8 +77,9 @@ function TrainingQuestionBank() {
         alert(data.message || 'Gagal menyimpan data.');
       }
     } catch (err) {
-      console.error('Save error:', err);
-      alert('Koneksi server gagal.');
+      alert(err.message || 'Koneksi server gagal.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -83,18 +89,14 @@ function TrainingQuestionBank() {
     }
 
     try {
-      const res = await fetch(`${API_BASE}/admin/training-questions/${id}`, {
-        method: 'DELETE'
-      });
-      const data = await res.json();
+      const data = await adminTrainingApi.deleteQuestion(id);
       if (data.success) {
         fetchStatements();
       } else {
         alert(data.message || 'Gagal menghapus data.');
       }
     } catch (err) {
-      console.error('Delete error:', err);
-      alert('Kesalahan jaringan.');
+      alert(err.message || 'Kesalahan jaringan.');
     }
   };
 
@@ -106,8 +108,8 @@ function TrainingQuestionBank() {
           <h1 className="page-title">Bank Soal & Pernyataan Training</h1>
           <p className="page-subtitle">Kelola indikator checklist penilaian 1-10 untuk evaluasi praktek kerja pasca training.</p>
         </div>
-        <button className="btn btn-primary" onClick={handleOpenAddModal}>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{marginRight: '6px'}}><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+        <button type="button" className="btn btn-primary" onClick={handleOpenAddModal}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
           Tambah Indikator Baru
         </button>
       </div>
@@ -117,59 +119,76 @@ function TrainingQuestionBank() {
         {loading ? (
           <div className="loading-spinner"></div>
         ) : error ? (
-          <div style={{ color: 'var(--color-danger)', textAlign: 'center' }}>{error}</div>
+          <div style={{ color: 'var(--color-danger)', textAlign: 'center', padding: '20px' }}>
+            <p style={{ marginBottom: '12px' }}>{error}</p>
+            <button type="button" className="btn btn-secondary" onClick={fetchStatements}>Coba Lagi</button>
+          </div>
         ) : statements.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-secondary)' }}>
             Belum ada pernyataan penilaian training. Klik "Tambah Indikator Baru" untuk memulai.
           </div>
         ) : (
-          <table className="candidate-table">
-            <thead>
-              <tr>
-                <th style={{ width: '80px' }}>No.</th>
-                <th>Pernyataan Kompetensi Training (Skala Penilaian 1-10)</th>
-                <th style={{ width: '200px', textAlign: 'right' }}>Aksi</th>
-              </tr>
-            </thead>
-            <tbody>
-              {statements.map((stmt, idx) => (
-                <tr key={stmt.id}>
-                  <td style={{ color: 'var(--text-secondary)' }}>{idx + 1}</td>
-                  <td style={{ fontWeight: '500', color: 'white', fontSize: '15px' }}>
-                    "{stmt.statement_text}"
-                  </td>
-                  <td style={{ textAlign: 'right' }}>
-                    <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                      <button 
-                        className="btn btn-secondary" 
-                        style={{ padding: '6px 12px', fontSize: '12px' }}
-                        onClick={() => handleOpenEditModal(stmt)}
-                      >
-                        Edit
-                      </button>
-                      <button 
-                        className="btn btn-danger" 
-                        style={{ padding: '6px 12px', fontSize: '12px', background: 'rgba(239, 68, 68, 0.1)', color: 'var(--color-danger)', border: '1px solid rgba(239, 68, 68, 0.2)' }}
-                        onClick={() => handleDeleteStatement(stmt.id, stmt.statement_text)}
-                      >
-                        Hapus
-                      </button>
-                    </div>
-                  </td>
+          <div style={{ overflowX: 'auto' }}>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th style={{ width: '80px' }}>No.</th>
+                  <th>Pernyataan Kompetensi Training (Skala Penilaian 1-10)</th>
+                  <th style={{ width: '200px', textAlign: 'right' }}>Aksi</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {statements.map((stmt, idx) => (
+                  <tr key={stmt.id}>
+                    <td style={{ color: 'var(--text-secondary)' }}>{idx + 1}</td>
+                    <td style={{ fontWeight: '500', color: 'var(--text-primary)', fontSize: '15px' }}>
+                      "{stmt.statement_text}"
+                    </td>
+                    <td style={{ textAlign: 'right' }}>
+                      <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          style={{ padding: '6px 12px', fontSize: '12px' }}
+                          onClick={() => handleOpenEditModal(stmt)}
+                        >
+                          Edit
+                        </button>
+                        {currentRole === 'master' && (
+                          <button
+                            type="button"
+                            className="btn btn-danger"
+                            style={{ padding: '6px 12px', fontSize: '12px', background: 'var(--color-danger-bg)', color: 'var(--color-danger)', border: '1px solid rgba(239, 68, 68, 0.25)' }}
+                            onClick={() => handleDeleteStatement(stmt.id, stmt.statement_text)}
+                          >
+                            Hapus
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 
       {/* Add/Edit Modal */}
-      {isModalOpen && (
-        <div className="modal-overlay">
-          <div className="glass-panel modal-content" style={{ maxWidth: '500px' }}>
+      {isModalOpen && createPortal(
+        <div
+          className="modal-overlay"
+          style={{ zIndex: 3000, overscrollBehavior: 'contain' }}
+          onClick={(e) => { if (e.target === e.currentTarget) setIsModalOpen(false); }}
+        >
+          <div
+            className="glass-panel modal-content"
+            style={{ maxWidth: '500px', background: 'var(--bg-surface-opaque)', overscrollBehavior: 'contain' }}
+            onClick={e => e.stopPropagation()}
+          >
             <div className="modal-header">
               <h2 className="modal-title">{editingStatement ? 'Edit Indikator Training' : 'Tambah Indikator Training Baru'}</h2>
-              <button className="close-btn" onClick={() => setIsModalOpen(false)}>×</button>
+              <button type="button" className="close-btn" onClick={() => setIsModalOpen(false)}>×</button>
             </div>
 
             <form onSubmit={handleFormSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '20px', marginTop: '16px' }}>
@@ -192,13 +211,14 @@ function TrainingQuestionBank() {
                 <button type="button" className="btn btn-secondary" onClick={() => setIsModalOpen(false)}>
                   Batal
                 </button>
-                <button type="submit" className="btn btn-primary">
-                  {editingStatement ? 'Simpan Perubahan' : 'Tambah Indikator'}
+                <button type="submit" className="btn btn-primary" disabled={submitting}>
+                  {submitting ? 'Menyimpan...' : editingStatement ? 'Simpan Perubahan' : 'Tambah Indikator'}
                 </button>
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

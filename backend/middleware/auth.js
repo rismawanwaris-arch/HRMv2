@@ -19,18 +19,18 @@ async function authenticateToken(req, res, next) {
     const token = bearerToken || queryToken;
 
     if (!token) {
-      return res.status(401).json({ success: false, message: 'Akses ditolak. Token tidak ditemukan.' });
+      return res.status(401).json({ success: false, code: 'TOKEN_MISSING', message: 'Akses ditolak. Token tidak ditemukan.' });
     }
 
     const decoded = verifyToken(token);
     if (!decoded || !decoded.username) {
-      return res.status(403).json({ success: false, message: 'Akses ditolak. Token tidak valid atau kedaluwarsa.' });
+      return res.status(403).json({ success: false, code: 'TOKEN_INVALID', message: 'Akses ditolak. Token tidak valid atau kedaluwarsa.' });
     }
 
     // Verify account still exists in database & enforce live role (instant revocation support)
     const admin = await query.get('SELECT id, username, role FROM admins WHERE username = ?', [decoded.username]);
     if (!admin) {
-      return res.status(401).json({ success: false, message: 'Akses ditolak. Akun sudah tidak aktif.' });
+      return res.status(401).json({ success: false, code: 'ACCOUNT_INACTIVE', message: 'Akses ditolak. Akun sudah tidak aktif.' });
     }
 
     req.user = {

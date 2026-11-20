@@ -9,6 +9,7 @@ router.post('/', candidateController.addCandidate);
 // Dedicated applicant upload & bulk excel routes (ZimaOS storage)
 router.get('/template-excel', candidateController.downloadCandidateTemplateExcel);
 router.post('/import-excel', excelUpload.single('file'), candidateController.importCandidatesExcel);
+router.post('/parse-cv', candidateCreationUpload.single('file'), candidateController.parseCv);
 router.post(
   '/upload-with-docs',
   candidateCreationUpload.fields([

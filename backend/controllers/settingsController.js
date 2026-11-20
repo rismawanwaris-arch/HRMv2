@@ -32,10 +32,16 @@ exports.updateSettings = async (req, res) => {
 
     for (const key of intKeys) {
       if (req.body[key] !== undefined) {
-        const val = String(parseInt(req.body[key], 10) || 0);
+        const parsed = parseInt(req.body[key], 10);
+        if (Number.isNaN(parsed) || parsed < 1 || parsed > 31) {
+          return res.status(400).json({
+            success: false,
+            message: `Nilai ${key} harus berupa angka antara 1 sampai 31.`,
+          });
+        }
         await query.run(
           'INSERT INTO system_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at',
-          [key, val]
+          [key, String(parsed)]
         );
       }
     }
@@ -44,7 +50,9 @@ exports.updateSettings = async (req, res) => {
       if (req.body[key] !== undefined) {
         // Validate HH:MM format
         const val = String(req.body[key]).trim();
-        if (!/^\d{2}:\d{2}$/.test(val)) continue;
+        if (!/^\d{2}:\d{2}$/.test(val)) {
+          return res.status(400).json({ success: false, message: `Format jam ${key} harus HH:MM.` });
+        }
         await query.run(
           'INSERT INTO system_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at',
           [key, val]
@@ -55,7 +63,7 @@ exports.updateSettings = async (req, res) => {
     if (req.body.mobile_api_base_url !== undefined) {
       const val = String(req.body.mobile_api_base_url).trim();
       await query.run(
-        'INSERT INTO system_settings (key, value, updated_at) VALUES ("mobile_api_base_url", ?, CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at',
+        "INSERT INTO system_settings (key, value, updated_at) VALUES ('mobile_api_base_url', ?, CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
         [val]
       );
     }
@@ -79,12 +87,22 @@ exports.getPenaltyRules = async (req, res) => {
 exports.createPenaltyRule = async (req, res) => {
   try {
     const { min_count, max_count, penalty_per_occurrence } = req.body;
-    if (min_count === undefined || penalty_per_occurrence === undefined) {
-      return res.status(400).json({ success: false, message: 'min_count dan penalty_per_occurrence wajib diisi.' });
+    const minVal = parseInt(min_count, 10);
+    const maxVal = (max_count !== undefined && max_count !== null && String(max_count).trim() !== '')
+      ? parseInt(max_count, 10)
+      : null;
+    const penVal = parseInt(penalty_per_occurrence, 10);
+
+    if (Number.isNaN(minVal) || minVal < 1 || Number.isNaN(penVal) || penVal < 0) {
+      return res.status(400).json({ success: false, message: 'min_count (>= 1) dan penalty_per_occurrence (>= 0) harus berupa angka valid.' });
     }
+    if (maxVal !== null && (Number.isNaN(maxVal) || maxVal < minVal)) {
+      return res.status(400).json({ success: false, message: 'Batas maksimal keterlambatan (max_count) harus >= batas minimal.' });
+    }
+
     const result = await query.run(
       'INSERT INTO late_penalty_rules (min_count, max_count, penalty_per_occurrence) VALUES (?, ?, ?)',
-      [parseInt(min_count, 10), max_count != null ? parseInt(max_count, 10) : null, parseInt(penalty_per_occurrence, 10)]
+      [minVal, maxVal, penVal]
     );
     const rule = await query.get('SELECT * FROM late_penalty_rules WHERE id = ?', [result.id]);
     res.json({ success: true, data: rule, message: 'Aturan denda berhasil ditambahkan.' });
@@ -97,10 +115,28 @@ exports.createPenaltyRule = async (req, res) => {
 exports.updatePenaltyRule = async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
+    const existing = await query.get('SELECT * FROM late_penalty_rules WHERE id = ?', [id]);
+    if (!existing) {
+      return res.status(404).json({ success: false, message: 'Aturan denda tidak ditemukan.' });
+    }
+
     const { min_count, max_count, penalty_per_occurrence } = req.body;
+    const minVal = parseInt(min_count, 10);
+    const maxVal = (max_count !== undefined && max_count !== null && String(max_count).trim() !== '')
+      ? parseInt(max_count, 10)
+      : null;
+    const penVal = parseInt(penalty_per_occurrence, 10);
+
+    if (Number.isNaN(minVal) || minVal < 1 || Number.isNaN(penVal) || penVal < 0) {
+      return res.status(400).json({ success: false, message: 'min_count (>= 1) dan penalty_per_occurrence (>= 0) harus berupa angka valid.' });
+    }
+    if (maxVal !== null && (Number.isNaN(maxVal) || maxVal < minVal)) {
+      return res.status(400).json({ success: false, message: 'Batas maksimal keterlambatan (max_count) harus >= batas minimal.' });
+    }
+
     await query.run(
       'UPDATE late_penalty_rules SET min_count = ?, max_count = ?, penalty_per_occurrence = ? WHERE id = ?',
-      [parseInt(min_count, 10), max_count != null ? parseInt(max_count, 10) : null, parseInt(penalty_per_occurrence, 10), id]
+      [minVal, maxVal, penVal, id]
     );
     const rule = await query.get('SELECT * FROM late_penalty_rules WHERE id = ?', [id]);
     res.json({ success: true, data: rule, message: 'Aturan denda berhasil diperbarui.' });
@@ -113,7 +149,10 @@ exports.updatePenaltyRule = async (req, res) => {
 exports.deletePenaltyRule = async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
-    await query.run('DELETE FROM late_penalty_rules WHERE id = ?', [id]);
+    const del = await query.run('DELETE FROM late_penalty_rules WHERE id = ?', [id]);
+    if (del.changes === 0) {
+      return res.status(404).json({ success: false, message: 'Aturan denda tidak ditemukan.' });
+    }
     res.json({ success: true, message: 'Aturan denda berhasil dihapus.' });
   } catch (error) {
     console.error('API Error (delete penalty rule):', error);
@@ -129,7 +168,7 @@ exports.getMobileConfig = async (req, res) => {
   try {
     const port = process.env.PORT || '5002';
     const localIp = getLocalIpAddress();
-    const customUrlRow = await query.get('SELECT value FROM system_settings WHERE key = "mobile_api_base_url"');
+    const customUrlRow = await query.get("SELECT value FROM system_settings WHERE key = 'mobile_api_base_url'");
     const customBaseUrl = customUrlRow ? customUrlRow.value : '';
 
     const assetSync = await query.get('SELECT COUNT(*) as count FROM outlet_assets WHERE client_uuid IS NOT NULL');

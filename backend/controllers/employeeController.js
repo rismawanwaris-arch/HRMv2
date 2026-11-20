@@ -6,6 +6,36 @@ const { EMPLOYEE_FIELDS, buildInsert, buildUpdate } = require('../utils/candidat
 const { STAFF_ALL_FIELDS, buildInsert: buildStaffInsert, buildUpdate: buildStaffUpdate } = require('../utils/staffFields');
 const { decryptRow, blindIndex } = require('../utils/fieldCrypto');
 
+/** Parse rupiah/numeric strings like "Rp 3.500.000", "3.500.000", "3500000.50", "3.500.000,50". */
+function parseRupiahNum(raw) {
+  if (raw === undefined || raw === null || raw === '') return 0;
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : 0;
+  let s = String(raw).trim().replace(/^rp\.?\s*/i, '').replace(/\s+/g, '');
+  if (!s) return 0;
+  // Indonesian thousands separator: one or more groups of .ddd at the end (no decimal comma) or comma as decimal
+  if (s.includes(',')) {
+    s = s.replace(/\./g, '').replace(',', '.');
+  } else if (/^\d{1,3}(\.\d{3})+$/.test(s)) {
+    s = s.replace(/\./g, '');
+  }
+  s = s.replace(/[^0-9.-]/g, '');
+  const n = parseFloat(s);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** Merge incoming partial payload on top of decrypted existing row without wiping existing fields to NULL/0. */
+function mergeNonEmptyFields(existingRow, incoming, numericCols = []) {
+  const merged = { ...(existingRow || {}) };
+  for (const [key, val] of Object.entries(incoming || {})) {
+    if (numericCols.includes(key)) {
+      if (val !== undefined && val !== null && val !== '') merged[key] = val;
+    } else if (val !== undefined && val !== null && String(val).trim() !== '') {
+      merged[key] = val;
+    }
+  }
+  return merged;
+}
+
 /**
  * Get list of Hired Employees (Data Karyawan)
  * @param {import('express').Request} req 
@@ -95,6 +125,26 @@ exports.addEmployeeManual = async (req, res) => {
       ]
     );
 
+    // Mirror to employees table so manual employee appears immediately in EmployeeManagement/Attendance/Payroll
+    const staffPayload = {
+      ...req.body,
+      candidate_id: candidateId,
+      contract_type: contract_type || 'PKWT',
+      salary: parseRupiahNum(salary_offered),
+      allowance: parseRupiahNum(allowance),
+      hire_date: hire_date || null,
+      employee_type: req.body.employee_type || 'Frontliner',
+      position: req.body.position || 'Frontliner',
+    };
+    const { columns: sCols, placeholders: sPh, values: sVals } = buildStaffInsert(STAFF_ALL_FIELDS, staffPayload);
+    await query.run(
+      `INSERT INTO employees (${sCols}, candidate_id, status, created_at, updated_at)
+       VALUES (${sPh}, ?, 'Active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+      [...sVals, candidateId]
+    ).catch((err) => {
+      console.warn('[employeeController] Mirror insert into employees skipped:', err.message);
+    });
+
     res.json({
       success: true,
       message: `Karyawan "${req.body.name.trim()}" berhasil ditambahkan ke Data Karyawan.`,
@@ -123,29 +173,49 @@ exports.updateEmployee = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Nama karyawan wajib diisi.' });
     }
 
-    const existing = await query.get('SELECT id FROM candidates WHERE id = ?', [employeeId]);
+    const existing = await query.get('SELECT * FROM candidates WHERE id = ?', [employeeId]);
     if (!existing) {
       return res.status(404).json({ success: false, message: 'Karyawan tidak ditemukan' });
     }
+    decryptRow(existing);
+    const mergedBody = { ...existing, ...req.body };
 
-    const { assignments, values } = buildUpdate(EMPLOYEE_FIELDS, req.body);
+    const { assignments, values } = buildUpdate(EMPLOYEE_FIELDS, mergedBody);
     await query.run(
       `UPDATE candidates SET ${assignments}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       [...values, employeeId]
     );
 
     await query.run(
-      `UPDATE stage7_offering 
-       SET contract_type = ?, salary_offered = ?, allowance = ?, start_date = ?
-       WHERE candidate_id = ?`,
+      `INSERT OR REPLACE INTO stage7_offering
+        (candidate_id, contract_type, salary_offered, allowance, start_date, offering_status, passed)
+       VALUES (?, ?, ?, ?, ?, 'Accepted', 1)`,
       [
+        employeeId,
         contract_type || 'PKWT',
-        salary_offered || 0,
-        allowance || 0,
+        salary_offered !== undefined ? parseRupiahNum(salary_offered) : 0,
+        allowance !== undefined ? parseRupiahNum(allowance) : 0,
         hire_date || null,
-        employeeId
       ]
     );
+
+    const linkedStaff = await query.get('SELECT * FROM employees WHERE candidate_id = ?', [employeeId]);
+    if (linkedStaff) {
+      decryptRow(linkedStaff);
+      const mergedStaff = {
+        ...linkedStaff,
+        ...mergedBody,
+        contract_type: contract_type || linkedStaff.contract_type || 'PKWT',
+        salary: salary_offered !== undefined ? parseRupiahNum(salary_offered) : linkedStaff.salary,
+        allowance: allowance !== undefined ? parseRupiahNum(allowance) : linkedStaff.allowance,
+        hire_date: hire_date !== undefined ? (hire_date || null) : linkedStaff.hire_date,
+      };
+      const { assignments: sAssign, values: sVals } = buildStaffUpdate(STAFF_ALL_FIELDS, mergedStaff);
+      await query.run(
+        `UPDATE employees SET ${sAssign}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+        [...sVals, linkedStaff.id]
+      );
+    }
 
     res.json({ success: true, message: 'Data karyawan berhasil diperbarui.' });
   } catch (error) {
@@ -215,7 +285,9 @@ exports.importExcel = async (req, res) => {
       branchCodes.add(code);
 
       const hasPetshop = /petshop/i.test(cleanName) ? 1 : 0;
-      const locType = /^(admin|cs|gudang|ho|head office)$/i.test(cleanName) ? 'Kantor/Pusat' : 'Konter';
+      const locType = /^gudang$/i.test(cleanName)
+        ? 'Gudang'
+        : (/^(admin|cs|ho|head office)$/i.test(cleanName) ? 'Kantor/Pusat' : 'Konter');
       const ins = await query.run(
         'INSERT INTO branches (code, name, address, city, location_type, has_petshop, rent_amount, status) VALUES (?, ?, ?, ?, ?, ?, 0, ?)',
         [code, cleanName, '', 'Bandung', locType, hasPetshop, 'Active']
@@ -268,7 +340,7 @@ exports.importExcel = async (req, res) => {
           const parts = ttl.split(',');
           if (parts.length > 1) {
             birth_place = parts[0].trim();
-            birth_date = parts.slice(1).join(',').trim();
+            birth_date = normalizeExcelDate(parts.slice(1).join(',').trim());
           } else {
             birth_place = ttl.trim();
           }
@@ -311,6 +383,12 @@ exports.importExcel = async (req, res) => {
         const address_ktp = str('Alamat KTP') || str('Permanent Address');
         const address_domicile = str('Alamat Domisili') || address_ktp;
 
+        const rawSalary = row['Gaji Pokok'];
+        const rawAllowance = row['Tunjangan'];
+        const hasSalaryCol = rawSalary !== undefined && rawSalary !== null && String(rawSalary).trim() !== '';
+        const hasAllowanceCol = rawAllowance !== undefined && rawAllowance !== null && String(rawAllowance).trim() !== '';
+        const hasDependentsCol = row['Jumlah Tanggungan'] !== undefined && row['Jumlah Tanggungan'] !== null && String(row['Jumlah Tanggungan']).trim() !== '';
+
         const rowBody = {
           name,
           nik,
@@ -319,7 +397,7 @@ exports.importExcel = async (req, res) => {
           birth_date,
           religion: str('Agama') || str('Religion'),
           marital_status: str('Status Perkawinan') || str('Marital Status'),
-          dependents: parseInt(row['Jumlah Tanggungan']) || 0,
+          dependents: hasDependentsCol ? (parseInt(row['Jumlah Tanggungan'], 10) || 0) : undefined,
           blood_type: str('Golongan Darah'),
           phone,
           email: str('E-mail') || str('Email'),
@@ -335,8 +413,8 @@ exports.importExcel = async (req, res) => {
           education_major: str('Jurusan'),
           education_years: str('Tahun Lulus'),
           education_grade: str('Nilai / IPK'),
-          height: parseInt(row['Tinggi Badan (cm)']) || null,
-          weight: parseInt(row['Berat Badan (kg)']) || null,
+          height: parseInt(row['Tinggi Badan (cm)'], 10) || null,
+          weight: parseInt(row['Berat Badan (kg)'], 10) || null,
           physical_condition: str('Kondisi Fisik'),
           color_blind_test: str('Tes Buta Warna'),
           health_history: str('Riwayat Penyakit'),
@@ -349,11 +427,11 @@ exports.importExcel = async (req, res) => {
           uniform_size: str('Ukuran Seragam'),
           branch_id,
           hire_date,
-          position,
-          employee_type,
-          contract_type,
-          salary: parseFloat(row['Gaji Pokok']) || 0,
-          allowance: parseFloat(row['Tunjangan']) || 0,
+          position: str('Jabatan') || str('Posisi') || undefined,
+          employee_type: rawEmpType || str('Jabatan') || str('Posisi') ? employee_type : undefined,
+          contract_type: str('Tipe Kontrak') || undefined,
+          salary: hasSalaryCol ? parseRupiahNum(rawSalary) : undefined,
+          allowance: hasAllowanceCol ? parseRupiahNum(rawAllowance) : undefined,
         };
 
         // 1. Upsert ke tabel candidates (Data Karyawan Rekrutmen)
@@ -371,7 +449,10 @@ exports.importExcel = async (req, res) => {
         }
 
         if (candidateId) {
-          const { assignments, values } = buildUpdate(EMPLOYEE_FIELDS, rowBody);
+          const existingCandFull = await query.get('SELECT * FROM candidates WHERE id = ?', [candidateId]);
+          decryptRow(existingCandFull);
+          const mergedCand = mergeNonEmptyFields(existingCandFull, rowBody, ['dependents', 'height', 'weight', 'branch_id']);
+          const { assignments, values } = buildUpdate(EMPLOYEE_FIELDS, mergedCand);
           await query.run(
             `UPDATE candidates SET ${assignments}, status = 'Hired', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
             [...values, candidateId]
@@ -384,7 +465,8 @@ exports.importExcel = async (req, res) => {
             const existing = await query.get('SELECT id FROM candidates WHERE access_code = ?', [accessCode]);
             codeExists = !!existing;
           }
-          const { columns, placeholders, values } = buildInsert(EMPLOYEE_FIELDS, rowBody);
+          const insertCandBody = { ...rowBody, dependents: rowBody.dependents ?? 0 };
+          const { columns, placeholders, values } = buildInsert(EMPLOYEE_FIELDS, insertCandBody);
           const candidateResult = await query.run(
             `INSERT INTO candidates (access_code, ${columns}, is_manual_entry, status, current_stage, created_at, updated_at)
              VALUES (?, ${placeholders}, 1, 'Hired', 7, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
@@ -393,11 +475,18 @@ exports.importExcel = async (req, res) => {
           candidateId = candidateResult.id;
         }
 
+        const existingOffer = await query.get('SELECT * FROM stage7_offering WHERE candidate_id = ?', [candidateId]);
         await query.run(
           `INSERT OR REPLACE INTO stage7_offering 
             (candidate_id, contract_type, salary_offered, allowance, start_date, offering_status, passed)
            VALUES (?, ?, ?, ?, ?, 'Accepted', 1)`,
-          [candidateId, contract_type, rowBody.salary, rowBody.allowance, hire_date]
+          [
+            candidateId,
+            rowBody.contract_type || existingOffer?.contract_type || 'PKWT',
+            rowBody.salary !== undefined ? rowBody.salary : (existingOffer?.salary_offered || 0),
+            rowBody.allowance !== undefined ? rowBody.allowance : (existingOffer?.allowance || 0),
+            hire_date || existingOffer?.start_date || null,
+          ]
         );
 
         // 2. Upsert ke tabel employees (Manajemen Karyawan, Absensi, Payroll & Mobile API)
@@ -405,25 +494,37 @@ exports.importExcel = async (req, res) => {
         if (nik) {
           const bidx = blindIndex(nik);
           existingStaff = bidx
-            ? await query.get('SELECT id FROM employees WHERE nik_bidx = ? OR nik = ?', [bidx, nik])
-            : await query.get('SELECT id FROM employees WHERE nik = ?', [nik]);
+            ? await query.get('SELECT * FROM employees WHERE nik_bidx = ? OR nik = ?', [bidx, nik])
+            : await query.get('SELECT * FROM employees WHERE nik = ?', [nik]);
         }
         if (!existingStaff && candidateId) {
-          existingStaff = await query.get('SELECT id FROM employees WHERE candidate_id = ?', [candidateId]);
+          existingStaff = await query.get('SELECT * FROM employees WHERE candidate_id = ?', [candidateId]);
         }
         if (!existingStaff) {
-          existingStaff = await query.get('SELECT id FROM employees WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))', [name]);
+          existingStaff = await query.get('SELECT * FROM employees WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))', [name]);
         }
 
         const staffPayload = { ...rowBody, candidate_id: candidateId };
         if (existingStaff) {
-          const { assignments: staffAssign, values: staffVals } = buildStaffUpdate(STAFF_ALL_FIELDS, staffPayload);
+          decryptRow(existingStaff);
+          const mergedStaff = mergeNonEmptyFields(existingStaff, staffPayload, ['dependents', 'height', 'weight', 'branch_id', 'salary', 'allowance']);
+          const { assignments: staffAssign, values: staffVals } = buildStaffUpdate(STAFF_ALL_FIELDS, mergedStaff);
+          // Preserve existing employees.status (do not reactivate Resign/Terminated rows implicitly)
           await query.run(
             `UPDATE employees SET ${staffAssign}, candidate_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
             [...staffVals, candidateId, existingStaff.id]
           );
         } else {
-          const { columns: staffCols, placeholders: staffPh, values: staffVals } = buildStaffInsert(STAFF_ALL_FIELDS, staffPayload);
+          const insertStaffBody = {
+            ...staffPayload,
+            position: staffPayload.position || 'Frontliner',
+            employee_type: staffPayload.employee_type || 'Frontliner',
+            contract_type: staffPayload.contract_type || 'PKWT',
+            salary: staffPayload.salary ?? 0,
+            allowance: staffPayload.allowance ?? 0,
+            dependents: staffPayload.dependents ?? 0,
+          };
+          const { columns: staffCols, placeholders: staffPh, values: staffVals } = buildStaffInsert(STAFF_ALL_FIELDS, insertStaffBody);
           await query.run(
             `INSERT INTO employees (${staffCols}, candidate_id, status, created_at, updated_at)
              VALUES (${staffPh}, ?, 'Active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,

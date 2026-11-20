@@ -1,8 +1,12 @@
 import React from 'react';
 
-function Stage3Simulation({ candidate, stageData, setStageData, handleStageSubmit }) {
+function Stage3Simulation({ candidate, stageId = 3, stageData, setStageData, handleStageSubmit, submitting = false }) {
+  const upselling = stageData.score_upselling ?? 3;
+  const complaint = stageData.score_complaint ?? 3;
+  const queue = stageData.score_queue ?? 3;
+
   return (
-    <form onSubmit={(e) => { e.preventDefault(); handleStageSubmit(3, stageData); }}>
+    <form onSubmit={(e) => { e.preventDefault(); handleStageSubmit(stageId, stageData); }}>
       <div className="eval-title">
         <span>Tahap 3: Tes Simulasi & Role Play</span>
         <span className={`badge ${stageData.passed ? 'badge-hired' : 'badge-active'}`}>
@@ -14,12 +18,12 @@ function Stage3Simulation({ candidate, stageData, setStageData, handleStageSubmi
         <div className="form-group">
           <label style={{ display: 'flex', justifyContent: 'space-between' }}>
             <span>Skenario 1: Melayani Pembelian + Upselling Paket Data</span>
-            <strong>Skor: {stageData.score_upselling} / 5</strong>
+            <strong>Skor: {upselling} / 5</strong>
           </label>
-          <input 
-            type="range" min="1" max="5" 
-            value={stageData.score_upselling} 
-            onChange={(e) => setStageData(p => ({ ...p, score_upselling: parseInt(e.target.value) }))}
+          <input
+            type="range" min="1" max="5"
+            value={upselling}
+            onChange={(e) => setStageData(p => ({ ...p, score_upselling: parseInt(e.target.value, 10) }))}
           />
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-muted)' }}>
             <span>1 = Buruk (pasif)</span>
@@ -30,12 +34,12 @@ function Stage3Simulation({ candidate, stageData, setStageData, handleStageSubmi
         <div className="form-group">
           <label style={{ display: 'flex', justifyContent: 'space-between' }}>
             <span>Skenario 2: Menangani Komplain Transaksi Gagal</span>
-            <strong>Skor: {stageData.score_complaint} / 5</strong>
+            <strong>Skor: {complaint} / 5</strong>
           </label>
-          <input 
-            type="range" min="1" max="5" 
-            value={stageData.score_complaint} 
-            onChange={(e) => setStageData(p => ({ ...p, score_complaint: parseInt(e.target.value) }))}
+          <input
+            type="range" min="1" max="5"
+            value={complaint}
+            onChange={(e) => setStageData(p => ({ ...p, score_complaint: parseInt(e.target.value, 10) }))}
           />
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-muted)' }}>
             <span>1 = Emosional / Defensif</span>
@@ -46,12 +50,12 @@ function Stage3Simulation({ candidate, stageData, setStageData, handleStageSubmi
         <div className="form-group">
           <label style={{ display: 'flex', justifyContent: 'space-between' }}>
             <span>Skenario 3: Menangani Antrean Ramah & Cepat</span>
-            <strong>Skor: {stageData.score_queue} / 5</strong>
+            <strong>Skor: {queue} / 5</strong>
           </label>
-          <input 
-            type="range" min="1" max="5" 
-            value={stageData.score_queue} 
-            onChange={(e) => setStageData(p => ({ ...p, score_queue: parseInt(e.target.value) }))}
+          <input
+            type="range" min="1" max="5"
+            value={queue}
+            onChange={(e) => setStageData(p => ({ ...p, score_queue: parseInt(e.target.value, 10) }))}
           />
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-muted)' }}>
             <span>1 = Gugup / Menurunkan Kualitas</span>
@@ -63,8 +67,8 @@ function Stage3Simulation({ candidate, stageData, setStageData, handleStageSubmi
       <div className="form-grid" style={{ marginBottom: '24px' }}>
         <div className="form-group">
           <label>Nama Evaluator (Supervisor / Kepala Toko)</label>
-          <input 
-            type="text" 
+          <input
+            type="text"
             value={stageData.evaluator || ''}
             onChange={(e) => setStageData(p => ({ ...p, evaluator: e.target.value }))}
             placeholder="Nama supervisor penilai..."
@@ -74,7 +78,7 @@ function Stage3Simulation({ candidate, stageData, setStageData, handleStageSubmi
 
       <div className="form-group form-group-full" style={{ marginBottom: '24px' }}>
         <label>Catatan & Evaluasi Perilaku</label>
-        <textarea 
+        <textarea
           value={stageData.notes || ''}
           onChange={(e) => setStageData(p => ({ ...p, notes: e.target.value }))}
           placeholder="Catatan kelebihan dan kekurangan kandidat saat melakukan simulasi pelayanan..."
@@ -92,7 +96,9 @@ function Stage3Simulation({ candidate, stageData, setStageData, handleStageSubmi
       </div>
 
       {candidate.status === 'Active' && (
-        <button type="submit" className="btn btn-primary">Simpan Hasil Tahap 3</button>
+        <button type="submit" className="btn btn-primary" disabled={submitting}>
+          {submitting ? 'Menyimpan...' : 'Simpan Hasil Tahap 3'}
+        </button>
       )}
     </form>
   );

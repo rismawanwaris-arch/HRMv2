@@ -23,7 +23,7 @@ function auditLog(req, res, next) {
   const originalJson = res.json.bind(res);
   res.json = (body) => {
     if (body && typeof body === 'object') {
-      const candidate = body.candidateId ?? body.id ?? (body.data && body.data.id);
+      const candidate = body.candidateId ?? body.employeeId ?? body.questionId ?? body.id ?? (body.data && body.data.id);
       if (/^\d+$/.test(String(candidate))) responseId = parseInt(candidate, 10);
     }
     return originalJson(body);
