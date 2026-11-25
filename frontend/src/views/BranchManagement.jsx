@@ -5,7 +5,7 @@ import { branchApi } from '../services/api';
 const iStyle = { background: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '10px 14px', color: 'var(--text-primary)', fontSize: '14px', width: '100%', boxSizing: 'border-box', display: 'block', outline: 'none', fontFamily: 'inherit', transition: 'border-color 0.2s' };
 const lStyle = { display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' };
 
-const EMPTY_FORM = { code: '', name: '', address: '', city: '', location_type: 'Konter', has_petshop: false, rent_amount: '' };
+const EMPTY_FORM = { code: '', name: '', address: '', city: '', location_type: 'Konter', has_petshop: false, rent_amount: '', latitude: '', longitude: '', geofence_radius_m: 100 };
 
 function Field({ label, required, children }) {
   return (
@@ -61,6 +61,21 @@ function BranchForm({ data, setData, onSubmit, isEdit, error, submitting, onCanc
           placeholder="Masukkan alamat lengkap cabang..." value={data.address}
           onChange={e => setData(p => ({ ...p, address: e.target.value }))} rows={3} />
       </Field>
+
+      <div className="responsive-grid-3" style={{ gap: '12px' }}>
+        <Field label="Latitude GPS (opsional)">
+          <input type="number" step="any" style={iStyle} placeholder="-6.200000" value={data.latitude ?? ''}
+            onChange={e => setData(p => ({ ...p, latitude: e.target.value }))} />
+        </Field>
+        <Field label="Longitude GPS (opsional)">
+          <input type="number" step="any" style={iStyle} placeholder="106.816666" value={data.longitude ?? ''}
+            onChange={e => setData(p => ({ ...p, longitude: e.target.value }))} />
+        </Field>
+        <Field label="Radius Geofence (m)">
+          <input type="number" min="10" max="10000" style={iStyle} placeholder="100" value={data.geofence_radius_m ?? 100}
+            onChange={e => setData(p => ({ ...p, geofence_radius_m: e.target.value }))} />
+        </Field>
+      </div>
 
       <div style={{ display: 'flex', gap: '20px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
         <label style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 16px', background: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: '10px', cursor: 'pointer', userSelect: 'none', marginBottom: 0 }}>
@@ -160,7 +175,14 @@ function BranchManagement() {
     }
     try {
       setSubmitting(true);
-      const res = await branchApi.create({ ...form, has_petshop: form.has_petshop ? 1 : 0, rent_amount: parseFloat(form.rent_amount) || 0 });
+      const res = await branchApi.create({
+        ...form,
+        has_petshop: form.has_petshop ? 1 : 0,
+        rent_amount: parseFloat(form.rent_amount) || 0,
+        latitude: form.latitude === '' ? null : form.latitude,
+        longitude: form.longitude === '' ? null : form.longitude,
+        geofence_radius_m: parseInt(form.geofence_radius_m, 10) || 100,
+      });
       if (res.success) {
         setBranches(prev => [...prev, { ...res.data, employee_count: res.data?.employee_count ?? 0 }].sort((a, b) => a.name.localeCompare(b.name)));
         setShowAddModal(false);
@@ -184,7 +206,14 @@ function BranchManagement() {
     }
     try {
       setSubmitting(true);
-      const res = await branchApi.update(editForm.id, { ...editForm, has_petshop: editForm.has_petshop ? 1 : 0, rent_amount: parseFloat(editForm.rent_amount) || 0 });
+      const res = await branchApi.update(editForm.id, {
+        ...editForm,
+        has_petshop: editForm.has_petshop ? 1 : 0,
+        rent_amount: parseFloat(editForm.rent_amount) || 0,
+        latitude: editForm.latitude === '' ? null : editForm.latitude,
+        longitude: editForm.longitude === '' ? null : editForm.longitude,
+        geofence_radius_m: parseInt(editForm.geofence_radius_m, 10) || 100,
+      });
       if (res.success) {
         setBranches(prev => prev.map(b => b.id === editForm.id ? { ...b, ...res.data, employee_count: res.data?.employee_count ?? b.employee_count } : b).sort((a, b) => a.name.localeCompare(b.name)));
         setShowEditModal(false);
@@ -253,6 +282,9 @@ function BranchManagement() {
       location_type: branch.location_type || 'Konter',
       has_petshop: !!branch.has_petshop,
       rent_amount: branch.rent_amount || '',
+      latitude: branch.latitude ?? '',
+      longitude: branch.longitude ?? '',
+      geofence_radius_m: branch.geofence_radius_m ?? 100,
     });
     setError('');
     setShowEditModal(true);

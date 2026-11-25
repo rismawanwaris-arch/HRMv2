@@ -97,11 +97,15 @@ describe('Mobile Sync & HRGA Endpoints', () => {
     assert.equal(res1.status, 201);
     assert.equal(res1.body.success, true);
     assert.ok(res1.body.data.server_id > 0);
+    assert.equal(res1.body.data.candidate_id, res1.body.data.server_id);
+    assert.ok(res1.body.data.employee_id > 0, 'syncEmployee must return employee_id');
 
     // Idempotent retry
     const res2 = await client.post('/api/mobile/sync/employee').send(empPayload);
     assert.equal(res2.status, 200);
     assert.equal(res2.body.data.server_id, res1.body.data.server_id);
+    assert.equal(res2.body.data.candidate_id, res1.body.data.candidate_id);
+    assert.equal(res2.body.data.employee_id, res1.body.data.employee_id);
   });
 
   it('GET /api/mobile/assets and /api/mobile/employees should return filtered results', async () => {
@@ -218,5 +222,114 @@ describe('Mobile Sync & HRGA Endpoints', () => {
       assert.equal('bank_account_number' in emp, false);
       assert.equal('address_ktp' in emp, false);
     }
+  });
+
+  it('API v2.0: health, me, no ghost /mobile/mobile prefix, master-data SunFish fields & unified SunFish mobile endpoints', async () => {
+    // Public health check
+    const healthRes = await request(app).get('/api/mobile/health');
+    assert.equal(healthRes.status, 200);
+    assert.equal(healthRes.body.success, true);
+    assert.equal(healthRes.body.api_version, '2.0');
+
+    // /me requires auth & returns permissions
+    const meNoAuth = await request(app).get('/api/mobile/me');
+    assert.equal(meNoAuth.status, 401);
+
+    const meRes = await client.get('/api/mobile/me');
+    assert.equal(meRes.status, 200);
+    assert.equal(meRes.body.data.username, 'admin');
+    assert.equal(meRes.body.data.permissions.can_approve, true);
+
+    // Ghost double prefix must be 404 JSON
+    const ghostRes = await request(app).post('/api/mobile/mobile/login').send({ username: 'admin', password: 'admin123' });
+    assert.equal(ghostRes.status, 404);
+    assert.equal(ghostRes.body.success, false);
+
+    // Master data includes SunFish leave_types, shift_cutoffs, reimbursement_categories, and branch geofence fields
+    const mdRes = await client.get('/api/mobile/master-data');
+    assert.equal(mdRes.status, 200);
+    assert.ok(Array.isArray(mdRes.body.data.leave_types) && mdRes.body.data.leave_types.length > 0);
+    assert.ok(Array.isArray(mdRes.body.data.reimbursement_categories));
+    assert.ok(mdRes.body.data.shift_cutoffs && mdRes.body.data.shift_cutoffs.pagi && mdRes.body.data.shift_cutoffs.siang);
+    assert.ok('geofence_radius_m' in mdRes.body.data.branches[0]);
+
+    // Sync an employee cleanly and use its returned employee_id for unified mobile HR calls
+    const syncEmp = await client.post('/api/mobile/sync/employee').send({
+      client_uuid: 'mobile-v2-emp-' + Date.now(),
+      name: 'Karyawan Mobile V2',
+      branch_id: branchId,
+      salary_offered: 3500000,
+    });
+    assert.equal(syncEmp.status, 201);
+    const empId = syncEmp.body.data.employee_id;
+    assert.ok(empId > 0);
+
+    // Create staff role user to verify unified mobile endpoints & RBAC
+    const staffUser = 'mbl_staff_' + Date.now();
+    await client.post('/api/admins').send({ username: staffUser, password: 'Password123!', role: 'staff' });
+    const staffLogin = await request(app).post('/api/mobile/login').send({ username: staffUser, password: 'Password123!' });
+    assert.equal(staffLogin.status, 200);
+    const staffClient = authed(staffLogin.body.token);
+
+    const staffMe = await staffClient.get('/api/mobile/me');
+    assert.equal(staffMe.status, 200);
+    assert.equal(staffMe.body.data.permissions.can_approve, false);
+
+    // Attendance today (no date param defaults to today) + history + check-in
+    const attToday = await staffClient.get('/api/mobile/attendance/today');
+    assert.equal(attToday.status, 200);
+
+    const checkinRes = await staffClient.post('/api/mobile/attendance/checkin').send({
+      employee_id: empId,
+      shift: 'Pagi',
+      date: '2026-11-25',
+      check_in_time: '06:15',
+    });
+    assert.equal(checkinRes.status, 200);
+
+    const attHist = await staffClient.get(`/api/mobile/attendance/history?employee_id=${empId}&period=2026-11`);
+    assert.equal(attHist.status, 200);
+    assert.ok(attHist.body.data.some((d) => d.date === '2026-11-25'));
+
+    // Leaves & Overtime via /api/mobile/*
+    const ltRes = await staffClient.get('/api/mobile/leaves/types');
+    assert.equal(ltRes.status, 200);
+    const annualType = ltRes.body.data.find((t) => t.code === 'ANNUAL');
+
+    const leaveCreate = await staffClient.post('/api/mobile/leaves/requests').send({
+      employee_id: empId,
+      leave_type_id: annualType.id,
+      start_date: '2026-12-21',
+      end_date: '2026-12-21',
+      reason: 'Uji mobile API v2',
+    });
+    assert.equal(leaveCreate.status, 201);
+    const leaveId = leaveCreate.body.data.id;
+
+    // Staff blocked 403 on approve; master succeeds
+    assert.equal((await staffClient.put(`/api/mobile/leaves/requests/${leaveId}/approve`).send({})).status, 403);
+    assert.equal((await client.put(`/api/mobile/leaves/requests/${leaveId}/approve`).send({})).status, 200);
+
+    const otCreate = await staffClient.post('/api/mobile/overtime').send({
+      employee_id: empId,
+      date: '2026-11-24',
+      hours: 2,
+      day_type: 'weekday',
+      reason: 'Lembur mobile v2',
+    });
+    assert.equal(otCreate.status, 201);
+    const otId = otCreate.body.data.id;
+    assert.equal((await staffClient.put(`/api/mobile/overtime/${otId}/approve`).send({})).status, 403);
+    assert.equal((await client.put(`/api/mobile/overtime/${otId}/approve`).send({})).status, 200);
+
+    const reimbCreate = await staffClient.post('/api/mobile/reimbursements').send({
+      employee_id: empId,
+      claim_date: '2026-11-25',
+      category: 'Transportasi',
+      amount: 45000,
+      description: 'Klaim BBM via mobile',
+    });
+    assert.equal(reimbCreate.status, 201);
+    assert.equal((await client.put(`/api/mobile/reimbursements/${reimbCreate.body.data.id}/approve`).send({})).status, 200);
   });
 });

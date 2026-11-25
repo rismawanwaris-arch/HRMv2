@@ -6,6 +6,14 @@ const {
 } = require('../utils/helpers');
 const { EMPLOYEE_FIELDS, buildInsert } = require('../utils/candidateFields');
 const { STAFF_ALL_FIELDS, buildInsert: buildStaffInsert } = require('../utils/staffFields');
+const { haversineMeters, getPeriodForDate, getPeriodDateRange } = require('../utils/payrollCalc');
+const {
+  getSettings,
+  getPenaltyRules,
+  normalizeTimeHHMM,
+  computeStatus,
+  syncEmployeePeriod,
+} = require('../utils/attendanceSync');
 
 function safeParseJsonArray(str) {
   if (!str) return [];
@@ -60,13 +68,48 @@ function clampPositiveMoney(val, maxVal = 1000000000) {
 }
 
 /**
+ * 0. GET /api/mobile/health
+ * Cek status server & versi API (Publik tanpa token — untuk verifikasi koneksi di layar Pengaturan HP)
+ */
+exports.health = (req, res) => {
+  res.json({
+    success: true,
+    status: 'ok',
+    api_version: '2.0',
+    server_time: new Date().toISOString(),
+    features: ['offline_sync', 'geofence_checkin', 'leaves', 'overtime', 'reimbursements'],
+  });
+};
+
+/**
+ * 0b. GET /api/mobile/me
+ * Verifikasi token JWT aktif & ambil profil beserta hak akses pengguna saat startup app
+ */
+exports.me = (req, res) => {
+  const role = req.user?.role || 'staff';
+  res.json({
+    success: true,
+    data: {
+      id: req.user?.id,
+      username: req.user?.username,
+      role,
+      permissions: {
+        can_approve: ['finance', 'master'].includes(role),
+        can_manage_loans: ['finance', 'master'].includes(role),
+        can_manage_settings: role === 'master',
+      },
+    },
+  });
+};
+
+/**
  * 1. GET /api/mobile/master-data
  * Mengambil data referensi untuk disimpan di cache lokal SQLite Flutter (Wajib Token)
  */
 exports.getMasterData = async (req, res) => {
   try {
     const rawBranches = await query.all(
-      "SELECT id, code, name, city, address, status FROM branches WHERE status = 'Active' ORDER BY name ASC"
+      "SELECT id, code, name, city, address, status, latitude, longitude, geofence_radius_m FROM branches WHERE status = 'Active' ORDER BY name ASC"
     );
 
     const branches = rawBranches.map(b => ({
@@ -76,8 +119,16 @@ exports.getMasterData = async (req, res) => {
       address: b.address || '',
       city: b.city || '',
       phone: b.phone || '',
-      status: b.status
+      status: b.status,
+      latitude: b.latitude ?? null,
+      longitude: b.longitude ?? null,
+      geofence_radius_m: b.geofence_radius_m ?? 100
     }));
+
+    const leaveTypes = await query.all(
+      'SELECT id, code, name, default_quota, is_paid, attendance_status, requires_attachment FROM leave_types WHERE is_active = 1 ORDER BY id ASC'
+    );
+    const settings = await getSettings();
 
     res.json({
       success: true,
@@ -90,7 +141,13 @@ exports.getMasterData = async (req, res) => {
         incident_categories: VALID_INCIDENT_CATEGORIES,
         incident_severities: VALID_INCIDENT_SEVERITIES,
         incident_statuses: VALID_INCIDENT_STATUSES,
-        visit_purposes: ['Audit Rutin', 'Perbaikan/Maintenance', 'Stock Opname Aset', 'Kunjungan Darurat', 'Lainnya']
+        visit_purposes: ['Audit Rutin', 'Perbaikan/Maintenance', 'Stock Opname Aset', 'Kunjungan Darurat', 'Lainnya'],
+        leave_types: leaveTypes,
+        reimbursement_categories: ['Transportasi', 'Operasional Outlet', 'Kesehatan / Medis', 'Perlengkapan', 'Lainnya'],
+        shift_cutoffs: {
+          pagi: settings.shift_pagi_cutoff || '06:30',
+          siang: settings.shift_siang_cutoff || '14:30',
+        },
       }
     });
   } catch (error) {
@@ -538,11 +595,14 @@ exports.syncEmployee = async (req, res) => {
       [cleanUuid]
     );
     if (existing) {
+      const empRow = await query.get('SELECT id FROM employees WHERE candidate_id = ?', [existing.id]);
       return res.status(200).json({
         success: true,
         message: 'Karyawan sudah tersinkronkan sebelumnya (idempotent).',
         data: {
           server_id: existing.id,
+          candidate_id: existing.id,
+          employee_id: empRow ? empRow.id : null,
           access_code: existing.access_code,
           client_uuid: existing.client_uuid
         }
@@ -616,19 +676,27 @@ exports.syncEmployee = async (req, res) => {
       position: req.body.position || 'Frontliner',
     };
     const { columns: sCols, placeholders: sPh, values: sVals } = buildStaffInsert(STAFF_ALL_FIELDS, staffPayload);
-    await query.run(
-      `INSERT INTO employees (${sCols}, candidate_id, status, created_at, updated_at)
-       VALUES (${sPh}, ?, 'Active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-      [...sVals, candidateId]
-    ).catch((err) => {
+    let employeeId = null;
+    try {
+      const empInsert = await query.run(
+        `INSERT INTO employees (${sCols}, candidate_id, status, created_at, updated_at)
+         VALUES (${sPh}, ?, 'Active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        [...sVals, candidateId]
+      );
+      employeeId = empInsert.id;
+    } catch (err) {
       console.warn('[mobileController] Mirror insert into employees skipped:', err.message);
-    });
+      const existingEmp = await query.get('SELECT id FROM employees WHERE candidate_id = ?', [candidateId]);
+      employeeId = existingEmp ? existingEmp.id : null;
+    }
 
     res.status(201).json({
       success: true,
       message: 'Karyawan berhasil terdaftar di sistem.',
       data: {
         server_id: candidateId,
+        candidate_id: candidateId,
+        employee_id: employeeId,
         access_code: accessCode,
         client_uuid: cleanUuid
       }
@@ -673,7 +741,10 @@ exports.getAssets = async (req, res) => {
       params.push(q, q, q);
     }
 
-    sql += ' ORDER BY a.id DESC LIMIT 100';
+    const limitVal = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 100));
+    const offsetVal = Math.max(0, parseInt(req.query.offset, 10) || 0);
+    sql += ' ORDER BY a.id DESC LIMIT ? OFFSET ?';
+    params.push(limitVal, offsetVal);
 
     const assets = await query.all(sql, params);
     res.json({
@@ -716,7 +787,10 @@ exports.getEmployees = async (req, res) => {
       params.push(q, q);
     }
 
-    sql += ' ORDER BY e.id DESC LIMIT 100';
+    const limitVal = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 100));
+    const offsetVal = Math.max(0, parseInt(req.query.offset, 10) || 0);
+    sql += ' ORDER BY e.id DESC LIMIT ? OFFSET ?';
+    params.push(limitVal, offsetVal);
 
     const employees = await query.all(sql, params);
     res.json({
@@ -726,5 +800,158 @@ exports.getEmployees = async (req, res) => {
   } catch (error) {
     console.error('Mobile API Error (getEmployees):', error);
     res.status(500).json({ success: false, message: 'Gagal mengambil data karyawan.' });
+  }
+};
+
+/**
+ * 8. POST /api/mobile/attendance/checkin
+ * Check-in absensi mandiri dari mobile app dengan GPS Geofencing + Foto Selfie opsional
+ */
+exports.checkInAttendance = async (req, res) => {
+  const uploadedFiles = req.file ? [req.file] : [];
+  try {
+    if (req.file && !verifyImageMagicBytes([req.file])) {
+      cleanupUploadedFiles(uploadedFiles);
+      return res.status(400).json({ success: false, message: 'File foto selfie tidak valid.' });
+    }
+
+    const employeeId = parseInt(req.body.employee_id, 10);
+    if (!Number.isInteger(employeeId) || employeeId < 1) {
+      cleanupUploadedFiles(uploadedFiles);
+      return res.status(400).json({ success: false, message: 'employee_id wajib diisi.' });
+    }
+
+    const emp = await query.get(
+      `SELECT e.id, e.name, e.branch_id, b.name AS branch_name, b.latitude AS branch_lat, b.longitude AS branch_lng, b.geofence_radius_m
+       FROM employees e LEFT JOIN branches b ON e.branch_id = b.id
+       WHERE e.id = ? AND e.status = 'Active'`,
+      [employeeId]
+    );
+    if (!emp) {
+      cleanupUploadedFiles(uploadedFiles);
+      return res.status(404).json({ success: false, message: 'Karyawan aktif tidak ditemukan.' });
+    }
+
+    const lat = req.body.latitude !== undefined && req.body.latitude !== '' ? parseFloat(req.body.latitude) : null;
+    const lng = req.body.longitude !== undefined && req.body.longitude !== '' ? parseFloat(req.body.longitude) : null;
+    let distanceM = null;
+
+    if (emp.branch_lat !== null && emp.branch_lat !== undefined && emp.branch_lng !== null && emp.branch_lng !== undefined) {
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        cleanupUploadedFiles(uploadedFiles);
+        return res.status(400).json({ success: false, message: 'Koordinat GPS (latitude/longitude) wajib dikirim untuk cabang ini.' });
+      }
+      distanceM = haversineMeters(lat, lng, emp.branch_lat, emp.branch_lng);
+      const maxRadius = emp.geofence_radius_m || 100;
+      if (distanceM > maxRadius) {
+        cleanupUploadedFiles(uploadedFiles);
+        return res.status(400).json({
+          success: false,
+          code: 'OUTSIDE_GEOFENCE',
+          distance_m: distanceM,
+          max_radius_m: maxRadius,
+          message: `Lokasi Anda berada ${distanceM} meter dari cabang ${emp.branch_name || ''} (batas maksimal ${maxRadius} meter).`,
+        });
+      }
+    }
+
+    const now = new Date();
+    const dateStr = req.body.date && /^\d{4}-\d{2}-\d{2}$/.test(req.body.date)
+      ? req.body.date
+      : getTodayDateStr();
+    const currentHHMM = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    const checkInTime = req.body.check_in_time
+      ? (normalizeTimeHHMM(req.body.check_in_time) || currentHHMM)
+      : currentHHMM;
+    const shift = req.body.shift === 'Siang' ? 'Siang' : 'Pagi';
+    const notes = sanitizeText(req.body.notes, 300);
+    const photoFilename = req.file ? req.file.filename : null;
+
+    const settings = await getSettings();
+    const { status, is_late } = computeStatus(shift, checkInTime, settings);
+
+    const existing = await query.get(
+      'SELECT id FROM daily_attendance WHERE employee_id = ? AND date = ?',
+      [employeeId, dateStr]
+    );
+    if (existing) {
+      await query.run(
+        `UPDATE daily_attendance
+         SET shift=?, check_in_time=?, status=?, is_late=?, notes=COALESCE(?, notes),
+             checkin_lat=?, checkin_lng=?, checkin_distance_m=?, checkin_photo=COALESCE(?, checkin_photo),
+             updated_at=CURRENT_TIMESTAMP
+         WHERE id=?`,
+        [shift, checkInTime, status, is_late, notes, lat, lng, distanceM, photoFilename, existing.id]
+      );
+    } else {
+      await query.run(
+        `INSERT INTO daily_attendance
+         (employee_id, date, shift, check_in_time, status, is_late, notes, checkin_lat, checkin_lng, checkin_distance_m, checkin_photo)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+        [employeeId, dateStr, shift, checkInTime, status, is_late, notes, lat, lng, distanceM, photoFilename]
+      );
+    }
+
+    const startDay = parseInt(settings.payroll_period_start_day, 10) || 29;
+    const endDay = parseInt(settings.payroll_period_end_day, 10) || 28;
+    const period = getPeriodForDate(dateStr, startDay, endDay);
+    const rules = await getPenaltyRules();
+    await syncEmployeePeriod(employeeId, period, settings, rules);
+
+    const saved = await query.get(
+      'SELECT * FROM daily_attendance WHERE employee_id = ? AND date = ?',
+      [employeeId, dateStr]
+    );
+    res.json({
+      success: true,
+      data: { ...saved, distance_m: distanceM },
+      message: `Check-in berhasil (${status}${distanceM !== null ? ` · jarak ${distanceM}m` : ''}).`,
+    });
+  } catch (error) {
+    cleanupUploadedFiles(uploadedFiles);
+    console.error('Mobile API Error (checkInAttendance):', error);
+    res.status(500).json({ success: false, message: 'Gagal menyimpan check-in absensi.' });
+  }
+};
+
+/**
+ * 9. GET /api/mobile/attendance/history?employee_id=&period=YYYY-MM
+ * Riwayat absensi harian karyawan pada satu periode payroll untuk mobile
+ */
+exports.getAttendanceHistory = async (req, res) => {
+  try {
+    const employeeId = parseInt(req.query.employee_id, 10);
+    if (!Number.isInteger(employeeId) || employeeId < 1) {
+      return res.status(400).json({ success: false, message: 'Parameter employee_id wajib berupa angka valid.' });
+    }
+    const now = new Date();
+    const defaultPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const period = req.query.period ? String(req.query.period).trim() : defaultPeriod;
+    if (!/^\d{4}-\d{2}$/.test(period)) {
+      return res.status(400).json({ success: false, message: 'Format period wajib YYYY-MM.' });
+    }
+
+    const settings = await getSettings();
+    const startDay = parseInt(settings.payroll_period_start_day, 10) || 29;
+    const endDay = parseInt(settings.payroll_period_end_day, 10) || 28;
+    const { startDate, endDate } = getPeriodDateRange(period, startDay, endDay);
+
+    const rows = await query.all(
+      `SELECT id, employee_id, date, shift, check_in_time, status, is_late, notes,
+              checkin_lat, checkin_lng, checkin_distance_m, checkin_photo
+       FROM daily_attendance
+       WHERE employee_id = ? AND date BETWEEN ? AND ?
+       ORDER BY date DESC`,
+      [employeeId, startDate, endDate]
+    );
+    res.json({
+      success: true,
+      data: rows,
+      period,
+      period_range: { startDate, endDate },
+    });
+  } catch (error) {
+    console.error('Mobile API Error (getAttendanceHistory):', error);
+    res.status(500).json({ success: false, message: 'Gagal mengambil riwayat absensi.' });
   }
 };

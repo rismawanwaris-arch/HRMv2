@@ -9,6 +9,12 @@ const STAFF_GETTERS = {
   position:      (b) => orNull(b, 'position'),
   employee_type: (b) => b.employee_type || 'Frontliner',
   contract_type: (b) => b.contract_type || 'PKWT',
+  contract_start:(b) => orNull(b, 'contract_start'),
+  contract_end:  (b) => orNull(b, 'contract_end'),
+  probation_end: (b) => orNull(b, 'probation_end'),
+  ptkp_status:   (b) => b.ptkp_status || 'TK/0',
+  enable_bpjs:   (b) => (b.enable_bpjs === 1 || b.enable_bpjs === true || b.enable_bpjs === '1') ? 1 : 0,
+  enable_pph21:  (b) => (b.enable_pph21 === 1 || b.enable_pph21 === true || b.enable_pph21 === '1') ? 1 : 0,
   salary:        (b) => parseFloat(b.salary) || 0,
   allowance:     (b) => parseFloat(b.allowance) || 0,
   candidate_id:  (b) => b.candidate_id ? parseInt(b.candidate_id, 10) : null,
@@ -27,7 +33,8 @@ const STAFF_BIODATA_FIELDS = [
 ];
 
 const STAFF_WORK_FIELDS = [
-  'position', 'employee_type', 'contract_type', 'branch_id', 'hire_date', 'salary', 'allowance',
+  'position', 'employee_type', 'contract_type', 'contract_start', 'contract_end', 'probation_end',
+  'ptkp_status', 'enable_bpjs', 'enable_pph21', 'branch_id', 'hire_date', 'salary', 'allowance',
 ];
 
 const STAFF_ALL_FIELDS = [...STAFF_BIODATA_FIELDS, ...STAFF_WORK_FIELDS];

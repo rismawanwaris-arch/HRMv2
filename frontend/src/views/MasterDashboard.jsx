@@ -198,7 +198,14 @@ export default function MasterDashboard({ setView, currentRole = 'master', canAc
     );
   }
 
-  const { employees = {}, branches = {}, late_rules = [] } = summary;
+  const {
+    employees = {},
+    branches = {},
+    late_rules = [],
+    contract_alerts = [],
+    pending_approvals = {},
+    turnover_analytics = {},
+  } = summary;
   const branchListSafe = Array.isArray(branches.list) ? branches.list : [];
 
   return (
@@ -271,6 +278,40 @@ export default function MasterDashboard({ setView, currentRole = 'master', canAc
             }}
           >
             Promosikan Sekarang ➔
+          </button>
+        </div>
+      )}
+
+      {/* Contract & Probation Expiry Alert Banner */}
+      {canManageEmployees && contract_alerts.length > 0 && (
+        <div style={{
+          background: 'linear-gradient(90deg, rgba(239, 68, 68, 0.14), rgba(245, 158, 11, 0.06))',
+          border: '1px solid rgba(239, 68, 68, 0.35)',
+          borderRadius: '12px',
+          padding: '14px 20px',
+          marginBottom: '20px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '12px'
+        }}>
+          <div>
+            <div style={{ fontWeight: 700, color: 'var(--color-danger)', fontSize: '14px' }}>
+              ⏰ {contract_alerts.length} Kontrak / Masa Probation Mendekati Berakhir
+            </div>
+            <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+              {contract_alerts.slice(0, 3).map(a => `${a.name} (${a.alert_type === 'probation' ? 'Probation' : 'Kontrak'} ${a.days_remaining < 0 ? 'Expired' : `H-${a.days_remaining}`})`).join(' · ')}
+              {contract_alerts.length > 3 ? ` · +${contract_alerts.length - 3} lainnya` : ''}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setView('employees')}
+            className="btn btn-secondary"
+            style={{ fontSize: '12px', padding: '7px 14px' }}
+          >
+            Kelola Kontrak ➔
           </button>
         </div>
       )}
@@ -370,9 +411,9 @@ export default function MasterDashboard({ setView, currentRole = 'master', canAc
       }}>
         {[
           { id: 'overview', label: '📊 Overview Terpadu' },
-          { id: 'employees', label: `👥 Data Karyawan (${employees.total || 0})` },
-          { id: 'branches', label: `🏢 Cabang Outlet (${branches.total || 0})` },
-          { id: 'settings', label: '⚙️ Pengaturan & Denda ASBEN' },
+          ...(canManageEmployees ? [{ id: 'employees', label: `👥 Data Karyawan (${employees.total || 0})` }] : []),
+          ...(canManageBranches ? [{ id: 'branches', label: `🏢 Cabang Outlet (${branches.total || 0})` }] : []),
+          ...(canManageSettings ? [{ id: 'settings', label: '⚙️ Pengaturan & Denda ASBEN' }] : []),
         ].map(tab => (
           <button
             type="button"
@@ -398,7 +439,60 @@ export default function MasterDashboard({ setView, currentRole = 'master', canAc
 
       {/* TAB 1: OVERVIEW TERPADU */}
       {activeTab === 'overview' && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(360px, 100%), 1fr))', gap: '20px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          {/* Pending Approvals Card & Turnover Snapshot */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(300px, 100%), 1fr))', gap: '16px' }}>
+            <div className="card" style={{ padding: '18px 20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                <h3 style={{ margin: 0, fontSize: '15px', color: 'var(--text-primary)', fontWeight: 700 }}>
+                  📥 Antrean Persetujuan ({pending_approvals.total || 0})
+                </h3>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
+                <button type="button" onClick={() => setView('leaves')} style={{ padding: '10px', borderRadius: '10px', border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', cursor: 'pointer', textAlign: 'left', color: 'inherit' }}>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Cuti &amp; Izin</div>
+                  <div style={{ fontSize: '20px', fontWeight: 800, color: (pending_approvals.leaves || 0) > 0 ? 'var(--color-warning)' : 'var(--text-primary)' }}>{pending_approvals.leaves || 0}</div>
+                </button>
+                <button type="button" onClick={() => setView('claims')} style={{ padding: '10px', borderRadius: '10px', border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', cursor: 'pointer', textAlign: 'left', color: 'inherit' }}>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Lembur</div>
+                  <div style={{ fontSize: '20px', fontWeight: 800, color: (pending_approvals.overtime || 0) > 0 ? 'var(--color-warning)' : 'var(--text-primary)' }}>{pending_approvals.overtime || 0}</div>
+                </button>
+                <button type="button" onClick={() => setView('claims')} style={{ padding: '10px', borderRadius: '10px', border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', cursor: 'pointer', textAlign: 'left', color: 'inherit' }}>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Reimburse</div>
+                  <div style={{ fontSize: '20px', fontWeight: 800, color: (pending_approvals.reimbursements || 0) > 0 ? 'var(--color-warning)' : 'var(--text-primary)' }}>{pending_approvals.reimbursements || 0}</div>
+                </button>
+              </div>
+            </div>
+
+            {canManageEmployees && (
+              <div className="card" style={{ padding: '18px 20px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                  <h3 style={{ margin: 0, fontSize: '15px', color: 'var(--text-primary)', fontWeight: 700 }}>
+                    📉 Analitik Turnover (90 Hari)
+                  </h3>
+                  <button type="button" onClick={() => setView('resigned-employees')} style={{ background: 'transparent', border: 'none', color: 'var(--color-warning)', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
+                    Riwayat Resign ➔
+                  </button>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
+                  <div style={{ padding: '10px', borderRadius: '10px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Turnover Rate</div>
+                    <div style={{ fontSize: '20px', fontWeight: 800, color: 'var(--color-warning)' }}>{turnover_analytics.turnover_rate_pct ?? 0}%</div>
+                  </div>
+                  <div style={{ padding: '10px', borderRadius: '10px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Keluar 90h</div>
+                    <div style={{ fontSize: '20px', fontWeight: 800, color: 'var(--color-danger)' }}>{turnover_analytics.exits_last_90d ?? 0}</div>
+                  </div>
+                  <div style={{ padding: '10px', borderRadius: '10px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Rata2 Masa Kerja</div>
+                    <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--color-info)' }}>{turnover_analytics.avg_tenure_months ?? 0} bln</div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(360px, 100%), 1fr))', gap: '20px' }}>
           
           {/* Alokasi Staf per Cabang */}
           <div className="card" style={{ padding: '20px' }}>
@@ -510,6 +604,53 @@ export default function MasterDashboard({ setView, currentRole = 'master', canAc
             </div>
           </div>
 
+          </div>
+
+          {/* Retention Early Warning & Top Resign Reasons (Finance/Master) */}
+          {canManageEmployees && ((turnover_analytics.retention_risk_list?.length || 0) > 0 || (turnover_analytics.top_resign_reasons?.length || 0) > 0) && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(340px, 100%), 1fr))', gap: '20px' }}>
+              <div className="card" style={{ padding: '20px' }}>
+                <h3 style={{ margin: '0 0 12px', fontSize: '15px', color: 'var(--text-primary)', fontWeight: 700 }}>
+                  🚨 Early Warning Risiko Resign / Kedisiplinan
+                </h3>
+                {(!turnover_analytics.retention_risk_list || turnover_analytics.retention_risk_list.length === 0) ? (
+                  <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Tidak ada karyawan dengan indikator risiko tinggi saat ini.</p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {turnover_analytics.retention_risk_list.map(r => (
+                      <div key={r.id} style={{ padding: '10px 12px', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: '13px', color: 'var(--text-primary)' }}>{r.name} <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>· {r.branch_name || '—'}</span></div>
+                          <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>{r.factors.join(' · ')}</div>
+                        </div>
+                        <span style={{ padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 700, background: r.risk_level === 'Tinggi' ? 'var(--color-danger-bg)' : 'var(--color-warning-bg)', color: r.risk_level === 'Tinggi' ? 'var(--color-danger)' : 'var(--color-warning)' }}>
+                          {r.risk_level}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="card" style={{ padding: '20px' }}>
+                <h3 style={{ margin: '0 0 12px', fontSize: '15px', color: 'var(--text-primary)', fontWeight: 700 }}>
+                  📊 Penyebab Keluar / Resign Terbanyak
+                </h3>
+                {(!turnover_analytics.top_resign_reasons || turnover_analytics.top_resign_reasons.length === 0) ? (
+                  <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Belum ada data alasan keluar karyawan.</p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {turnover_analytics.top_resign_reasons.map(item => (
+                      <div key={item.reason} style={{ padding: '10px 12px', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
+                        <span style={{ color: 'var(--text-secondary)' }}>{item.reason}</span>
+                        <strong style={{ color: 'var(--color-warning)' }}>{item.count} orang</strong>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

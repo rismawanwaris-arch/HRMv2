@@ -35,9 +35,18 @@ const EMPTY_FORM = {
   work_experience: '', npwp: '', bank_name: '', bank_account: '', bpjs_health: '', bpjs_employment: '', bpjs_active: 'Tidak Aktif',
   uniform_size: '', health_history: '', allergies: '', medications: '', color_blind_test: '',
   height: '', weight: '', physical_condition: '',
-  position: '', employee_type: 'Frontliner', contract_type: 'PKWT', branch_id: '',
-  hire_date: '', salary: '', allowance: '',
+  position: '', employee_type: 'Frontliner', contract_type: 'PKWT', contract_start: '', contract_end: '', probation_end: '',
+  ptkp_status: 'TK/0', enable_bpjs: false, enable_pph21: false,
+  branch_id: '', hire_date: '', salary: '', allowance: '',
 };
+
+function calcDaysRemaining(dateStr) {
+  if (!dateStr) return null;
+  const target = new Date(`${String(dateStr).slice(0, 10)}T00:00:00Z`).getTime();
+  const base = new Date(`${getTodayLocalDateStr()}T00:00:00Z`).getTime();
+  if (Number.isNaN(target) || Number.isNaN(base)) return null;
+  return Math.round((target - base) / 86400000);
+}
 
 const inputStyle = {
   background: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: '10px',
@@ -91,6 +100,14 @@ export default function EmployeeManagement() {
   const [promoteForm, setPromoteForm] = useState({ candidateId: null, employee_type: 'Frontliner', position: '' });
   const [selectedCardEmp, setSelectedCardEmp] = useState(null);
 
+  const [showContractModal, setShowContractModal] = useState(false);
+  const [contractEmp, setContractEmp] = useState(null);
+  const [contractSubmitting, setContractSubmitting] = useState(false);
+  const [contractForm, setContractForm] = useState({
+    action: 'renew', contract_type: 'PKWT', contract_start: '', contract_end: '',
+    clear_probation: true, salary: '', allowance: '', notes: '',
+  });
+
   const importRef = useRef(null);
   const fetchReqIdRef = useRef(0);
   const editReqIdRef = useRef(0);
@@ -105,16 +122,17 @@ export default function EmployeeManagement() {
   useEffect(() => {
     const onKeyDown = (e) => {
       if (e.key !== 'Escape') return;
-      if (showPromoteModal) setShowPromoteModal(false);
+      if (showContractModal && !contractSubmitting) setShowContractModal(false);
+      else if (showPromoteModal) setShowPromoteModal(false);
       else if (showDeactivateModal) setShowDeactivateModal(false);
       else if (showFormModal) setShowFormModal(false);
     };
-    if (showFormModal || showDeactivateModal || showPromoteModal) {
+    if (showFormModal || showDeactivateModal || showPromoteModal || showContractModal) {
       window.addEventListener('keydown', onKeyDown);
       return () => window.removeEventListener('keydown', onKeyDown);
     }
     return undefined;
-  }, [showFormModal, showDeactivateModal, showPromoteModal]);
+  }, [showFormModal, showDeactivateModal, showPromoteModal, showContractModal, contractSubmitting]);
 
   const computeStatsFromActiveList = (list) => ({
     total: list.length,
@@ -197,6 +215,12 @@ export default function EmployeeManagement() {
         });
         cleaned.birth_date = toDateInputValue(d.birth_date);
         cleaned.hire_date = toDateInputValue(d.hire_date);
+        cleaned.contract_start = toDateInputValue(d.contract_start);
+        cleaned.contract_end = toDateInputValue(d.contract_end);
+        cleaned.probation_end = toDateInputValue(d.probation_end);
+        cleaned.ptkp_status = d.ptkp_status || 'TK/0';
+        cleaned.enable_bpjs = Boolean(d.enable_bpjs);
+        cleaned.enable_pph21 = Boolean(d.enable_pph21);
         cleaned.salary = d.salary ?? '';
         cleaned.allowance = d.allowance ?? '';
         cleaned.height = d.height ?? '';
@@ -289,6 +313,40 @@ export default function EmployeeManagement() {
       alert(err.message || 'Gagal mempromosikan karyawan.');
     } finally {
       setPromoteSubmitting(false);
+    }
+  };
+
+  const openRenewContract = (emp) => {
+    setContractEmp(emp);
+    setContractForm({
+      action: 'renew',
+      contract_type: emp.contract_type === 'PKWTT' ? 'PKWT' : (emp.contract_type || 'PKWT'),
+      contract_start: getTodayLocalDateStr(),
+      contract_end: '',
+      clear_probation: true,
+      salary: emp.salary ?? '',
+      allowance: emp.allowance ?? '',
+      notes: '',
+    });
+    setShowContractModal(true);
+  };
+
+  const handleRenewContract = async (e) => {
+    e.preventDefault();
+    if (!contractEmp || contractSubmitting) return;
+    setContractSubmitting(true);
+    try {
+      const res = await staffApi.renewContract(contractEmp.id, contractForm);
+      if (res.success) {
+        setShowContractModal(false);
+        fetchEmployees();
+      } else {
+        alert(res.message || 'Gagal memperpanjang kontrak.');
+      }
+    } catch (err) {
+      alert(err.message || 'Gagal memperpanjang kontrak.');
+    } finally {
+      setContractSubmitting(false);
     }
   };
 
@@ -487,7 +545,28 @@ export default function EmployeeManagement() {
                         </span>
                       </td>
                       <td style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{emp.branch_name || '-'}</td>
-                      <td style={{ fontSize: '13px', color: 'var(--text-muted)' }}>{emp.contract_type || '-'}</td>
+                      <td style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
+                        <div>{emp.contract_type || '-'}</div>
+                        {emp.status === 'Active' && (() => {
+                          const cDays = calcDaysRemaining(emp.contract_end);
+                          const pDays = calcDaysRemaining(emp.probation_end);
+                          const activeAlert = cDays !== null && cDays <= 30
+                            ? { days: cDays, label: 'Kontrak' }
+                            : (pDays !== null && pDays <= 30 ? { days: pDays, label: 'Probation' } : null);
+                          if (!activeAlert) return null;
+                          const isExp = activeAlert.days < 0;
+                          return (
+                            <span style={{
+                              display: 'inline-block', marginTop: '2px', padding: '1px 6px', borderRadius: '6px',
+                              fontSize: '10px', fontWeight: 700,
+                              background: isExp ? 'var(--color-danger-bg)' : 'var(--color-warning-bg)',
+                              color: isExp ? 'var(--color-danger)' : 'var(--color-warning)',
+                            }}>
+                              {activeAlert.label}: {isExp ? 'Expired' : `H-${activeAlert.days}`}
+                            </span>
+                          );
+                        })()}
+                      </td>
                       <td style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '13px' }}>
                         {emp.salary ? `Rp ${fmt(emp.salary)}` : '-'}
                       </td>
@@ -511,6 +590,12 @@ export default function EmployeeManagement() {
                           style={{ background: 'var(--color-info-bg)', border: '1px solid var(--color-info)', color: 'var(--color-info)', padding: '5px 12px', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: 600, marginRight: '6px' }}>
                           Edit
                         </button>
+                        {emp.status === 'Active' && (
+                          <button type="button" onClick={() => openRenewContract(emp)}
+                            style={{ background: 'rgba(20,184,166,0.14)', border: '1px solid rgba(20,184,166,0.4)', color: '#14b8a6', padding: '5px 10px', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: 600, marginRight: '6px' }}>
+                            Kontrak
+                          </button>
+                        )}
                         {emp.status === 'Active' ? (
                           <button type="button" onClick={() => { setDeactivatingEmployee(emp); setDeactivateForm({ status: 'Resign', resign_date: getTodayLocalDateStr(), resign_reason: 'Pindah Kerja / Karir Baru', resign_notes: '' }); setShowDeactivateModal(true); }}
                             style={{ background: 'var(--color-warning-bg)', border: '1px solid var(--color-warning)', color: 'var(--color-warning)', padding: '5px 12px', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>
@@ -628,6 +713,17 @@ export default function EmployeeManagement() {
                     <div className="responsive-grid-2">
                       <FormField label="Tanggal Mulai Kerja">
                         <input type="date" style={inputStyle} value={form.hire_date} onChange={f('hire_date')} />
+                      </FormField>
+                      <FormField label="Tanggal Mulai Kontrak">
+                        <input type="date" style={inputStyle} value={form.contract_start} onChange={f('contract_start')} />
+                      </FormField>
+                    </div>
+                    <div className="responsive-grid-2">
+                      <FormField label="Tanggal Berakhir Kontrak">
+                        <input type="date" style={inputStyle} value={form.contract_end} onChange={f('contract_end')} />
+                      </FormField>
+                      <FormField label="Akhir Masa Percobaan (Probation)">
+                        <input type="date" style={inputStyle} value={form.probation_end} onChange={f('probation_end')} />
                       </FormField>
                     </div>
                     <SectionTitle title="Kompensasi" color="var(--color-success)" />
@@ -827,6 +923,26 @@ export default function EmployeeManagement() {
                         <option value="Tidak Aktif">Tidak Aktif</option>
                       </select>
                     </FormField>
+                    <SectionTitle title="Pajak (PPh 21 TER) & Potongan Otomatis Payroll" color="var(--color-primary)" />
+                    <div className="responsive-grid-2">
+                      <FormField label="Status PTKP">
+                        <select style={inputStyle} value={form.ptkp_status || 'TK/0'} onChange={f('ptkp_status')}>
+                          {['TK/0', 'TK/1', 'TK/2', 'TK/3', 'K/0', 'K/1', 'K/2', 'K/3'].map(s => (
+                            <option key={s} value={s}>{s}</option>
+                          ))}
+                        </select>
+                      </FormField>
+                      <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '8px', paddingTop: '14px' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', cursor: 'pointer' }}>
+                          <input type="checkbox" checked={!!form.enable_bpjs} onChange={e => setForm(p => ({ ...p, enable_bpjs: e.target.checked }))} />
+                          Ikut Potongan BPJS di Payroll
+                        </label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', cursor: 'pointer' }}>
+                          <input type="checkbox" checked={!!form.enable_pph21} onChange={e => setForm(p => ({ ...p, enable_pph21: e.target.checked }))} />
+                          Ikut Potongan PPh 21 TER di Payroll
+                        </label>
+                      </div>
+                    </div>
                   </>
                 )}
               </div>
@@ -1003,6 +1119,60 @@ export default function EmployeeManagement() {
                 </button>
               </div>
             </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Contract Renewal Modal */}
+      {showContractModal && contractEmp && createPortal(
+        <div
+          onClick={(e) => { if (e.target === e.currentTarget && !contractSubmitting) setShowContractModal(false); }}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3000, backdropFilter: 'blur(6px)', padding: '16px', overscrollBehavior: 'contain' }}
+        >
+          <div style={{ width: '100%', maxWidth: '480px', maxHeight: '90vh', overflowY: 'auto', overscrollBehavior: 'contain', background: 'var(--bg-surface-opaque)', border: '1px solid var(--border-color)', borderRadius: '20px', boxShadow: '0 24px 48px rgba(0,0,0,0.3)' }}>
+            <div style={{ padding: '22px 26px 16px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)' }}>Kelola Kontrak Kerja</h3>
+                <p style={{ margin: '4px 0 0', fontSize: '12px', color: 'var(--text-muted)' }}>{contractEmp.name} · Saat ini: {contractEmp.contract_type || 'PKWT'}</p>
+              </div>
+              <button type="button" disabled={contractSubmitting} onClick={() => setShowContractModal(false)} style={{ background: 'var(--bg-hover)', border: 'none', borderRadius: '8px', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '18px', width: '32px', height: '32px' }}>×</button>
+            </div>
+            <form onSubmit={handleRenewContract} style={{ padding: '22px 26px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <FormField label="Tindakan" required>
+                <select style={inputStyle} value={contractForm.action} onChange={e => setContractForm(p => ({ ...p, action: e.target.value }))}>
+                  <option value="renew">Perpanjang Kontrak (PKWT / Magang)</option>
+                  <option value="permanent">Angkat Karyawan Tetap (PKWTT)</option>
+                </select>
+              </FormField>
+              <div className="responsive-grid-2">
+                <FormField label="Mulai Berlaku">
+                  <input type="date" style={inputStyle} value={contractForm.contract_start} onChange={e => setContractForm(p => ({ ...p, contract_start: e.target.value }))} />
+                </FormField>
+                {contractForm.action === 'renew' && (
+                  <FormField label="Berakhir Kontrak Baru" required>
+                    <input type="date" style={inputStyle} required value={contractForm.contract_end} onChange={e => setContractForm(p => ({ ...p, contract_end: e.target.value }))} />
+                  </FormField>
+                )}
+              </div>
+              <div className="responsive-grid-2">
+                <FormField label="Gaji Pokok Baru (Rp)">
+                  <input type="number" min="0" style={inputStyle} value={contractForm.salary} onChange={e => setContractForm(p => ({ ...p, salary: e.target.value }))} />
+                </FormField>
+                <FormField label="Tunjangan Baru (Rp)">
+                  <input type="number" min="0" style={inputStyle} value={contractForm.allowance} onChange={e => setContractForm(p => ({ ...p, allowance: e.target.value }))} />
+                </FormField>
+              </div>
+              <FormField label="Catatan Perubahan">
+                <textarea style={{ ...inputStyle, minHeight: '60px', resize: 'vertical' }} value={contractForm.notes} onChange={e => setContractForm(p => ({ ...p, notes: e.target.value }))} placeholder="Contoh: Perpanjangan kontrak periode ke-2..." />
+              </FormField>
+              <div style={{ display: 'flex', gap: '10px', marginTop: '4px' }}>
+                <button type="button" disabled={contractSubmitting} onClick={() => setShowContractModal(false)} className="btn btn-secondary" style={{ flex: 1 }}>Batal</button>
+                <button type="submit" disabled={contractSubmitting} className="btn btn-primary" style={{ flex: 2, justifyContent: 'center' }}>
+                  {contractSubmitting ? 'Menyimpan...' : 'Simpan & Catat Riwayat'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>,
         document.body

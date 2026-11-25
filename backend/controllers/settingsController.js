@@ -67,6 +67,49 @@ exports.updateSettings = async (req, res) => {
         [val]
       );
     }
+
+    const boolKeys = ['bpjs_payroll_enabled', 'pph21_payroll_enabled'];
+    for (const key of boolKeys) {
+      if (req.body[key] !== undefined) {
+        const val = (req.body[key] === true || req.body[key] === '1' || req.body[key] === 1) ? '1' : '0';
+        await query.run(
+          'INSERT INTO system_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at',
+          [key, val]
+        );
+      }
+    }
+
+    const floatRangeRules = {
+      bpjs_kes_emp_rate: [0, 20],
+      bpjs_kes_company_rate: [0, 20],
+      bpjs_jht_emp_rate: [0, 20],
+      bpjs_jht_company_rate: [0, 20],
+      bpjs_jp_emp_rate: [0, 20],
+      bpjs_jp_company_rate: [0, 20],
+      bpjs_jkk_rate: [0, 20],
+      bpjs_jkm_rate: [0, 20],
+      bpjs_kes_cap: [0, 1000000000],
+      bpjs_jp_cap: [0, 1000000000],
+      contract_reminder_days: [1, 365],
+      annual_leave_quota: [0, 60],
+      overtime_hourly_divisor: [1, 500],
+    };
+    for (const [key, [minV, maxV]] of Object.entries(floatRangeRules)) {
+      if (req.body[key] !== undefined) {
+        const parsed = parseFloat(req.body[key]);
+        if (!Number.isFinite(parsed) || parsed < minV || parsed > maxV) {
+          return res.status(400).json({
+            success: false,
+            message: `Nilai ${key} harus berada di antara ${minV} sampai ${maxV}.`,
+          });
+        }
+        await query.run(
+          'INSERT INTO system_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at',
+          [key, String(parsed)]
+        );
+      }
+    }
+
     res.json({ success: true, message: 'Pengaturan berhasil disimpan.' });
   } catch (error) {
     console.error('API Error (update settings):', error);

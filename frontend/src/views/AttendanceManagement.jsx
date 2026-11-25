@@ -10,6 +10,7 @@ const STATUS_COLORS = {
   'Tidak Hadir': { bg: 'rgba(239,68,68,0.15)',   color: '#ef4444' },
   'Izin':        { bg: 'rgba(99,102,241,0.15)',  color: '#6366f1' },
   'Sakit':       { bg: 'rgba(59,130,246,0.15)',  color: '#3b82f6' },
+  'Cuti':        { bg: 'rgba(20,184,166,0.15)',  color: '#14b8a6' },
   'Belum Absen': { bg: 'rgba(107,114,128,0.1)',  color: '#6b7280' },
 };
 
@@ -174,7 +175,7 @@ function InputHarian({ branches }) {
 
     let previewStatus = e.status || 'Tidak Hadir';
     if (e.check_in_time) {
-      const cutoff = e.shift === 'Siang' ? cutoffs.afternoon : cutoffs.morning;
+      const cutoff = e.shift === 'Siang' ? cutoffs.siang : cutoffs.pagi;
       previewStatus = e.check_in_time > cutoff ? 'Telat' : 'Hadir';
     }
 
@@ -221,6 +222,7 @@ function InputHarian({ branches }) {
               <option value="Tidak Hadir">Tidak Hadir</option>
               <option value="Izin">Izin</option>
               <option value="Sakit">Sakit</option>
+              <option value="Cuti">Cuti</option>
             </select>
           )}
         </td>
@@ -371,7 +373,7 @@ function InputHarian({ branches }) {
 
       {/* Shift cutoff info */}
       <div style={{ marginTop: '12px', fontSize: '12px', color: 'var(--text-muted)' }}>
-        Batas masuk: <strong>Shift Pagi {cutoffs.morning}</strong> · <strong>Shift Siang {cutoffs.afternoon}</strong>. Status Hadir/Telat dihitung otomatis dari jam masuk.
+        Batas masuk: <strong>Shift Pagi {cutoffs.pagi}</strong> · <strong>Shift Siang {cutoffs.siang}</strong>. Status Hadir/Telat dihitung otomatis dari jam masuk.
       </div>
     </div>
   );
@@ -426,6 +428,7 @@ function DetailModal({ emp, period, onClose }) {
     absen: details.filter(d => d.status === 'Tidak Hadir').length,
     izin: details.filter(d => d.status === 'Izin').length,
     sakit: details.filter(d => d.status === 'Sakit').length,
+    cuti: details.filter(d => d.status === 'Cuti').length,
   };
 
   return createPortal(
@@ -466,6 +469,7 @@ function DetailModal({ emp, period, onClose }) {
                 ['Tdk Hadir', ringkasan.absen, '#ef4444'],
                 ['Izin', ringkasan.izin, '#6366f1'],
                 ['Sakit', ringkasan.sakit, '#3b82f6'],
+                ['Cuti', ringkasan.cuti, '#14b8a6'],
               ].map(([lbl, val, clr]) => (
                 <div key={lbl} style={{
                   background: `${clr}18`, border: `1px solid ${clr}30`,
@@ -704,6 +708,7 @@ function RekapBulanan({ branches }) {
                   <th style={{ textAlign: 'center' }}>Tdk Hadir</th>
                   <th style={{ textAlign: 'center' }}>Izin</th>
                   <th style={{ textAlign: 'center' }}>Sakit</th>
+                  <th style={{ textAlign: 'center' }}>Cuti</th>
                   <th style={{ textAlign: 'right', color: '#f59e0b' }}>Pot. Absen</th>
                   <th style={{ textAlign: 'right', color: '#ef4444' }}>ASBEN</th>
                   <th style={{ textAlign: 'right' }}>Kasbon (Rp)</th>
@@ -735,6 +740,7 @@ function RekapBulanan({ branches }) {
                       </td>
                       <td style={{ textAlign: 'center', color: '#6366f1' }}>{emp.days_izin || 0}</td>
                       <td style={{ textAlign: 'center', color: '#3b82f6' }}>{emp.days_sakit || 0}</td>
+                      <td style={{ textAlign: 'center', color: '#14b8a6' }}>{emp.days_cuti || 0}</td>
                       <td style={{ textAlign: 'right', color: '#f59e0b', fontWeight: 600 }}>
                         {emp.deduction_absent != null ? `Rp ${fmt(emp.deduction_absent)}` : '—'}
                       </td>

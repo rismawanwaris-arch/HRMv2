@@ -887,6 +887,225 @@ async function initDb() {
     await query.run('CREATE UNIQUE INDEX IF NOT EXISTS idx_incidents_client_uuid ON outlet_incidents(client_uuid)').catch(() => {});
     await query.run('CREATE UNIQUE INDEX IF NOT EXISTS idx_candidates_client_uuid ON candidates(client_uuid)').catch(() => {});
 
+    // --- SunFish HR Adaptation: Additive Column Migrations ---
+    const sunfishAlterColumns = [
+      'ALTER TABLE employees ADD COLUMN contract_start TEXT',
+      'ALTER TABLE employees ADD COLUMN contract_end TEXT',
+      'ALTER TABLE employees ADD COLUMN probation_end TEXT',
+      "ALTER TABLE employees ADD COLUMN ptkp_status TEXT DEFAULT 'TK/0'",
+      'ALTER TABLE employees ADD COLUMN enable_bpjs INTEGER DEFAULT 0',
+      'ALTER TABLE employees ADD COLUMN enable_pph21 INTEGER DEFAULT 0',
+
+      'ALTER TABLE branches ADD COLUMN latitude REAL',
+      'ALTER TABLE branches ADD COLUMN longitude REAL',
+      'ALTER TABLE branches ADD COLUMN geofence_radius_m INTEGER DEFAULT 100',
+
+      'ALTER TABLE daily_attendance ADD COLUMN checkin_lat REAL',
+      'ALTER TABLE daily_attendance ADD COLUMN checkin_lng REAL',
+      'ALTER TABLE daily_attendance ADD COLUMN checkin_photo TEXT',
+      'ALTER TABLE daily_attendance ADD COLUMN checkin_distance_m REAL',
+
+      'ALTER TABLE payroll_entries ADD COLUMN overtime_pay REAL DEFAULT 0',
+      'ALTER TABLE payroll_entries ADD COLUMN reimbursement_pay REAL DEFAULT 0',
+      'ALTER TABLE payroll_entries ADD COLUMN thr_pay REAL DEFAULT 0',
+      'ALTER TABLE payroll_entries ADD COLUMN deduction_loan REAL DEFAULT 0',
+      'ALTER TABLE payroll_entries ADD COLUMN bpjs_kes_emp REAL DEFAULT 0',
+      'ALTER TABLE payroll_entries ADD COLUMN bpjs_tk_emp REAL DEFAULT 0',
+      'ALTER TABLE payroll_entries ADD COLUMN bpjs_kes_company REAL DEFAULT 0',
+      'ALTER TABLE payroll_entries ADD COLUMN bpjs_tk_company REAL DEFAULT 0',
+      'ALTER TABLE payroll_entries ADD COLUMN pph21_deduction REAL DEFAULT 0',
+    ];
+    for (const stmt of sunfishAlterColumns) {
+      await query.run(stmt).catch(() => {});
+    }
+
+    // --- SunFish HR Adaptation: New Tables & Indexes ---
+    await query.run(`
+      CREATE TABLE IF NOT EXISTS employee_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        event_type TEXT NOT NULL,
+        effective_date TEXT NOT NULL,
+        old_value TEXT,
+        new_value TEXT,
+        notes TEXT,
+        recorded_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await query.run('CREATE INDEX IF NOT EXISTS idx_emp_history_emp ON employee_history(employee_id)').catch(() => {});
+
+    await query.run(`
+      CREATE TABLE IF NOT EXISTS leave_types (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        code TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        default_quota INTEGER NOT NULL DEFAULT 0,
+        is_paid INTEGER NOT NULL DEFAULT 1,
+        attendance_status TEXT NOT NULL DEFAULT 'Cuti',
+        requires_attachment INTEGER DEFAULT 0,
+        is_active INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    const leaveTypesCount = await query.get('SELECT COUNT(*) as count FROM leave_types');
+    if (leaveTypesCount.count === 0) {
+      const defaultLeaveTypes = [
+        ['ANNUAL', 'Cuti Tahunan', 12, 1, 'Cuti', 0, 1],
+        ['SICK', 'Cuti Sakit', 0, 1, 'Sakit', 1, 1],
+        ['SPECIAL', 'Izin Khusus (Nikah/Duka/Melahirkan)', 0, 1, 'Izin', 0, 1],
+        ['UNPAID', 'Cuti Di Luar Tanggungan (Unpaid)', 0, 0, 'Tidak Hadir', 0, 1],
+      ];
+      for (const lt of defaultLeaveTypes) {
+        await query.run(
+          'INSERT INTO leave_types (code, name, default_quota, is_paid, attendance_status, requires_attachment, is_active) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          lt
+        );
+      }
+    }
+
+    await query.run(`
+      CREATE TABLE IF NOT EXISTS leave_balances (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        leave_type_id INTEGER NOT NULL REFERENCES leave_types(id),
+        year INTEGER NOT NULL,
+        quota REAL NOT NULL DEFAULT 0,
+        used REAL NOT NULL DEFAULT 0,
+        carry_over REAL NOT NULL DEFAULT 0,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(employee_id, leave_type_id, year)
+      )
+    `);
+    await query.run('CREATE INDEX IF NOT EXISTS idx_leave_bal_emp_yr ON leave_balances(employee_id, year)').catch(() => {});
+
+    await query.run(`
+      CREATE TABLE IF NOT EXISTS leave_requests (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        leave_type_id INTEGER NOT NULL REFERENCES leave_types(id),
+        start_date TEXT NOT NULL,
+        end_date TEXT NOT NULL,
+        total_days INTEGER NOT NULL DEFAULT 1,
+        reason TEXT,
+        status TEXT NOT NULL DEFAULT 'Pending',
+        approved_by TEXT,
+        approved_at DATETIME,
+        approval_notes TEXT,
+        requested_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await query.run('CREATE INDEX IF NOT EXISTS idx_leave_req_emp ON leave_requests(employee_id)').catch(() => {});
+    await query.run('CREATE INDEX IF NOT EXISTS idx_leave_req_status ON leave_requests(status)').catch(() => {});
+    await query.run('CREATE INDEX IF NOT EXISTS idx_leave_req_dates ON leave_requests(start_date, end_date)').catch(() => {});
+
+    await query.run(`
+      CREATE TABLE IF NOT EXISTS employee_loans (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        loan_type TEXT NOT NULL DEFAULT 'Kasbon',
+        principal_amount REAL NOT NULL,
+        tenor_months INTEGER NOT NULL DEFAULT 1,
+        monthly_installment REAL NOT NULL,
+        remaining_amount REAL NOT NULL,
+        start_period TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'Active',
+        notes TEXT,
+        approved_by TEXT,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await query.run('CREATE INDEX IF NOT EXISTS idx_loans_emp ON employee_loans(employee_id)').catch(() => {});
+    await query.run('CREATE INDEX IF NOT EXISTS idx_loans_status ON employee_loans(status)').catch(() => {});
+
+    await query.run(`
+      CREATE TABLE IF NOT EXISTS loan_payments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        loan_id INTEGER NOT NULL REFERENCES employee_loans(id) ON DELETE CASCADE,
+        employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        period TEXT,
+        payroll_entry_id INTEGER REFERENCES payroll_entries(id) ON DELETE SET NULL,
+        amount REAL NOT NULL,
+        payment_date TEXT NOT NULL,
+        payment_method TEXT NOT NULL DEFAULT 'Potong Gaji',
+        notes TEXT,
+        recorded_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await query.run('CREATE INDEX IF NOT EXISTS idx_loan_pay_loan ON loan_payments(loan_id)').catch(() => {});
+    await query.run('CREATE INDEX IF NOT EXISTS idx_loan_pay_period ON loan_payments(period)').catch(() => {});
+
+    await query.run(`
+      CREATE TABLE IF NOT EXISTS overtime_requests (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        date TEXT NOT NULL,
+        hours REAL NOT NULL,
+        day_type TEXT NOT NULL DEFAULT 'weekday',
+        calculated_amount REAL NOT NULL DEFAULT 0,
+        reason TEXT,
+        status TEXT NOT NULL DEFAULT 'Pending',
+        approved_by TEXT,
+        approved_at DATETIME,
+        approval_notes TEXT,
+        requested_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await query.run('CREATE INDEX IF NOT EXISTS idx_overtime_emp_date ON overtime_requests(employee_id, date)').catch(() => {});
+    await query.run('CREATE INDEX IF NOT EXISTS idx_overtime_status ON overtime_requests(status)').catch(() => {});
+
+    await query.run(`
+      CREATE TABLE IF NOT EXISTS reimbursements (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        claim_date TEXT NOT NULL,
+        category TEXT NOT NULL,
+        amount REAL NOT NULL,
+        description TEXT,
+        receipt_photo TEXT,
+        payroll_period TEXT,
+        status TEXT NOT NULL DEFAULT 'Pending',
+        approved_by TEXT,
+        approved_at DATETIME,
+        approval_notes TEXT,
+        requested_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await query.run('CREATE INDEX IF NOT EXISTS idx_reimb_emp ON reimbursements(employee_id)').catch(() => {});
+    await query.run('CREATE INDEX IF NOT EXISTS idx_reimb_status ON reimbursements(status)').catch(() => {});
+    await query.run('CREATE INDEX IF NOT EXISTS idx_reimb_period ON reimbursements(payroll_period)').catch(() => {});
+
+    // Seed SunFish HR system settings safely without overwriting existing keys
+    const sunfishSettings = [
+      ['bpjs_payroll_enabled', '0'],
+      ['pph21_payroll_enabled', '0'],
+      ['bpjs_kes_emp_rate', '1'],
+      ['bpjs_kes_company_rate', '4'],
+      ['bpjs_kes_cap', '12000000'],
+      ['bpjs_jht_emp_rate', '2'],
+      ['bpjs_jht_company_rate', '3.7'],
+      ['bpjs_jp_emp_rate', '1'],
+      ['bpjs_jp_company_rate', '2'],
+      ['bpjs_jp_cap', '10547400'],
+      ['bpjs_jkk_rate', '0.24'],
+      ['bpjs_jkm_rate', '0.3'],
+      ['contract_reminder_days', '30'],
+      ['annual_leave_quota', '12'],
+      ['overtime_hourly_divisor', '173'],
+    ];
+    for (const [key, value] of sunfishSettings) {
+      await query.run('INSERT OR IGNORE INTO system_settings (key, value) VALUES (?, ?)', [key, value]);
+    }
+
     // Clean up cognitive test table from training questions if any exist
     await query.run("DELETE FROM test_questions WHERE subtest = 'training'").catch(() => {});
 

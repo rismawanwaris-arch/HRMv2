@@ -29,7 +29,28 @@ const ROLE_COLORS = {
 };
 
 export default function Settings({ currentRole = 'master' }) {
-  const [settings, setSettings] = useState({ payroll_period_start_day: 29, payroll_period_end_day: 28, working_days_per_month: 25, shift_pagi_cutoff: '06:30', shift_siang_cutoff: '14:30' });
+  const [settings, setSettings] = useState({
+    payroll_period_start_day: 29,
+    payroll_period_end_day: 28,
+    working_days_per_month: 25,
+    shift_pagi_cutoff: '06:30',
+    shift_siang_cutoff: '14:30',
+    bpjs_payroll_enabled: '0',
+    pph21_payroll_enabled: '0',
+    bpjs_kes_emp_rate: '1',
+    bpjs_kes_company_rate: '4',
+    bpjs_kes_cap: '12000000',
+    bpjs_jht_emp_rate: '2',
+    bpjs_jht_company_rate: '3.7',
+    bpjs_jp_emp_rate: '1',
+    bpjs_jp_company_rate: '2',
+    bpjs_jp_cap: '10547400',
+    bpjs_jkk_rate: '0.24',
+    bpjs_jkm_rate: '0.3',
+    contract_reminder_days: '30',
+    annual_leave_quota: '12',
+    overtime_hourly_divisor: '173',
+  });
   const [rules, setRules] = useState([]);
   const [loadingSettings, setLoadingSettings] = useState(true);
   const [settingsError, setSettingsError] = useState('');
@@ -37,6 +58,8 @@ export default function Settings({ currentRole = 'master' }) {
   const [settingsMsg, setSettingsMsg] = useState(null);
   const [savingShift, setSavingShift] = useState(false);
   const [shiftMsg, setShiftMsg] = useState(null);
+  const [savingSunfish, setSavingSunfish] = useState(false);
+  const [sunfishMsg, setSunfishMsg] = useState(null);
 
   const [showRuleModal, setShowRuleModal] = useState(false);
   const [editingRule, setEditingRule] = useState(null);
@@ -296,6 +319,36 @@ export default function Settings({ currentRole = 'master' }) {
     }
   };
 
+  const handleSaveSunfish = async (e) => {
+    e.preventDefault();
+    setSavingSunfish(true);
+    setSunfishMsg(null);
+    try {
+      const res = await settingsApi.updateSettings({
+        bpjs_payroll_enabled: settings.bpjs_payroll_enabled === '1' ? '1' : '0',
+        pph21_payroll_enabled: settings.pph21_payroll_enabled === '1' ? '1' : '0',
+        bpjs_kes_emp_rate: settings.bpjs_kes_emp_rate,
+        bpjs_kes_company_rate: settings.bpjs_kes_company_rate,
+        bpjs_kes_cap: settings.bpjs_kes_cap,
+        bpjs_jht_emp_rate: settings.bpjs_jht_emp_rate,
+        bpjs_jht_company_rate: settings.bpjs_jht_company_rate,
+        bpjs_jp_emp_rate: settings.bpjs_jp_emp_rate,
+        bpjs_jp_company_rate: settings.bpjs_jp_company_rate,
+        bpjs_jp_cap: settings.bpjs_jp_cap,
+        bpjs_jkk_rate: settings.bpjs_jkk_rate,
+        bpjs_jkm_rate: settings.bpjs_jkm_rate,
+        contract_reminder_days: settings.contract_reminder_days,
+        annual_leave_quota: settings.annual_leave_quota,
+        overtime_hourly_divisor: settings.overtime_hourly_divisor,
+      });
+      setSunfishMsg({ type: res.success ? 'success' : 'error', text: res.message });
+    } catch (err) {
+      setSunfishMsg({ type: 'error', text: err.message || 'Gagal menyimpan konfigurasi.' });
+    } finally {
+      setSavingSunfish(false);
+    }
+  };
+
   const openAddRule = () => {
     setEditingRule(null);
     setRuleForm({ min_count: '', max_count: '', penalty_per_occurrence: '' });
@@ -365,16 +418,32 @@ export default function Settings({ currentRole = 'master' }) {
   const effectiveBaseUrl = customBaseUrl || mobileConfig?.recommended_base_url || 'http://100.103.255.45:5002/api';
   const dartSnippet = [
     'class ApiConfig {',
-    '  // Base URL aktif (Tailscale ZimaOS / Local LAN)',
-    `  static const String baseUrl = '${effectiveBaseUrl}';`,
+    '  // Base URL tunggal: akhiri dengan /api (TANPA trailing slash)',
+    `  static const String defaultBaseUrl = '${effectiveBaseUrl}';`,
     '',
-    '  // Endpoint Autentikasi & Sinkronisasi (Wajib Header Authorization: Bearer <token>)',
-    "  static const String login = '$baseUrl/mobile/login';",
-    "  static const String masterData = '$baseUrl/mobile/master-data';",
-    "  static const String syncAsset = '$baseUrl/mobile/sync/asset';",
-    "  static const String syncVisit = '$baseUrl/mobile/sync/visit';",
-    "  static const String syncIncident = '$baseUrl/mobile/sync/incident';",
-    "  static const String syncEmployee = '$baseUrl/mobile/sync/employee';",
+    '  // Koneksi & Auth',
+    "  static const String health = '/mobile/health';",
+    "  static const String login = '/mobile/login';",
+    "  static const String me = '/mobile/me';",
+    "  static const String masterData = '/mobile/master-data';",
+    "  static const String assets = '/mobile/assets';",
+    "  static const String employees = '/mobile/employees';",
+    '',
+    '  // Offline Sync (Idempotent via client_uuid)',
+    "  static const String syncAsset = '/mobile/sync/asset';",
+    "  static const String syncVisit = '/mobile/sync/visit';",
+    "  static const String syncIncident = '/mobile/sync/incident';",
+    "  static const String syncEmployee = '/mobile/sync/employee';",
+    '',
+    '  // HR & SunFish Mobile Modules',
+    "  static const String attendanceCheckin = '/mobile/attendance/checkin';",
+    "  static const String attendanceToday = '/mobile/attendance/today';",
+    "  static const String attendanceHistory = '/mobile/attendance/history';",
+    "  static const String leaveTypes = '/mobile/leaves/types';",
+    "  static const String leaveBalances = '/mobile/leaves/balances';",
+    "  static const String leaveRequests = '/mobile/leaves/requests';",
+    "  static const String overtime = '/mobile/overtime';",
+    "  static const String reimbursements = '/mobile/reimbursements';",
     '}',
   ].join('\n');
 
@@ -555,6 +624,88 @@ export default function Settings({ currentRole = 'master' }) {
             }}
           >
             {savingShift ? 'Menyimpan...' : 'Simpan Batas Shift'}
+          </button>
+        </form>
+      </div>
+
+      {/* SunFish HR Statutory, Contract & Leave Settings */}
+      <div className="glass-panel" style={{ marginBottom: '24px' }}>
+        <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border-color)' }}>
+          <h2 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>
+            Konfigurasi BPJS, PPh 21 TER, Kontrak &amp; Cuti
+          </h2>
+          <p style={{ margin: '4px 0 0', fontSize: '13px', color: 'var(--text-muted)' }}>
+            Aktifkan kalkulasi otomatis BPJS &amp; PPh 21 TER pada Payroll serta parameter reminder kontrak dan kuota cuti.
+          </p>
+        </div>
+        <form onSubmit={handleSaveSunfish} style={{ padding: '24px' }}>
+          <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', marginBottom: '20px' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13.5px', fontWeight: 600, cursor: 'pointer', color: 'var(--text-primary)' }}>
+              <input
+                type="checkbox"
+                checked={settings.bpjs_payroll_enabled === '1'}
+                onChange={e => setSettings(p => ({ ...p, bpjs_payroll_enabled: e.target.checked ? '1' : '0' }))}
+              />
+              Aktifkan Potongan BPJS Otomatis di Payroll
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13.5px', fontWeight: 600, cursor: 'pointer', color: 'var(--text-primary)' }}>
+              <input
+                type="checkbox"
+                checked={settings.pph21_payroll_enabled === '1'}
+                onChange={e => setSettings(p => ({ ...p, pph21_payroll_enabled: e.target.checked ? '1' : '0' }))}
+              />
+              Aktifkan PPh 21 TER (PP 58/2023) di Payroll
+            </label>
+          </div>
+
+          <div className="responsive-grid-3" style={{ gap: '16px', marginBottom: '18px' }}>
+            {[
+              ['bpjs_kes_emp_rate', 'BPJS Kes Karyawan (%)', '0.1'],
+              ['bpjs_kes_company_rate', 'BPJS Kes Perusahaan (%)', '0.1'],
+              ['bpjs_kes_cap', 'Batas Upah BPJS Kes (Rp)', '100000'],
+              ['bpjs_jht_emp_rate', 'JHT Karyawan (%)', '0.1'],
+              ['bpjs_jht_company_rate', 'JHT Perusahaan (%)', '0.1'],
+              ['bpjs_jp_emp_rate', 'JP Karyawan (%)', '0.1'],
+              ['bpjs_jp_company_rate', 'JP Perusahaan (%)', '0.1'],
+              ['bpjs_jp_cap', 'Batas Upah JP (Rp)', '100000'],
+              ['bpjs_jkk_rate', 'Tarif JKK Perusahaan (%)', '0.01'],
+              ['bpjs_jkm_rate', 'Tarif JKM Perusahaan (%)', '0.01'],
+              ['contract_reminder_days', 'Reminder Kontrak (Hari)', '1'],
+              ['annual_leave_quota', 'Kuota Cuti Tahunan (Hari)', '1'],
+              ['overtime_hourly_divisor', 'Pembagi Jam Lembur (173)', '1'],
+            ].map(([key, label, step]) => (
+              <div key={key}>
+                <label style={{ display: 'block', fontSize: '11.5px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '5px' }}>
+                  {label}
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step={step}
+                  style={inputStyle}
+                  value={settings[key] ?? ''}
+                  onChange={e => setSettings(p => ({ ...p, [key]: e.target.value }))}
+                />
+              </div>
+            ))}
+          </div>
+
+          {sunfishMsg && (
+            <div style={{
+              padding: '10px 14px', borderRadius: '8px', marginBottom: '14px', fontSize: '13px',
+              background: sunfishMsg.type === 'success' ? 'var(--color-success-bg)' : 'var(--color-danger-bg)',
+              color: sunfishMsg.type === 'success' ? 'var(--color-success)' : 'var(--color-danger)',
+            }}>
+              {sunfishMsg.text}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={savingSunfish}
+            className="btn btn-primary"
+          >
+            {savingSunfish ? 'Menyimpan...' : 'Simpan Konfigurasi BPJS & HR'}
           </button>
         </form>
       </div>
@@ -1045,6 +1196,14 @@ export default function Settings({ currentRole = 'master' }) {
           </div>
 
           <div style={{ display: 'flex', gap: '14px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <a
+              href="/docs/FLUTTER_API_INTEGRATION_GUIDE.md"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ fontSize: '12px', color: 'var(--color-info)', textDecoration: 'none', fontWeight: 700 }}
+            >
+              📱 Panduan Integrasi API Flutter v2.0 ↗
+            </a>
             <a
               href="/docs/ANDROID_SECURITY_AND_SYNC_GUIDE.md"
               target="_blank"

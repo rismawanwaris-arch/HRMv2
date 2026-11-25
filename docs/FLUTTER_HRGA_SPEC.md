@@ -3,6 +3,8 @@
 **Tipe Arsitektur:** Offline-First Android Client + Express.js REST API  
 **Fokus Modul:** Monitoring & Input Aset, Aktivitas GA (Kunjungan & Insiden), Cabang Outlet, dan Data Karyawan.
 
+> **Penting (Update API v2.0):** Untuk daftar endpoint terbaru yang sudah dirapikan (termasuk `/api/mobile/health`, `/api/mobile/me`, perbaikan `employee_id`, Absensi GPS Geofence, Cuti, Lembur, Reimbursement, serta template lengkap `Dio` client), lihat [FLUTTER_API_INTEGRATION_GUIDE.md](./FLUTTER_API_INTEGRATION_GUIDE.md).
+
 ---
 
 ## 1. Arsitektur & Prinsip Kerja (Offline-First)

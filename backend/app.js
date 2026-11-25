@@ -66,10 +66,14 @@ app.use('/api/attendance', authenticateToken, auditLog, requireRole(...STAFF),  
 app.use('/api/payroll',    authenticateToken, auditLog, requireRole(...FINANCE), require('./routes/payrollRoutes'));
 app.use('/api/financial',  authenticateToken, auditLog, requireRole(...FINANCE), require('./routes/financialRoutes'));
 app.use('/api/discipline', authenticateToken, auditLog, requireRole(...FINANCE), require('./routes/disciplineRoutes'));
+app.use('/api/leaves',     authenticateToken, auditLog, requireRole(...STAFF),   require('./routes/leaveRoutes'));
+app.use('/api/loans',      authenticateToken, auditLog, requireRole(...FINANCE), require('./routes/loanRoutes'));
+app.use('/api/claims',     authenticateToken, auditLog, requireRole(...STAFF),   require('./routes/claimsRoutes'));
 app.use('/api/outlet-activity', authenticateToken, auditLog, requireRole(...STAFF), require('./routes/outletActivityRoutes'));
 app.use('/api/assets',          authenticateToken, auditLog, requireRole(...STAFF), require('./routes/assetRoutes'));
-app.use('/api/mobile',          require('./routes/mobileRoutes'));
-app.use('/api',                 require('./routes/mobileRoutes')); // Fallback alias (e.g. /api/master-data, /api/sync/*)
+const { mobileRouter, legacyAliasRouter } = require('./routes/mobileRoutes');
+app.use('/api/mobile',          mobileRouter);
+app.use('/api',                 legacyAliasRouter); // Backward-compatible aliases (e.g. /api/master-data, /api/sync/*)
 app.use('/api', require('./routes/testRoutes'));
 
 // Strict JSON 404 response for unhandled /api/* requests (mencegah HTML fallback terkirim ke mobile app)

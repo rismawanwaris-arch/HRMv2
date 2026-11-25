@@ -23,6 +23,9 @@ import Discipline from './views/Discipline';
 import UploadPelamar from './views/UploadPelamar';
 import OutletActivity from './views/OutletActivity';
 import AssetManagement from './views/AssetManagement';
+import LeaveManagement from './views/LeaveManagement';
+import LoanManagement from './views/LoanManagement';
+import ClaimsAndTHR from './views/ClaimsAndTHR';
 import Login from './views/Login';
 import { authApi } from './services/api';
 
@@ -81,6 +84,8 @@ function App() {
   const [isLaporanOpen, setIsLaporanOpen] = useState(() => {
     return window.location.pathname.includes('laporan');
   });
+  const hrServiceViews = ['leaves', 'loans', 'claims'];
+  const [isHrServiceOpen, setIsHrServiceOpen] = useState(false);
 
   // Auth state
   const [isAuthenticated, setIsAuthenticated] = useState(() => !!localStorage.getItem('auth_token'));
@@ -181,6 +186,9 @@ function App() {
     laporan:          ['finance', 'master'].includes(currentRole),
     settings:         currentRole === 'master',
     disiplin:         ['finance', 'master'].includes(currentRole),
+    cuti:             true,
+    pinjaman:         ['finance', 'master'].includes(currentRole),
+    klaim:            true,
     aktivitas_outlet: true,
     assets:           true,
   };
@@ -307,6 +315,12 @@ function App() {
         return canAccess.rekrutmen ? <TrainingQuestionBank currentRole={currentRole} /> : <Denied />;
       case 'discipline':
         return canAccess.disiplin ? <Discipline /> : <Denied />;
+      case 'leaves':
+        return canAccess.cuti ? <LeaveManagement currentRole={currentRole} /> : <Denied />;
+      case 'loans':
+        return canAccess.pinjaman ? <LoanManagement /> : <Denied />;
+      case 'claims':
+        return canAccess.klaim ? <ClaimsAndTHR currentRole={currentRole} /> : <Denied />;
       case 'outlet-activity':
         return <OutletActivity />;
       case 'assets':
@@ -452,6 +466,47 @@ function App() {
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: '#ef4444' }}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
               Disiplin & Pelanggaran
             </li>}
+            {/* ── LAYANAN HR & KLAIM GROUP (SunFish HR Modules) ── */}
+            <li style={{ listStyle: 'none' }}>
+              <div
+                className={`sidebar-item${hrServiceViews.includes(view) ? ' active' : ''}`}
+                onClick={() => setIsHrServiceOpen(p => !p)}
+                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: '#14b8a6' }}><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/><path d="M8 14h.01"/><path d="M12 14h.01"/><path d="M16 14h.01"/></svg>
+                  <span>Layanan HR & Klaim</span>
+                </div>
+                <span style={{ fontSize: '10px', transition: 'transform 0.2s', transform: isHrServiceOpen ? 'rotate(90deg)' : 'none', color: 'inherit', opacity: 0.7, marginRight: '4px' }}>▶</span>
+              </div>
+              {isHrServiceOpen && (
+                <ul className="sidebar-submenu" style={{ listStyle: 'none', margin: '2px 0 4px', padding: '0', display: 'flex', flexDirection: 'column', gap: '2px', borderLeft: '2px solid rgba(20,184,166,0.35)', marginLeft: '12px', paddingLeft: '8px' }}>
+                  <li
+                    className={`sidebar-item ${view === 'leaves' ? 'active' : ''}`}
+                    onClick={() => navigate('leaves')}
+                    style={{ fontSize: '13px', padding: '8px 10px' }}
+                  >
+                    Cuti & Saldo Cuti
+                  </li>
+                  {canAccess.pinjaman && (
+                    <li
+                      className={`sidebar-item ${view === 'loans' ? 'active' : ''}`}
+                      onClick={() => navigate('loans')}
+                      style={{ fontSize: '13px', padding: '8px 10px' }}
+                    >
+                      Kasbon & Pinjaman
+                    </li>
+                  )}
+                  <li
+                    className={`sidebar-item ${view === 'claims' ? 'active' : ''}`}
+                    onClick={() => navigate('claims')}
+                    style={{ fontSize: '13px', padding: '8px 10px' }}
+                  >
+                    Lembur, Klaim & THR
+                  </li>
+                </ul>
+              )}
+            </li>
             {/* ── LAPORAN KEUANGAN GROUP ── */}
             {canAccess.laporan && (
               <li style={{ listStyle: 'none' }}>

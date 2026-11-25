@@ -95,6 +95,135 @@ exports.getMasterSummary = async (req, res) => {
     // Late penalty rules
     const lateRules = await query.all('SELECT * FROM late_penalty_rules ORDER BY min_count ASC');
 
+    // 4. Contract & Probation Expiry Alerts
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const reminderDays = Math.max(1, parseInt(settings.contract_reminder_days, 10) || 30);
+    const cutoffDt = new Date(`${todayStr}T00:00:00Z`);
+    cutoffDt.setUTCDate(cutoffDt.getUTCDate() + reminderDays);
+    const cutoffStr = cutoffDt.toISOString().slice(0, 10);
+
+    const expRows = await query.all(
+      `SELECT e.id, e.name, e.position, e.contract_type, e.contract_end, e.probation_end, b.name AS branch_name
+       FROM employees e LEFT JOIN branches b ON e.branch_id = b.id
+       WHERE e.status = 'Active'
+         AND ((e.contract_end IS NOT NULL AND e.contract_end != '' AND e.contract_end <= ?)
+           OR (e.probation_end IS NOT NULL AND e.probation_end != '' AND e.probation_end <= ?))`,
+      [cutoffStr, cutoffStr]
+    );
+    const contractAlerts = [];
+    const baseMs = new Date(`${todayStr}T00:00:00Z`).getTime();
+    for (const r of expRows) {
+      if (r.contract_end && r.contract_end <= cutoffStr) {
+        const ms = new Date(`${String(r.contract_end).slice(0, 10)}T00:00:00Z`).getTime();
+        if (!Number.isNaN(ms)) {
+          contractAlerts.push({ ...r, alert_type: 'contract', target_date: r.contract_end, days_remaining: Math.round((ms - baseMs) / 86400000) });
+        }
+      }
+      if (r.probation_end && r.probation_end <= cutoffStr) {
+        const ms = new Date(`${String(r.probation_end).slice(0, 10)}T00:00:00Z`).getTime();
+        if (!Number.isNaN(ms)) {
+          contractAlerts.push({ ...r, alert_type: 'probation', target_date: r.probation_end, days_remaining: Math.round((ms - baseMs) / 86400000) });
+        }
+      }
+    }
+    contractAlerts.sort((a, b) => a.days_remaining - b.days_remaining);
+
+    // 5. Pending Approvals Summary
+    const pendLeaves = await query.get("SELECT COUNT(*) AS count FROM leave_requests WHERE status = 'Pending'").catch(() => ({ count: 0 }));
+    const pendOvertime = await query.get("SELECT COUNT(*) AS count FROM overtime_requests WHERE status = 'Pending'").catch(() => ({ count: 0 }));
+    const pendReimb = await query.get("SELECT COUNT(*) AS count FROM reimbursements WHERE status = 'Pending'").catch(() => ({ count: 0 }));
+    const pendingApprovals = {
+      leaves: pendLeaves ? pendLeaves.count : 0,
+      overtime: pendOvertime ? pendOvertime.count : 0,
+      reimbursements: pendReimb ? pendReimb.count : 0,
+    };
+    pendingApprovals.total = pendingApprovals.leaves + pendingApprovals.overtime + pendingApprovals.reimbursements;
+
+    // 6. Turnover Analytics & Rule-Based Early Warning Retensi
+    const dt90 = new Date(baseMs);
+    dt90.setUTCDate(dt90.getUTCDate() - 90);
+    const date90Str = dt90.toISOString().slice(0, 10);
+    const dt30 = new Date(baseMs);
+    dt30.setUTCDate(dt30.getUTCDate() - 30);
+    const date30Str = dt30.toISOString().slice(0, 10);
+
+    const exitedRows = await query.all("SELECT hire_date, resign_date, resign_reason FROM employees WHERE status IN ('Resign', 'Terminated')");
+    const exitsLast90d = exitedRows.filter((e) => e.resign_date && e.resign_date >= date90Str).length;
+    const totalActiveCount = empTotal ? empTotal.count : 0;
+    const turnoverRatePct = Math.round((exitsLast90d / Math.max(1, totalActiveCount + exitsLast90d)) * 1000) / 10;
+
+    let tenureSum = 0;
+    let tenureCount = 0;
+    for (const ex of exitedRows) {
+      if (ex.hire_date && ex.resign_date) {
+        const s = new Date(`${String(ex.hire_date).slice(0, 10)}T00:00:00Z`).getTime();
+        const e = new Date(`${String(ex.resign_date).slice(0, 10)}T00:00:00Z`).getTime();
+        if (!Number.isNaN(s) && !Number.isNaN(e) && e >= s) {
+          tenureSum += (e - s) / (86400000 * 30.4375);
+          tenureCount++;
+        }
+      }
+    }
+    const avgTenureMonths = tenureCount > 0 ? Math.round((tenureSum / tenureCount) * 10) / 10 : 0;
+
+    const reasonCounts = {};
+    for (const ex of exitedRows) {
+      const r = (ex.resign_reason && String(ex.resign_reason).trim()) || 'Tidak Tercatat';
+      reasonCounts[r] = (reasonCounts[r] || 0) + 1;
+    }
+    const topResignReasons = Object.entries(reasonCounts)
+      .map(([reason, count]) => ({ reason, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+
+    const activeRiskCandidates = await query.all(`
+      SELECT e.id, e.name, e.position, e.hire_date, e.contract_end, b.name AS branch_name,
+        (SELECT COUNT(*) FROM daily_attendance da WHERE da.employee_id = e.id AND da.date >= ? AND da.is_late = 1) AS late_30d,
+        (SELECT COUNT(*) FROM daily_attendance da WHERE da.employee_id = e.id AND da.date >= ? AND da.status = 'Tidak Hadir') AS absent_30d,
+        (SELECT COUNT(*) FROM discipline_records dr WHERE dr.employee_id = e.id AND dr.status = 'Aktif') AS active_sp
+      FROM employees e
+      LEFT JOIN branches b ON e.branch_id = b.id
+      WHERE e.status = 'Active'
+    `, [date30Str, date30Str]);
+
+    const dt180 = new Date(baseMs);
+    dt180.setUTCDate(dt180.getUTCDate() - 180);
+    const date180Str = dt180.toISOString().slice(0, 10);
+
+    const retentionRiskList = [];
+    for (const emp of activeRiskCandidates) {
+      let score = 0;
+      const factors = [];
+      if (emp.active_sp > 0) { score += 3; factors.push(`${emp.active_sp} SP Aktif`); }
+      if (emp.absent_30d >= 2) { score += 2; factors.push(`${emp.absent_30d}x Alpha (30h)`); }
+      if (emp.late_30d >= 4) { score += 2; factors.push(`${emp.late_30d}x Telat (30h)`); }
+      if (emp.contract_end) {
+        const cMs = new Date(`${String(emp.contract_end).slice(0, 10)}T00:00:00Z`).getTime();
+        const rem = Math.round((cMs - baseMs) / 86400000);
+        if (!Number.isNaN(rem) && rem <= 14) {
+          score += 2;
+          factors.push(rem < 0 ? 'Kontrak Lewat' : `Kontrak H-${rem}`);
+        }
+      }
+      if (emp.hire_date && emp.hire_date >= date180Str) {
+        score += 1;
+        factors.push('Masa Kerja < 6 bln');
+      }
+      if (score >= 2) {
+        retentionRiskList.push({
+          id: emp.id,
+          name: emp.name,
+          position: emp.position,
+          branch_name: emp.branch_name,
+          risk_score: score,
+          risk_level: score >= 4 ? 'Tinggi' : 'Sedang',
+          factors,
+        });
+      }
+    }
+    retentionRiskList.sort((a, b) => b.risk_score - a.risk_score);
+
     res.json({
       success: true,
       data: {
@@ -118,7 +247,17 @@ exports.getMasterSummary = async (req, res) => {
           list: branchList
         },
         settings,
-        late_rules: lateRules
+        late_rules: lateRules,
+        contract_alerts: contractAlerts,
+        pending_approvals: pendingApprovals,
+        turnover_analytics: {
+          total_exits: exitedRows.length,
+          exits_last_90d: exitsLast90d,
+          turnover_rate_pct: turnoverRatePct,
+          avg_tenure_months: avgTenureMonths,
+          top_resign_reasons: topResignReasons,
+          retention_risk_list: retentionRiskList.slice(0, 8),
+        },
       }
     });
   } catch (error) {

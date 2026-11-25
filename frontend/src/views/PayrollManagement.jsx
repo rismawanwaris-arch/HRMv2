@@ -67,8 +67,22 @@ function SlipModal({ slip, onClose }) {
   };
 
   const gross = (slip.salary || 0) + (slip.allowance || 0);
-  const totalBonus = (slip.bonus_penjualan || 0) + (slip.bonus_tartun || 0) + (slip.bonus_lain || 0);
-  const totalPotongan = (slip.deduction_kasbon || 0) + (slip.deduction_absent || 0) + (slip.deduction_late || 0) + (slip.deduction_fake_money || 0);
+  const totalBonus =
+    (slip.bonus_penjualan || 0) +
+    (slip.bonus_tartun || 0) +
+    (slip.bonus_lain || 0) +
+    (slip.overtime_pay || 0) +
+    (slip.reimbursement_pay || 0) +
+    (slip.thr_pay || 0);
+  const totalPotongan =
+    (slip.deduction_kasbon || 0) +
+    (slip.deduction_loan || 0) +
+    (slip.deduction_absent || 0) +
+    (slip.deduction_late || 0) +
+    (slip.deduction_fake_money || 0) +
+    (slip.bpjs_kes_emp || 0) +
+    (slip.bpjs_tk_emp || 0) +
+    (slip.pph21_deduction || 0);
 
   return createPortal(
     <div
@@ -102,19 +116,26 @@ function SlipModal({ slip, onClose }) {
           <Row label="Tunjangan" value={fmtRp(slip.allowance)} />
           <RowTotal label="TOTAL PENGHASILAN" value={fmtRp(gross)} />
 
-          {(slip.bonus_penjualan > 0 || slip.bonus_tartun > 0 || slip.bonus_lain > 0) && <>
-            <p style={{ margin: '8px 0 6px', fontWeight: 700, color: 'var(--text-secondary)', fontSize: '11px', textTransform: 'uppercase' }}>Bonus</p>
+          {(slip.bonus_penjualan > 0 || slip.bonus_tartun > 0 || slip.bonus_lain > 0 || slip.overtime_pay > 0 || slip.reimbursement_pay > 0 || slip.thr_pay > 0) && <>
+            <p style={{ margin: '8px 0 6px', fontWeight: 700, color: 'var(--text-secondary)', fontSize: '11px', textTransform: 'uppercase' }}>Bonus &amp; Tambahan</p>
             {slip.bonus_penjualan > 0 && <Row label="Bonus Penjualan" value={fmtRp(slip.bonus_penjualan)} />}
             {slip.bonus_tartun > 0 && <Row label="Bonus Tartun" value={fmtRp(slip.bonus_tartun)} />}
             {slip.bonus_lain > 0 && <Row label={slip.bonus_lain_label || 'Bonus Lain'} value={fmtRp(slip.bonus_lain)} />}
-            <RowTotal label="TOTAL BONUS" value={fmtRp(totalBonus)} />
+            {slip.overtime_pay > 0 && <Row label="Lembur (PP 35/2021)" value={fmtRp(slip.overtime_pay)} />}
+            {slip.reimbursement_pay > 0 && <Row label="Reimbursement / Klaim" value={fmtRp(slip.reimbursement_pay)} />}
+            {slip.thr_pay > 0 && <Row label="THR" value={fmtRp(slip.thr_pay)} />}
+            <RowTotal label="TOTAL TAMBAHAN" value={fmtRp(totalBonus)} />
           </>}
 
           <p style={{ margin: '8px 0 6px', fontWeight: 700, color: 'var(--text-secondary)', fontSize: '11px', textTransform: 'uppercase' }}>Potongan</p>
           {slip.deduction_kasbon > 0 && <Row label="Kasbon" value={`(${fmtRp(slip.deduction_kasbon)})`} red />}
+          {slip.deduction_loan > 0 && <Row label="Cicilan Pinjaman" value={`(${fmtRp(slip.deduction_loan)})`} red />}
           {slip.deduction_absent > 0 && <Row label="Tidak Masuk" value={`(${fmtRp(slip.deduction_absent)})`} red />}
           {slip.deduction_late > 0 && <Row label="Terlambat" value={`(${fmtRp(slip.deduction_late)})`} red />}
           {slip.deduction_fake_money > 0 && <Row label="Uang Palsu" value={`(${fmtRp(slip.deduction_fake_money)})`} red />}
+          {slip.bpjs_kes_emp > 0 && <Row label="BPJS Kesehatan (Karyawan)" value={`(${fmtRp(slip.bpjs_kes_emp)})`} red />}
+          {slip.bpjs_tk_emp > 0 && <Row label="BPJS Ketenagakerjaan (JHT/JP)" value={`(${fmtRp(slip.bpjs_tk_emp)})`} red />}
+          {slip.pph21_deduction > 0 && <Row label={`PPh 21 TER (${slip.ptkp_status || 'TK/0'})`} value={`(${fmtRp(slip.pph21_deduction)})`} red />}
           {totalPotongan === 0 && <Row label="—" value="Rp 0" />}
           <RowTotal label="TOTAL POTONGAN" value={`(${fmtRp(totalPotongan)})`} red />
 
@@ -122,6 +143,11 @@ function SlipModal({ slip, onClose }) {
             <strong style={{ fontSize: '14px', color: 'var(--text-primary)' }}>TAKE HOME PAY</strong>
             <strong style={{ fontSize: '16px', color: '#10b981' }}>{fmtRp(slip.take_home_pay)}</strong>
           </div>
+          {(slip.bpjs_kes_company > 0 || slip.bpjs_tk_company > 0) && (
+            <p style={{ marginTop: '8px', fontSize: '11px', color: 'var(--text-muted)' }}>
+              Kontribusi Perusahaan (non-THP): BPJS Kes {fmtRp(slip.bpjs_kes_company)} · BPJS TK {fmtRp(slip.bpjs_tk_company)}
+            </p>
+          )}
           {slip.notes && <p style={{ marginTop: '10px', fontSize: '11px', color: 'var(--text-muted)', fontStyle: 'italic' }}>Catatan: {slip.notes}</p>}
         </div>
       </div>
@@ -153,6 +179,7 @@ function BonusModal({ entry, saving, onSave, onClose }) {
     bonus_lain: String(entry.bonus_lain ?? 0),
     bonus_lain_label: entry.bonus_lain_label || '',
     bonus_ditahan: String(entry.bonus_ditahan ?? 0),
+    thr_pay: String(entry.thr_pay ?? 0),
     notes: entry.notes || '',
   });
   const f = k => e => setForm(p => ({ ...p, [k]: e.target.value }));
@@ -172,6 +199,7 @@ function BonusModal({ entry, saving, onSave, onClose }) {
       bonus_tartun: parseFloat(form.bonus_tartun) || 0,
       bonus_lain: parseFloat(form.bonus_lain) || 0,
       bonus_ditahan: parseFloat(form.bonus_ditahan) || 0,
+      thr_pay: parseFloat(form.thr_pay) || 0,
     });
   };
 
@@ -198,6 +226,7 @@ function BonusModal({ entry, saving, onSave, onClose }) {
             { label: 'Bonus Penjualan (Rp)', key: 'bonus_penjualan' },
             { label: 'Bonus Tartun / Tarik Tunai (Rp)', key: 'bonus_tartun' },
             { label: 'Bonus Lain (Rp)', key: 'bonus_lain' },
+            { label: 'THR / Tunjangan Hari Raya (Rp)', key: 'thr_pay' },
           ].map(({ label, key }) => (
             <div key={key}>
               <label style={labelS}>{label}</label>
@@ -243,6 +272,7 @@ export default function PayrollManagement() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [generating, setGenerating] = useState(false);
+  const [submittingPeriod, setSubmittingPeriod] = useState(false);
   const [activeTab, setActiveTab] = useState('entries');
   const [slipData, setSlipData] = useState(null);
   const [bonusEntry, setBonusEntry] = useState(null);
@@ -296,6 +326,24 @@ export default function PayrollManagement() {
     setGenerating(false);
   };
 
+  const handleSubmitPeriod = async () => {
+    if (!window.confirm(`Ajukan & kunci Payroll periode ${period}?\n\nCicilan pinjaman & klaim reimbursement periode ini akan dicatat sebagai terpotong/terbayar dan periode tidak dapat diubah lagi.`)) return;
+    setSubmittingPeriod(true);
+    try {
+      const res = await payrollApi.submitPeriod(period);
+      if (res.success) {
+        alert(res.message);
+        fetchAll();
+      } else {
+        alert(res.message || 'Gagal mengajukan payroll.');
+      }
+    } catch (err) {
+      alert(err.message || 'Gagal mengajukan payroll.');
+    } finally {
+      setSubmittingPeriod(false);
+    }
+  };
+
   const openSlip = async (entry) => {
     try {
       const res = await payrollApi.getSlip(entry.id);
@@ -346,8 +394,8 @@ export default function PayrollManagement() {
   const filteredRekapTHP = filteredSummaryData.reduce((s, r) => s + (r.total_thp || 0), 0);
 
   const totalGross = filteredEntries.reduce((s, e) => s + (e.salary || 0) + (e.allowance || 0), 0);
-  const totalBonus = filteredEntries.reduce((s, e) => s + (e.bonus_penjualan || 0) + (e.bonus_tartun || 0) + (e.bonus_lain || 0), 0);
-  const totalPot = filteredEntries.reduce((s, e) => s + (e.deduction_kasbon || 0) + (e.deduction_absent || 0) + (e.deduction_late || 0) + (e.deduction_fake_money || 0), 0);
+  const totalBonus = filteredEntries.reduce((s, e) => s + (e.bonus_penjualan || 0) + (e.bonus_tartun || 0) + (e.bonus_lain || 0) + (e.overtime_pay || 0) + (e.reimbursement_pay || 0) + (e.thr_pay || 0), 0);
+  const totalPot = filteredEntries.reduce((s, e) => s + (e.deduction_kasbon || 0) + (e.deduction_loan || 0) + (e.deduction_absent || 0) + (e.deduction_late || 0) + (e.deduction_fake_money || 0) + (e.bpjs_kes_emp || 0) + (e.bpjs_tk_emp || 0) + (e.pph21_deduction || 0), 0);
   const totalTHP = filteredEntries.reduce((s, e) => s + (e.take_home_pay || 0), 0);
 
   const isLockedPeriod = Boolean(periodInfo && periodInfo.status !== 'Draft');
@@ -367,7 +415,7 @@ export default function PayrollManagement() {
             {periodInfo ? periodInfo.label : 'Input bonus, hitung THP, dan cetak slip gaji karyawan.'}
           </p>
         </div>
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
           {periodInfo && statusBadge(periodInfo.status)}
           <button
             type="button"
@@ -377,6 +425,17 @@ export default function PayrollManagement() {
           >
             {generating ? 'Generating...' : '⚡ Generate Payroll'}
           </button>
+          {periodInfo && periodInfo.status === 'Draft' && entries.length > 0 && (
+            <button
+              type="button"
+              onClick={handleSubmitPeriod}
+              disabled={submittingPeriod}
+              className="btn btn-primary"
+              style={{ fontSize: '13px' }}
+            >
+              {submittingPeriod ? 'Mengunci...' : '🔒 Ajukan & Kunci'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -475,8 +534,9 @@ export default function PayrollManagement() {
                 </thead>
                 <tbody>
                   {filteredEntries.map(e => {
-                    const bonus = (e.bonus_penjualan || 0) + (e.bonus_tartun || 0) + (e.bonus_lain || 0);
-                    const pot = (e.deduction_kasbon || 0) + (e.deduction_absent || 0) + (e.deduction_late || 0) + (e.deduction_fake_money || 0);
+                    const bonus = (e.bonus_penjualan || 0) + (e.bonus_tartun || 0) + (e.bonus_lain || 0) + (e.overtime_pay || 0) + (e.reimbursement_pay || 0) + (e.thr_pay || 0);
+                    const pot = (e.deduction_kasbon || 0) + (e.deduction_loan || 0) + (e.deduction_absent || 0) + (e.deduction_late || 0) + (e.deduction_fake_money || 0) + (e.bpjs_kes_emp || 0) + (e.bpjs_tk_emp || 0) + (e.pph21_deduction || 0);
+                    const bpjsEmp = (e.bpjs_kes_emp || 0) + (e.bpjs_tk_emp || 0);
                     return (
                       <tr key={e.id}>
                         <td>
@@ -489,10 +549,20 @@ export default function PayrollManagement() {
                         <td style={{ fontSize: '13px', color: 'var(--text-muted)' }}>{e.branch_name || '—'}</td>
                         <td style={{ textAlign: 'right', fontSize: '13px', color: 'var(--text-secondary)' }}>{fmtRp((e.salary || 0) + (e.allowance || 0))}</td>
                         <td style={{ textAlign: 'right', fontSize: '13px', color: '#10b981' }}>
-                          {bonus > 0 ? `+${fmtRp(bonus)}` : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                          <div>{bonus > 0 ? `+${fmtRp(bonus)}` : <span style={{ color: 'var(--text-muted)' }}>—</span>}</div>
+                          {(e.overtime_pay > 0 || e.reimbursement_pay > 0 || e.thr_pay > 0) && (
+                            <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                              {[e.overtime_pay > 0 ? `Lmb ${fmt(e.overtime_pay)}` : '', e.reimbursement_pay > 0 ? `Klm ${fmt(e.reimbursement_pay)}` : '', e.thr_pay > 0 ? `THR ${fmt(e.thr_pay)}` : ''].filter(Boolean).join(' · ')}
+                            </div>
+                          )}
                         </td>
                         <td style={{ textAlign: 'right', fontSize: '13px', color: '#ef4444' }}>
-                          {pot > 0 ? `(${fmtRp(pot)})` : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                          <div>{pot > 0 ? `(${fmtRp(pot)})` : <span style={{ color: 'var(--text-muted)' }}>—</span>}</div>
+                          {(e.deduction_loan > 0 || bpjsEmp > 0 || e.pph21_deduction > 0) && (
+                            <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                              {[e.deduction_loan > 0 ? `Ccl ${fmt(e.deduction_loan)}` : '', bpjsEmp > 0 ? `BPJS ${fmt(bpjsEmp)}` : '', e.pph21_deduction > 0 ? `PPh ${fmt(e.pph21_deduction)}` : ''].filter(Boolean).join(' · ')}
+                            </div>
+                          )}
                         </td>
                         <td style={{ textAlign: 'right', fontWeight: 700, color: '#10b981', fontSize: '14px' }}>{fmtRp(e.take_home_pay)}</td>
                         <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>

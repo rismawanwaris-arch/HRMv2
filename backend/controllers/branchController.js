@@ -27,19 +27,37 @@ exports.getAllBranches = async (req, res) => {
  * @param {import('express').Request} req 
  * @param {import('express').Response} res 
  */
+function parseCoord(val) {
+  if (val === undefined || val === null || val === '') return null;
+  const n = parseFloat(val);
+  return Number.isFinite(n) ? n : null;
+}
+
+function parseRadius(val) {
+  const n = parseInt(val, 10);
+  if (!Number.isFinite(n)) return 100;
+  return Math.max(10, Math.min(10000, n));
+}
+
 exports.createBranch = async (req, res) => {
   try {
-    const { code, name, address, city, location_type, has_petshop, rent_amount } = req.body;
+    const { code, name, address, city, location_type, has_petshop, rent_amount, latitude, longitude, geofence_radius_m } = req.body;
     if (!code || !name) {
       return res.status(400).json({ success: false, message: 'Kode dan Nama Cabang wajib diisi.' });
     }
+    const lat = parseCoord(latitude);
+    const lng = parseCoord(longitude);
+    const radius = parseRadius(geofence_radius_m);
     const result = await query.run(
-      'INSERT INTO branches (code, name, address, city, location_type, has_petshop, rent_amount) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO branches (code, name, address, city, location_type, has_petshop, rent_amount, latitude, longitude, geofence_radius_m) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       [
         code.trim().toUpperCase(), name.trim(), address || '', city || '',
         location_type || 'Konter',
         has_petshop ? 1 : 0,
         parseFloat(rent_amount) || 0,
+        lat,
+        lng,
+        radius,
       ]
     );
     const newBranch = await query.get('SELECT * FROM branches WHERE id = ?', [result.id]);
@@ -134,24 +152,31 @@ exports.deleteBranch = async (req, res) => {
 exports.updateBranch = async (req, res) => {
   try {
     const branchId = parseInt(req.params.id, 10);
-    const { code, name, address, city, status, location_type, has_petshop, rent_amount } = req.body;
+    const { code, name, address, city, status, location_type, has_petshop, rent_amount, latitude, longitude, geofence_radius_m } = req.body;
     if (!code || !name) {
       return res.status(400).json({ success: false, message: 'Kode dan Nama Cabang wajib diisi.' });
     }
 
-    const existing = await query.get('SELECT id FROM branches WHERE id = ?', [branchId]);
+    const existing = await query.get('SELECT id, latitude, longitude, geofence_radius_m FROM branches WHERE id = ?', [branchId]);
     if (!existing) {
       return res.status(404).json({ success: false, message: 'Cabang tidak ditemukan.' });
     }
 
+    const lat = latitude !== undefined ? parseCoord(latitude) : existing.latitude;
+    const lng = longitude !== undefined ? parseCoord(longitude) : existing.longitude;
+    const radius = geofence_radius_m !== undefined ? parseRadius(geofence_radius_m) : (existing.geofence_radius_m || 100);
+
     await query.run(
-      'UPDATE branches SET code = ?, name = ?, address = ?, city = ?, status = ?, location_type = ?, has_petshop = ?, rent_amount = ? WHERE id = ?',
+      'UPDATE branches SET code = ?, name = ?, address = ?, city = ?, status = ?, location_type = ?, has_petshop = ?, rent_amount = ?, latitude = ?, longitude = ?, geofence_radius_m = ? WHERE id = ?',
       [
         code.trim().toUpperCase(), name.trim(), address || '', city || '',
         status || 'Active',
         location_type || 'Konter',
         has_petshop ? 1 : 0,
         parseFloat(rent_amount) || 0,
+        lat,
+        lng,
+        radius,
         branchId,
       ]
     );

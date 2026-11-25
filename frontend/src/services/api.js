@@ -479,6 +479,78 @@ export const staffApi = {
   deactivate: (id, data) => api.put(`/staff/${id}/status`, data),
   promote: (candidateId, data) => api.post(`/staff/promote/${candidateId}`, data),
   getHiredCandidates: () => api.get('/staff/hired-candidates'),
+  getContractAlerts: (days) => api.get(`/staff/contract-alerts${days ? `?days=${days}` : ''}`),
+  getHistory: (id) => api.get(`/staff/${id}/history`),
+  addHistory: (id, data) => api.post(`/staff/${id}/history`, data),
+  renewContract: (id, data) => api.post(`/staff/${id}/renew-contract`, data),
+};
+
+/**
+ * --- LEAVE MANAGEMENT API (Cuti & Izin) ---
+ */
+export const leaveApi = {
+  getTypes: (all = false) => api.get(`/leaves/types${all ? '?all=1' : ''}`),
+  createType: (data) => api.post('/leaves/types', data),
+  updateType: (id, data) => api.put(`/leaves/types/${id}`, data),
+  getBalances: (params) => {
+    const qs = buildQueryString(params);
+    return api.get(`/leaves/balances${qs ? '?' + qs : ''}`);
+  },
+  initYearBalances: (data) => api.post('/leaves/balances/init-year', data),
+  updateBalance: (id, data) => api.put(`/leaves/balances/${id}`, data),
+  getRequests: (params) => {
+    const qs = buildQueryString(params);
+    return api.get(`/leaves/requests${qs ? '?' + qs : ''}`);
+  },
+  createRequest: (data) => api.post('/leaves/requests', data),
+  approveRequest: (id, data = {}) => api.put(`/leaves/requests/${id}/approve`, data),
+  rejectRequest: (id, data = {}) => api.put(`/leaves/requests/${id}/reject`, data),
+  cancelRequest: (id, data = {}) => api.put(`/leaves/requests/${id}/cancel`, data),
+};
+
+/**
+ * --- LOAN MANAGEMENT API (Pinjaman & Kasbon Berjangka) ---
+ */
+export const loanApi = {
+  getAll: (params) => {
+    const qs = buildQueryString(params);
+    return api.get(`/loans${qs ? '?' + qs : ''}`);
+  },
+  getSummary: () => api.get('/loans/summary'),
+  getById: (id) => api.get(`/loans/${id}`),
+  create: (data) => api.post('/loans', data),
+  recordPayment: (id, data) => api.post(`/loans/${id}/payment`, data),
+  cancel: (id) => api.put(`/loans/${id}/cancel`, {}),
+};
+
+/**
+ * --- CLAIMS & THR API (Lembur, Reimbursement & THR) ---
+ */
+export const claimsApi = {
+  getOvertime: (params) => {
+    const qs = buildQueryString(params);
+    return api.get(`/claims/overtime${qs ? '?' + qs : ''}`);
+  },
+  createOvertime: (data) => api.post('/claims/overtime', data),
+  approveOvertime: (id, data = {}) => api.put(`/claims/overtime/${id}/approve`, data),
+  rejectOvertime: (id, data = {}) => api.put(`/claims/overtime/${id}/reject`, data),
+  deleteOvertime: (id) => api.delete(`/claims/overtime/${id}`),
+
+  getReimbursements: (params) => {
+    const qs = buildQueryString(params);
+    return api.get(`/claims/reimbursements${qs ? '?' + qs : ''}`);
+  },
+  createReimbursement: (formDataOrJson) => api.post('/claims/reimbursements', formDataOrJson),
+  approveReimbursement: (id, data = {}) => api.put(`/claims/reimbursements/${id}/approve`, data),
+  rejectReimbursement: (id, data = {}) => api.put(`/claims/reimbursements/${id}/reject`, data),
+  deleteReimbursement: (id) => api.delete(`/claims/reimbursements/${id}`),
+  getReceiptUrl: (filename) => {
+    const token = encodeURIComponent(localStorage.getItem('auth_token') || '');
+    return `${API_BASE}/outlet-activity/photos/${encodeURIComponent(filename || '')}?token=${token}`;
+  },
+
+  previewTHR: (targetDate) => api.get(`/claims/thr/preview${targetDate ? `?target_date=${encodeURIComponent(targetDate)}` : ''}`),
+  applyTHR: (data) => api.post('/claims/thr/apply', data),
 };
 
 /**

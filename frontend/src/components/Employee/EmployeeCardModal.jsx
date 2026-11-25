@@ -1,6 +1,7 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { exportEmployeeToPDF } from '../../utils/pdfExport';
+import { staffApi } from '../../services/api';
 
 function safeFormatDate(val, opts) {
   if (!val) return '-';
@@ -9,13 +10,25 @@ function safeFormatDate(val, opts) {
 }
 
 function EmployeeCardModal({ emp, onClose }) {
+  const [history, setHistory] = useState([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+
   useEffect(() => {
     if (!emp) return;
+    let active = true;
+    setLoadingHistory(true);
+    staffApi.getHistory(emp.id)
+      .then(r => { if (active && r.success) setHistory(r.data || []); })
+      .catch(() => {})
+      .finally(() => { if (active) setLoadingHistory(false); });
     const onKey = (e) => {
       if (e.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    return () => {
+      active = false;
+      window.removeEventListener('keydown', onKey);
+    };
   }, [emp, onClose]);
 
   if (!emp) return null;
@@ -132,7 +145,41 @@ function EmployeeCardModal({ emp, onClose }) {
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}><span style={{ color: 'var(--text-muted)' }}>Ukuran Seragam</span> <span>{emp.uniform_size || '-'}</span></div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}><span style={{ color: 'var(--text-muted)' }}>BPJS Kesehatan</span> <span>{emp.bpjs_health || '-'}</span></div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}><span style={{ color: 'var(--text-muted)' }}>BPJS TK</span> <span>{emp.bpjs_employment || '-'}</span></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}><span style={{ color: 'var(--text-muted)' }}>Periode Kontrak</span> <span>{emp.contract_start || '-'} s.d. {emp.contract_end || 'Tetap'}</span></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}><span style={{ color: 'var(--text-muted)' }}>Akhir Probation</span> <span>{emp.probation_end || '-'}</span></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}><span style={{ color: 'var(--text-muted)' }}>Status PTKP</span> <span>{emp.ptkp_status || 'TK/0'}</span></div>
               </div>
+            </div>
+
+            <div style={{ padding: '16px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '12px', gridColumn: '1 / -1' }}>
+              <h3 style={{ fontSize: '14px', margin: '0 0 10px 0', color: 'var(--color-info)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                📜 Riwayat Karir &amp; Kontrak
+              </h3>
+              {loadingHistory ? (
+                <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Memuat riwayat...</div>
+              ) : history.length === 0 ? (
+                <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Belum ada catatan mutasi, promosi, atau perpanjangan kontrak.</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '180px', overflowY: 'auto' }}>
+                  {history.map(h => (
+                    <div key={h.id} style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', fontSize: '12px', paddingBottom: '6px', borderBottom: '1px solid var(--border-color)' }}>
+                      <div>
+                        <strong style={{ color: 'var(--text-primary)' }}>{h.event_type}</strong>
+                        {(h.old_value || h.new_value) && (
+                          <span style={{ color: 'var(--text-secondary)', marginLeft: '6px' }}>
+                            {h.old_value || '-'} → <strong>{h.new_value || '-'}</strong>
+                          </span>
+                        )}
+                        {h.notes && <div style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{h.notes}</div>}
+                      </div>
+                      <div style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap', textAlign: 'right' }}>
+                        <div>{h.effective_date}</div>
+                        <div style={{ fontSize: '10px' }}>{h.recorded_by || 'system'}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>
