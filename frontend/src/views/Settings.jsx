@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { settingsApi, adminApi } from '../services/api';
+import { settingsApi, adminApi, mobileSessionApi } from '../services/api';
 
 function CopyIconSwap({ isCopied }) {
   return (
@@ -87,6 +87,25 @@ export default function Settings({ currentRole = 'master' }) {
   const [showDartSnippet, setShowDartSnippet] = useState(false);
   const copyTimerRef = useRef(null);
 
+  // Mobile session policy & active mobile sessions state
+  const [sessionPolicy, setSessionPolicy] = useState({
+    token_ttl_hours: 12,
+    idle_timeout_minutes: 30,
+    app_lock_minutes: 5,
+    offline_cache_ttl_hours: 24,
+    require_app_lock: true,
+    wipe_cache_on_logout: true,
+    allow_offline_read: true,
+    single_device_mode: false,
+  });
+  const [savingSessionPolicy, setSavingSessionPolicy] = useState(false);
+  const [sessionPolicyMsg, setSessionPolicyMsg] = useState(null);
+  const [mobileSessions, setMobileSessions] = useState([]);
+  const [loadingMobileSessions, setLoadingMobileSessions] = useState(false);
+  const [mobileSessionsMsg, setMobileSessionsMsg] = useState(null);
+  const [revokingSessionId, setRevokingSessionId] = useState(null);
+  const [revokingAllSessions, setRevokingAllSessions] = useState(false);
+
   useEffect(() => () => {
     if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
   }, []);
@@ -118,9 +137,24 @@ export default function Settings({ currentRole = 'master' }) {
         if (res.success && res.data) {
           setMobileConfig(res.data);
           setCustomBaseUrl(res.data.custom_base_url || res.data.recommended_base_url || '');
+          if (res.data.session_policy) {
+            setSessionPolicy(prev => ({ ...prev, ...res.data.session_policy }));
+          }
         }
       })
       .catch(() => {});
+  }, []);
+
+  const loadMobileSessions = useCallback(() => {
+    setLoadingMobileSessions(true);
+    mobileSessionApi.list()
+      .then(res => {
+        if (res.success) {
+          setMobileSessions(res.data || []);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoadingMobileSessions(false));
   }, []);
 
   const loadSettingsData = useCallback(() => {
@@ -241,8 +275,96 @@ export default function Settings({ currentRole = 'master' }) {
   useEffect(() => {
     loadSettingsData();
     loadMobileConfig();
-    if (currentRole === 'master') loadAdmins();
-  }, [currentRole, loadSettingsData, loadMobileConfig, loadAdmins]);
+    if (currentRole === 'master') {
+      loadAdmins();
+      loadMobileSessions();
+    }
+  }, [currentRole, loadSettingsData, loadMobileConfig, loadAdmins, loadMobileSessions]);
+
+  const handleSaveSessionPolicy = async (e) => {
+    e.preventDefault();
+    setSavingSessionPolicy(true);
+    setSessionPolicyMsg(null);
+    try {
+      const res = await settingsApi.updateSettings({
+        mobile_token_ttl_hours: parseInt(sessionPolicy.token_ttl_hours, 10),
+        mobile_idle_timeout_minutes: parseInt(sessionPolicy.idle_timeout_minutes, 10),
+        mobile_app_lock_minutes: parseInt(sessionPolicy.app_lock_minutes, 10),
+        mobile_offline_cache_ttl_hours: parseInt(sessionPolicy.offline_cache_ttl_hours, 10),
+        mobile_require_app_lock: sessionPolicy.require_app_lock,
+        mobile_wipe_cache_on_logout: sessionPolicy.wipe_cache_on_logout,
+        mobile_allow_offline_read: sessionPolicy.allow_offline_read,
+        mobile_single_device_mode: sessionPolicy.single_device_mode,
+      });
+      if (res.success) {
+        setSessionPolicyMsg({ type: 'ok', text: 'Kebijakan sesi mobile berhasil disimpan dan langsung berlaku ke aplikasi Flutter.' });
+        loadMobileConfig();
+        loadMobileSessions();
+      } else {
+        setSessionPolicyMsg({ type: 'err', text: res.message || 'Gagal menyimpan kebijakan sesi mobile.' });
+      }
+    } catch (err) {
+      setSessionPolicyMsg({ type: 'err', text: err.message || 'Gagal menyimpan kebijakan sesi mobile.' });
+    } finally {
+      setSavingSessionPolicy(false);
+    }
+  };
+
+  const handleRevokeOneMobileSession = async (sessionId, username) => {
+    if (!window.confirm(`Putus sesi perangkat mobile milik "${username}"? Perangkat akan diminta login ulang dan menghapus cache lokalnya.`)) return;
+    setRevokingSessionId(sessionId);
+    setMobileSessionsMsg(null);
+    try {
+      const res = await mobileSessionApi.revokeOne(sessionId);
+      if (res.success) {
+        setMobileSessionsMsg({ type: 'ok', text: res.message || 'Sesi perangkat mobile berhasil diputus.' });
+        loadMobileSessions();
+        loadMobileConfig();
+      } else {
+        setMobileSessionsMsg({ type: 'err', text: res.message || 'Gagal memutus sesi.' });
+      }
+    } catch (err) {
+      setMobileSessionsMsg({ type: 'err', text: err.message || 'Gagal memutus sesi.' });
+    } finally {
+      setRevokingSessionId(null);
+    }
+  };
+
+  const handleRevokeAllMobileSessions = async () => {
+    if (!window.confirm('Putus SEMUA sesi aplikasi mobile yang sedang aktif? Seluruh perangkat akan diminta login ulang.')) return;
+    setRevokingAllSessions(true);
+    setMobileSessionsMsg(null);
+    try {
+      const res = await mobileSessionApi.revokeAll();
+      if (res.success) {
+        setMobileSessionsMsg({ type: 'ok', text: res.message || 'Semua sesi mobile berhasil diputus.' });
+        loadMobileSessions();
+        loadMobileConfig();
+      } else {
+        setMobileSessionsMsg({ type: 'err', text: res.message || 'Gagal memutus semua sesi.' });
+      }
+    } catch (err) {
+      setMobileSessionsMsg({ type: 'err', text: err.message || 'Gagal memutus semua sesi.' });
+    } finally {
+      setRevokingAllSessions(false);
+    }
+  };
+
+  const handleRevokeAdminSessions = async (id, username) => {
+    if (!window.confirm(`Cabut seluruh sesi aktif (Web & Mobile) milik akun "${username}"?`)) return;
+    try {
+      const res = await adminApi.revokeSessions(id);
+      if (res.success) {
+        setAdminMsg({ type: 'ok', text: `Sesi aktif "${username}" berhasil dicabut.` });
+        loadMobileSessions();
+        loadMobileConfig();
+      } else {
+        alert(res.message || 'Gagal mencabut sesi.');
+      }
+    } catch (err) {
+      alert(err.message || 'Gagal mencabut sesi.');
+    }
+  };
 
   const handleCreateAdmin = async (e) => {
     e.preventDefault();
@@ -424,6 +546,8 @@ export default function Settings({ currentRole = 'master' }) {
     '  // Koneksi & Auth',
     "  static const String health = '/mobile/health';",
     "  static const String login = '/mobile/login';",
+    "  static const String logout = '/mobile/logout';",
+    "  static const String sessionRefresh = '/mobile/session/refresh';",
     "  static const String me = '/mobile/me';",
     "  static const String masterData = '/mobile/master-data';",
     "  static const String assets = '/mobile/assets';",
@@ -1309,6 +1433,237 @@ export default function Settings({ currentRole = 'master' }) {
             </pre>
           </div>
         )}
+
+        {/* ── KEBIJAKAN SESI & CACHE OFFLINE MOBILE (master only) ── */}
+        {currentRole === 'master' && (
+          <div style={{ marginTop: '22px', paddingTop: '20px', borderTop: '1px solid var(--border-color)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '10px', marginBottom: '14px' }}>
+              <div>
+                <h4 style={{ margin: 0, fontSize: '14.5px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                  🔐 Kebijakan Sesi & Cache Offline Aplikasi Mobile
+                </h4>
+                <p style={{ margin: '3px 0 0', fontSize: '12px', color: 'var(--text-muted)' }}>
+                  Atur batas waktu sesi, idle timeout otomatis di server, kunci layar biometrik/PIN, serta batas cache lokal Flutter.
+                </p>
+              </div>
+              <span style={{ fontSize: '11.5px', fontWeight: 700, padding: '4px 10px', borderRadius: '20px', background: 'rgba(16,185,129,0.12)', color: 'var(--color-success)', border: '1px solid rgba(16,185,129,0.28)' }}>
+                📱 Sesi Aktif: {mobileConfig?.active_mobile_sessions ?? 0} Perangkat
+              </span>
+            </div>
+
+            <form onSubmit={handleSaveSessionPolicy} style={{ background: 'var(--bg-hover)', borderRadius: '12px', padding: '16px', border: '1px solid var(--border-color)' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(185px, 1fr))', gap: '12px', marginBottom: '14px' }}>
+                <div>
+                  <label style={{ fontSize: '11.5px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+                    Masa Berlaku Token (Jam)
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={168}
+                    value={sessionPolicy.token_ttl_hours}
+                    onChange={e => setSessionPolicy(p => ({ ...p, token_ttl_hours: e.target.value }))}
+                    style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-surface)', color: 'var(--text-primary)', fontSize: '13px', boxSizing: 'border-box' }}
+                  />
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '3px' }}>Default 12 jam (1–168 jam)</div>
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '11.5px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+                    Batas Idle Server (Menit)
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={1440}
+                    value={sessionPolicy.idle_timeout_minutes}
+                    onChange={e => setSessionPolicy(p => ({ ...p, idle_timeout_minutes: e.target.value }))}
+                    style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-surface)', color: 'var(--text-primary)', fontSize: '13px', boxSizing: 'border-box' }}
+                  />
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '3px' }}>Auto-logout jika tidak aktif (1–1440 mnt)</div>
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '11.5px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+                    Kunci Layar Background (Menit)
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={60}
+                    value={sessionPolicy.app_lock_minutes}
+                    onChange={e => setSessionPolicy(p => ({ ...p, app_lock_minutes: e.target.value }))}
+                    style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-surface)', color: 'var(--text-primary)', fontSize: '13px', boxSizing: 'border-box' }}
+                  />
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '3px' }}>Minta Biometrik/PIN setelah di-minimize</div>
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '11.5px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+                    Batas Cache Offline (Jam)
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={168}
+                    value={sessionPolicy.offline_cache_ttl_hours}
+                    onChange={e => setSessionPolicy(p => ({ ...p, offline_cache_ttl_hours: e.target.value }))}
+                    style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-surface)', color: 'var(--text-primary)', fontSize: '13px', boxSizing: 'border-box' }}
+                  />
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '3px' }}>Kunci cache lokal jika offline melebihi batas</div>
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px', marginBottom: '14px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12.5px', color: 'var(--text-primary)', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={Boolean(sessionPolicy.require_app_lock)}
+                    onChange={e => setSessionPolicy(p => ({ ...p, require_app_lock: e.target.checked }))}
+                  />
+                  Wajib kunci aplikasi (Biometrik / PIN)
+                </label>
+
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12.5px', color: 'var(--text-primary)', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={Boolean(sessionPolicy.wipe_cache_on_logout)}
+                    onChange={e => setSessionPolicy(p => ({ ...p, wipe_cache_on_logout: e.target.checked }))}
+                  />
+                  Hapus cache lokal otomatis saat logout / 401
+                </label>
+
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12.5px', color: 'var(--text-primary)', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={Boolean(sessionPolicy.allow_offline_read)}
+                    onChange={e => setSessionPolicy(p => ({ ...p, allow_offline_read: e.target.checked }))}
+                  />
+                  Izinkan baca cache sementara saat koneksi lambat
+                </label>
+
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12.5px', color: 'var(--text-primary)', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={Boolean(sessionPolicy.single_device_mode)}
+                    onChange={e => setSessionPolicy(p => ({ ...p, single_device_mode: e.target.checked }))}
+                  />
+                  Mode 1 perangkat per akun (logout perangkat lama)
+                </label>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
+                <button
+                  type="submit"
+                  disabled={savingSessionPolicy}
+                  style={{
+                    padding: '9px 18px',
+                    borderRadius: '9px',
+                    border: 'none',
+                    background: savingSessionPolicy ? '#666' : 'linear-gradient(135deg, #7c3aed, #4f46e5)',
+                    color: '#fff',
+                    fontWeight: 700,
+                    fontSize: '13px',
+                    cursor: savingSessionPolicy ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {savingSessionPolicy ? 'Menyimpan...' : '💾 Simpan Kebijakan Sesi Mobile'}
+                </button>
+                {sessionPolicyMsg && (
+                  <span style={{ fontSize: '12.5px', fontWeight: 600, color: sessionPolicyMsg.type === 'ok' ? 'var(--color-success)' : 'var(--color-danger)' }}>
+                    {sessionPolicyMsg.type === 'ok' ? '✓ ' : '✕ '}{sessionPolicyMsg.text}
+                  </span>
+                )}
+              </div>
+            </form>
+
+            {/* ── MONITOR & PENCABUTAN SESI MOBILE AKTIF ── */}
+            <div style={{ marginTop: '18px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '10px' }}>
+                <div>
+                  <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                    📡 Sesi Perangkat Mobile Terdaftar
+                  </h4>
+                  <p style={{ margin: '2px 0 0', fontSize: '12px', color: 'var(--text-muted)' }}>
+                    Pantau perangkat Flutter yang pernah login dan putus akses jarak jauh jika HP hilang atau berpindah tangan.
+                  </p>
+                </div>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    onClick={loadMobileSessions}
+                    disabled={loadingMobileSessions}
+                    style={{ padding: '7px 12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-surface)', color: 'var(--text-primary)', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
+                  >
+                    {loadingMobileSessions ? 'Memuat...' : '🔄 Muat Ulang'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleRevokeAllMobileSessions}
+                    disabled={revokingAllSessions}
+                    style={{ padding: '7px 12px', borderRadius: '8px', border: '1px solid rgba(239,68,68,0.35)', background: 'var(--color-danger-bg)', color: 'var(--color-danger)', fontSize: '12px', fontWeight: 700, cursor: revokingAllSessions ? 'not-allowed' : 'pointer' }}
+                  >
+                    {revokingAllSessions ? 'Memutus...' : '🚫 Putus Semua Sesi Mobile'}
+                  </button>
+                </div>
+              </div>
+
+              {mobileSessionsMsg && (
+                <div style={{ marginBottom: '10px', fontSize: '12.5px', fontWeight: 600, color: mobileSessionsMsg.type === 'ok' ? 'var(--color-success)' : 'var(--color-danger)' }}>
+                  {mobileSessionsMsg.type === 'ok' ? '✓ ' : '✕ '}{mobileSessionsMsg.text}
+                </div>
+              )}
+
+              {loadingMobileSessions ? (
+                <div style={{ textAlign: 'center', padding: '16px', fontSize: '12.5px', color: 'var(--text-muted)' }}>Memuat daftar sesi mobile...</div>
+              ) : mobileSessions.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '18px', fontSize: '12.5px', color: 'var(--text-muted)', background: 'var(--bg-hover)', borderRadius: '10px', border: '1px dashed var(--border-color)' }}>
+                  Belum ada perangkat mobile yang tercatat login.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '300px', overflowY: 'auto' }}>
+                  {mobileSessions.map(s => {
+                    const statusMap = {
+                      active: { label: 'Aktif', bg: 'var(--color-success-bg)', color: 'var(--color-success)' },
+                      idle_expired: { label: 'Idle Timeout', bg: 'rgba(245,158,11,0.14)', color: 'var(--color-warning)' },
+                      expired: { label: 'Kedaluwarsa', bg: 'var(--bg-surface)', color: 'var(--text-muted)' },
+                      revoked: { label: `Dicabut (${s.revoked_reason || 'manual'})`, bg: 'var(--color-danger-bg)', color: 'var(--color-danger)' },
+                    };
+                    const badge = statusMap[s.status] || statusMap.expired;
+                    return (
+                      <div key={s.session_id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px', padding: '10px 14px', borderRadius: '10px', background: 'var(--bg-hover)', border: '1px solid var(--border-color)' }}>
+                        <div style={{ minWidth: '200px', flex: 1 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                            <strong style={{ fontSize: '13px', color: 'var(--text-primary)' }}>{s.username}</strong>
+                            <span style={{ fontSize: '11px', padding: '2px 7px', borderRadius: '6px', background: badge.bg, color: badge.color, fontWeight: 700 }}>
+                              {badge.label}
+                            </span>
+                            <span style={{ fontSize: '11.5px', color: 'var(--text-secondary)' }}>
+                              {s.device_name || 'Perangkat Mobile'} {s.platform ? `(${s.platform}${s.app_version ? ` v${s.app_version}` : ''})` : ''}
+                            </span>
+                          </div>
+                          <div style={{ fontSize: '11.5px', color: 'var(--text-muted)', marginTop: '3px' }}>
+                            Aktif terakhir: {s.last_active_at ? new Date(s.last_active_at).toLocaleString('id-ID') : '-'} · IP: {s.ip_address || '-'}
+                          </div>
+                        </div>
+                        {!s.revoked_at && (
+                          <button
+                            type="button"
+                            disabled={revokingSessionId === s.session_id}
+                            onClick={() => handleRevokeOneMobileSession(s.session_id, s.username)}
+                            style={{ padding: '6px 11px', borderRadius: '7px', border: '1px solid rgba(239,68,68,0.35)', background: 'var(--color-danger-bg)', color: 'var(--color-danger)', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
+                          >
+                            {revokingSessionId === s.session_id ? 'Memutus...' : 'Putus Sesi'}
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── MANAJEMEN ADMIN (master only) ── */}
@@ -1393,6 +1748,11 @@ export default function Settings({ currentRole = 'master' }) {
                       <option value="finance" style={{ background: 'var(--bg-surface-opaque)', color: 'var(--text-primary)' }}>Admin Finance</option>
                       <option value="master" style={{ background: 'var(--bg-surface-opaque)', color: 'var(--text-primary)' }}>Master</option>
                     </select>
+                    <button type="button" onClick={() => handleRevokeAdminSessions(adm.id, adm.username)}
+                      title="Cabut semua sesi aktif Web & Mobile akun ini"
+                      style={{ padding: '5px 10px', background: 'rgba(245,158,11,0.14)', border: '1px solid rgba(245,158,11,0.35)', borderRadius: '6px', color: 'var(--color-warning)', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>
+                      Cabut Sesi
+                    </button>
                     <button type="button" onClick={() => handleDeleteAdmin(adm.id, adm.username)}
                       style={{ padding: '5px 10px', background: 'var(--color-danger-bg)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '6px', color: 'var(--color-danger)', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>
                       Hapus

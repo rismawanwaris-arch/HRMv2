@@ -5,6 +5,11 @@ const {
   getDropdownOptions,
   saveDropdownOptions,
 } = require('../utils/dropdownOptions');
+const {
+  POLICY_INT_RANGES,
+  POLICY_BOOL_KEYS,
+  getMobileSessionPolicy,
+} = require('../utils/mobileSessionPolicy');
 
 function getLocalIpAddress() {
   const interfaces = os.networkInterfaces();
@@ -110,13 +115,33 @@ exports.updateSettings = async (req, res) => {
       );
     }
 
-    const boolKeys = ['bpjs_payroll_enabled', 'pph21_payroll_enabled'];
+    const boolKeys = [
+      'bpjs_payroll_enabled',
+      'pph21_payroll_enabled',
+      ...Object.keys(POLICY_BOOL_KEYS),
+    ];
     for (const key of boolKeys) {
       if (req.body[key] !== undefined) {
-        const val = (req.body[key] === true || req.body[key] === '1' || req.body[key] === 1) ? '1' : '0';
+        const val = (req.body[key] === true || req.body[key] === '1' || req.body[key] === 1 || req.body[key] === 'true') ? '1' : '0';
         await query.run(
           'INSERT INTO system_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at',
           [key, val]
+        );
+      }
+    }
+
+    for (const [key, { min, max }] of Object.entries(POLICY_INT_RANGES)) {
+      if (req.body[key] !== undefined) {
+        const parsed = parseInt(req.body[key], 10);
+        if (!Number.isInteger(parsed) || parsed < min || parsed > max) {
+          return res.status(400).json({
+            success: false,
+            message: `Nilai ${key} harus berupa bilangan bulat antara ${min} sampai ${max}.`,
+          });
+        }
+        await query.run(
+          'INSERT INTO system_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at',
+          [key, String(parsed)]
         );
       }
     }
@@ -260,6 +285,13 @@ exports.getMobileConfig = async (req, res) => {
     const visitSync = await query.get('SELECT COUNT(*) as count FROM outlet_visits WHERE client_uuid IS NOT NULL');
     const incidentSync = await query.get('SELECT COUNT(*) as count FROM outlet_incidents WHERE client_uuid IS NOT NULL');
     const empSync = await query.get('SELECT COUNT(*) as count FROM candidates WHERE client_uuid IS NOT NULL');
+    const sessionPolicy = await getMobileSessionPolicy();
+    const nowIso = new Date().toISOString();
+    const idleCutoffIso = new Date(Date.now() - sessionPolicy.idle_timeout_minutes * 60 * 1000).toISOString();
+    const activeSessionsRow = await query.get(
+      'SELECT COUNT(*) as count FROM mobile_sessions WHERE revoked_at IS NULL AND expires_at > ? AND last_active_at >= ?',
+      [nowIso, idleCutoffIso]
+    );
 
     res.json({
       success: true,
@@ -269,6 +301,8 @@ exports.getMobileConfig = async (req, res) => {
         recommended_base_url: `http://${localIp}:${port}/api`,
         emulator_base_url: `http://10.0.2.2:${port}/api`,
         custom_base_url: customBaseUrl || `http://${localIp}:${port}/api`,
+        session_policy: sessionPolicy,
+        active_mobile_sessions: activeSessionsRow ? activeSessionsRow.count : 0,
         sync_stats: {
           synced_assets: assetSync ? assetSync.count : 0,
           synced_visits: visitSync ? visitSync.count : 0,

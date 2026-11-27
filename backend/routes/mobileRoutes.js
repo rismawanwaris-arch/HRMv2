@@ -93,6 +93,7 @@ const mobileRouter = express.Router();
 mobileRouter.get('/health', ...healthHandlers);
 mobileRouter.post('/login', ...loginHandlers);
 mobileRouter.post('/logout', ...apiProtection, auditLog, authController.logout);
+mobileRouter.post('/session/refresh', ...apiProtection, authController.refreshMobileSession);
 mobileRouter.get('/me', ...apiProtection, mobileController.me);
 
 // --- 1. Master Data & Photo Stream ---

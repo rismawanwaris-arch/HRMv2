@@ -618,7 +618,17 @@ export const adminApi = {
   list: () => api.get('/admins'),
   create: (data) => api.post('/admins', data),
   updateRole: (id, role) => api.put(`/admins/${id}/role`, { role }),
+  revokeSessions: (id) => api.post(`/admins/${id}/revoke-sessions`, {}),
   delete: (id) => api.delete(`/admins/${id}`),
+};
+
+/**
+ * --- MOBILE SESSION MANAGEMENT API (master only) ---
+ */
+export const mobileSessionApi = {
+  list: () => api.get('/mobile-sessions'),
+  revokeOne: (sessionId) => api.post(`/mobile-sessions/${encodeURIComponent(sessionId)}/revoke`, {}),
+  revokeAll: () => api.post('/mobile-sessions/revoke-all', {}),
 };
 
 /**

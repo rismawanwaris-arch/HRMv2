@@ -19,6 +19,7 @@ const {
   LEGACY_INCIDENT_CATEGORIES,
   LEGACY_ASSET_STATUSES,
 } = require('../utils/dropdownOptions');
+const { getMobileSessionPolicy } = require('../utils/mobileSessionPolicy');
 
 function safeParseJsonArray(str) {
   if (!str) return [];
@@ -75,22 +76,27 @@ exports.health = (req, res) => {
     api_version: '2.0',
     app_key_required: Boolean((process.env.MOBILE_API_KEY || '').trim()),
     server_time: new Date().toISOString(),
-    features: ['offline_sync', 'geofence_checkin', 'leaves', 'overtime', 'reimbursements'],
+    features: ['offline_sync', 'geofence_checkin', 'leaves', 'overtime', 'reimbursements', 'session_policy', 'session_refresh'],
   });
 };
 
 /**
  * 0b. GET /api/mobile/me
- * Verifikasi token JWT aktif & ambil profil beserta hak akses pengguna saat startup app
+ * Verifikasi token JWT aktif & ambil profil beserta hak akses pengguna serta kebijakan sesi saat startup app
  */
-exports.me = (req, res) => {
+exports.me = async (req, res) => {
   const role = req.user?.role || 'staff';
+  const sessionPolicy = await getMobileSessionPolicy();
   res.json({
     success: true,
     data: {
       id: req.user?.id,
       username: req.user?.username,
       role,
+      session_id: req.user?.sid || null,
+      session_expires_at: req.user?.session_expires_at || null,
+      server_time: new Date().toISOString(),
+      session_policy: sessionPolicy,
       permissions: {
         can_approve: ['finance', 'master'].includes(role),
         can_register_employee: ['finance', 'master'].includes(role),

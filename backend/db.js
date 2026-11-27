@@ -74,6 +74,28 @@ async function initDb() {
     await query.run("ALTER TABLE admins ADD COLUMN role TEXT NOT NULL DEFAULT 'master'").catch(() => {});
     await query.run('ALTER TABLE admins ADD COLUMN token_version INTEGER NOT NULL DEFAULT 1').catch(() => {});
 
+    // 0.1 Active mobile sessions table (per-device tracking, idle timeout, remote revoke)
+    await query.run(`
+      CREATE TABLE IF NOT EXISTS mobile_sessions (
+        session_id TEXT PRIMARY KEY,
+        admin_id INTEGER NOT NULL,
+        username TEXT NOT NULL,
+        device_id TEXT,
+        device_name TEXT,
+        platform TEXT,
+        app_version TEXT,
+        ip_address TEXT,
+        created_at TEXT NOT NULL,
+        last_active_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        revoked_at TEXT,
+        revoked_reason TEXT,
+        FOREIGN KEY (admin_id) REFERENCES admins(id) ON DELETE CASCADE
+      )
+    `);
+    await query.run('CREATE INDEX IF NOT EXISTS idx_mobile_sessions_admin ON mobile_sessions(admin_id, revoked_at)').catch(() => {});
+    await query.run('CREATE INDEX IF NOT EXISTS idx_mobile_sessions_expires ON mobile_sessions(expires_at)').catch(() => {});
+
     // 0a. Audit log (who changed what, via middleware/audit.js)
     await query.run(`
       CREATE TABLE IF NOT EXISTS audit_log (

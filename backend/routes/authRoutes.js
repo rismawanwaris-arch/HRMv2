@@ -43,4 +43,9 @@ router.put('/admins/:id/role', authenticateToken, auditLog, requireRole('master'
 router.post('/admins/:id/revoke-sessions', authenticateToken, auditLog, requireRole('master'), authController.revokeAdminSessions);
 router.delete('/admins/:id', authenticateToken, auditLog, requireRole('master'), authController.deleteAdmin);
 
+// Mobile session management — master only
+router.get('/mobile-sessions', authenticateToken, requireRole('master'), authController.listMobileSessions);
+router.post('/mobile-sessions/revoke-all', authenticateToken, auditLog, requireRole('master'), authController.revokeAllMobileSessions);
+router.post('/mobile-sessions/:sessionId/revoke', authenticateToken, auditLog, requireRole('master'), authController.revokeMobileSession);
+
 module.exports = router;
