@@ -46,16 +46,38 @@ const storage = multer.diskStorage({
   }
 });
 
+const ALLOWED_DOC_MIMES = new Set([
+  'application/pdf',
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/octet-stream', // fallback for some browsers/clients; verified by magic bytes
+]);
+
+const ALLOWED_EXCEL_MIMES = new Set([
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-excel',
+  'text/csv',
+  'application/csv',
+  'text/plain',
+  'application/octet-stream',
+]);
+
 const upload = multer({
   storage: storage,
   limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB Limit
   fileFilter: function (req, file, cb) {
     const allowedTypes = ['.pdf', '.jpg', '.jpeg', '.png'];
     const ext = path.extname(file.originalname).toLowerCase();
-    if (allowedTypes.includes(ext)) {
+    const mime = (file.mimetype || '').toLowerCase();
+    if (allowedTypes.includes(ext) && ALLOWED_DOC_MIMES.has(mime)) {
       cb(null, true);
     } else {
-      cb(new Error('Format file tidak didukung. Gunakan .pdf, .jpg, .jpeg, atau .png'));
+      const err = new Error('Format file tidak didukung. Gunakan .pdf, .jpg, .jpeg, atau .png');
+      err.status = 400;
+      cb(err);
     }
   }
 });
@@ -82,10 +104,13 @@ const candidateCreationUpload = multer({
   fileFilter: function (req, file, cb) {
     const allowedTypes = ['.pdf', '.jpg', '.jpeg', '.png', '.doc', '.docx'];
     const ext = path.extname(file.originalname).toLowerCase();
-    if (allowedTypes.includes(ext)) {
+    const mime = (file.mimetype || '').toLowerCase();
+    if (allowedTypes.includes(ext) && ALLOWED_DOC_MIMES.has(mime)) {
       cb(null, true);
     } else {
-      cb(new Error(`Format file ${file.originalname} tidak didukung. Gunakan PDF, JPG, PNG, atau DOCX.`));
+      const err = new Error(`Format file ${file.originalname} tidak didukung. Gunakan PDF, JPG, PNG, atau DOCX.`);
+      err.status = 400;
+      cb(err);
     }
   }
 });
@@ -96,10 +121,13 @@ const excelUpload = multer({
   fileFilter: function (req, file, cb) {
     const allowedTypes = ['.xlsx', '.xls', '.csv'];
     const ext = path.extname(file.originalname).toLowerCase();
-    if (allowedTypes.includes(ext)) {
+    const mime = (file.mimetype || '').toLowerCase();
+    if (allowedTypes.includes(ext) && ALLOWED_EXCEL_MIMES.has(mime)) {
       cb(null, true);
     } else {
-      cb(new Error('Format file harus .xlsx, .xls, atau .csv'));
+      const err = new Error('Format file harus .xlsx, .xls, atau .csv');
+      err.status = 400;
+      cb(err);
     }
   }
 });
@@ -234,6 +262,70 @@ function enforceImageMagicBytes(req, res, next) {
 }
 
 /**
+ * Inspect binary magic bytes of uploaded document files (PDF, JPEG, PNG, DOC, DOCX).
+ * Prevents spoofed HTML/scripts renamed to .pdf/.jpg/.docx from being stored.
+ * @param {Array<{path: string, originalname?: string}>} [files]
+ * @returns {boolean}
+ */
+function verifyDocumentMagicBytes(files) {
+  if (!files || !Array.isArray(files) || files.length === 0) return true;
+  for (const f of files) {
+    if (!f || !f.path || !fs.existsSync(f.path)) return false;
+    try {
+      const fd = fs.openSync(f.path, 'r');
+      const buf = Buffer.alloc(12);
+      const bytesRead = fs.readSync(fd, buf, 0, 12, 0);
+      fs.closeSync(fd);
+      if (bytesRead < 4) return false;
+
+      const isPdf = buf.toString('ascii', 0, 4) === '%PDF';
+      const isJpeg = buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff;
+      const isPng =
+        bytesRead >= 8 &&
+        buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47 &&
+        buf[4] === 0x0d && buf[5] === 0x0a && buf[6] === 0x1a && buf[7] === 0x0a;
+      // DOCX (ZIP archive): 50 4B 03 04
+      const isZip = buf[0] === 0x50 && buf[1] === 0x4b && (buf[2] === 0x03 || buf[2] === 0x05) && (buf[3] === 0x04 || buf[3] === 0x06);
+      // Legacy DOC (OLE2 Compound Binary): D0 CF 11 E0 A1 B1 1A E1
+      const isOle2 =
+        bytesRead >= 8 &&
+        buf[0] === 0xd0 && buf[1] === 0xcf && buf[2] === 0x11 && buf[3] === 0xe0 &&
+        buf[4] === 0xa1 && buf[5] === 0xb1 && buf[6] === 0x1a && buf[7] === 0xe1;
+
+      if (!isPdf && !isJpeg && !isPng && !isZip && !isOle2) {
+        return false;
+      }
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Express middleware enforcing magic-byte validation on uploaded candidate document files.
+ * Works with single (`req.file`), array (`req.files`), and fields (`req.files` object).
+ */
+function enforceDocumentMagicBytes(req, res, next) {
+  let files = [];
+  if (req.file) {
+    files = [req.file];
+  } else if (Array.isArray(req.files)) {
+    files = req.files;
+  } else if (req.files && typeof req.files === 'object') {
+    files = Object.values(req.files).flat();
+  }
+  if (files.length > 0 && !verifyDocumentMagicBytes(files)) {
+    cleanupUploadedFiles(files);
+    return res.status(400).json({
+      success: false,
+      message: 'File dokumen tidak valid atau terdeteksi bukan file asli (PDF/JPG/PNG/DOC/DOCX).'
+    });
+  }
+  return next();
+}
+
+/**
  * Generate a random access code using a CSPRNG.
  * @param {string} [prefix] - Optional prefix (e.g. 'MAN-' for manual entries).
  * @returns {string}
@@ -258,5 +350,7 @@ module.exports = {
   cleanupUploadedFiles,
   verifyImageMagicBytes,
   enforceImageMagicBytes,
+  verifyDocumentMagicBytes,
+  enforceDocumentMagicBytes,
   generateAccessCode
 };

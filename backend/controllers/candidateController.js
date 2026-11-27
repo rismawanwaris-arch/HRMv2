@@ -1,5 +1,5 @@
 const { query, uploadsDir } = require('../db');
-const { generateAccessCode, getCandidateFolderName, upload, cleanupUploadedFiles } = require('../utils/helpers');
+const { generateAccessCode, getCandidateFolderName, upload, cleanupUploadedFiles, verifyDocumentMagicBytes } = require('../utils/helpers');
 const { CANDIDATE_FIELDS, buildInsert, buildUpdate } = require('../utils/candidateFields');
 const { decryptRow, blindIndex } = require('../utils/fieldCrypto');
 const { parseCvWithGemini } = require('../utils/geminiCvParser');
@@ -350,6 +350,10 @@ exports.uploadDocument = (req, res) => {
       const candidateId = parseInt(String(req.params.id), 10);
       const { doc_type } = req.body;
       if (!req.file) return res.status(400).json({ success: false, message: 'File tidak ditemukan.' });
+      if (!verifyDocumentMagicBytes([req.file])) {
+        cleanupUploadedFiles([req.file]);
+        return res.status(400).json({ success: false, message: 'File dokumen tidak valid atau terdeteksi bukan file asli (PDF/JPG/PNG).' });
+      }
       if (!doc_type || !String(doc_type).trim()) {
         if (fs.existsSync(req.file.path)) { try { fs.unlinkSync(req.file.path); } catch {} }
         return res.status(400).json({ success: false, message: 'Tipe dokumen wajib diisi.' });

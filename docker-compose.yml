@@ -4,7 +4,12 @@ services:
     container_name: hrmv2-pulsa
     restart: unless-stopped
     ports:
-      - "5002:5002"
+      # Default 0.0.0.0 agar tetap bisa diakses di LAN/ZimaOS; set BIND_HOST=127.0.0.1 di .env jika menggunakan reverse proxy HTTPS di host yang sama
+      - "${BIND_HOST:-0.0.0.0}:5002:5002"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     volumes:
       # Data & Berkas Upload Persisten - Terlihat & Mudah Di-backup dari Files ZimaOS
       - ./data:/app/data
@@ -18,11 +23,13 @@ services:
       # Optional: comma-separated list of allowed CORS origins. Leave unset when
       # the frontend is served from this same server.
       - CORS_ORIGIN=${CORS_ORIGIN:-}
-      # Optional: number of reverse-proxy hops (Tailscale / ZimaOS ingress).
-      - TRUST_PROXY=${TRUST_PROXY:-}
-      # Optional: password for the auto-seeded admin account on first run.
+      # Number of reverse-proxy hops (Nginx / Cloudflare Tunnel / ZimaOS ingress).
+      - TRUST_PROXY=${TRUST_PROXY:-1}
+      # Required on first-ever empty DB startup in production (min 12 chars).
       - ADMIN_INITIAL_PASSWORD=${ADMIN_INITIAL_PASSWORD:-}
-      # Recommended: enables at-rest encryption of sensitive PII columns.
+      # Strongly recommended: enables at-rest encryption of sensitive PII columns.
       - DATA_ENCRYPTION_KEY=${DATA_ENCRYPTION_KEY:-}
+      # Optional: mobile app attestation key (X-Mobile-App-Key).
+      - MOBILE_API_KEY=${MOBILE_API_KEY:-}
       # Optional: Google Gemini API Key for AI CV Parsing
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}

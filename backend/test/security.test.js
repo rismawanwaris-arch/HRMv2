@@ -260,5 +260,42 @@ describe('Security Hardening & Regression Suite', () => {
       .attach('photos', fakeHtmlBuffer, { filename: 'bad.jpg', contentType: 'image/jpeg' });
     assert.equal(assetSpoof.status, 400);
     assert.match(assetSpoof.body.message, /bukan gambar asli/i);
+
+    const reimbSpoof = await staffClient
+      .post('/api/claims/reimbursements')
+      .field('employee_id', String(employeeId))
+      .field('claim_date', getLocalTodayStr())
+      .field('category', 'Transportasi')
+      .field('amount', '25000')
+      .attach('receipt', fakeHtmlBuffer, { filename: 'receipt.jpg', contentType: 'image/jpeg' });
+    assert.equal(reimbSpoof.status, 400);
+    assert.match(reimbSpoof.body.message, /bukan gambar asli/i);
+
+    const docSpoof = await staffClient
+      .post('/api/candidates/parse-cv')
+      .attach('file', fakeHtmlBuffer, { filename: 'cv.pdf', contentType: 'application/pdf' });
+    assert.equal(docSpoof.status, 400);
+    assert.match(docSpoof.body.message, /bukan file asli/i);
+  });
+
+  it('SEC-08: staff cannot modify payroll cash_advance/fake_money or trigger period sync', async () => {
+    const recRes = await staffClient
+      .put(`/api/attendance/record/${employeeId}/2026-11`)
+      .send({ cash_advance: 500000, fake_money: 100000 });
+    assert.equal(recRes.status, 403);
+    assert.equal(recRes.body.code, 'FORBIDDEN_ROLE');
+
+    const syncRes = await staffClient
+      .post('/api/attendance/sync/2026-11')
+      .send({});
+    assert.equal(syncRes.status, 403);
+    assert.equal(syncRes.body.code, 'FORBIDDEN_ROLE');
+
+    // Master is allowed
+    const masterRecRes = await masterClient
+      .put(`/api/attendance/record/${employeeId}/2026-11`)
+      .send({ cash_advance: 100000, fake_money: 0 });
+    assert.equal(masterRecRes.status, 200);
+    assert.equal(masterRecRes.body.success, true);
   });
 });

@@ -1,7 +1,18 @@
 const express = require('express');
+const rateLimit = require('express-rate-limit');
 const router = express.Router();
 const candidateController = require('../controllers/candidateController');
-const { candidateCreationUpload, excelUpload } = require('../utils/helpers');
+const { candidateCreationUpload, excelUpload, enforceDocumentMagicBytes } = require('../utils/helpers');
+
+const cvParseLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Terlalu banyak permintaan parsing CV. Coba lagi beberapa saat lagi.' },
+});
+
+const cvParseGuard = process.env.NODE_ENV === 'test' ? [] : [cvParseLimiter];
 
 router.get('/', candidateController.getCandidates);
 router.post('/', candidateController.addCandidate);
@@ -9,7 +20,7 @@ router.post('/', candidateController.addCandidate);
 // Dedicated applicant upload & bulk excel routes (ZimaOS storage)
 router.get('/template-excel', candidateController.downloadCandidateTemplateExcel);
 router.post('/import-excel', excelUpload.single('file'), candidateController.importCandidatesExcel);
-router.post('/parse-cv', candidateCreationUpload.single('file'), candidateController.parseCv);
+router.post('/parse-cv', ...cvParseGuard, candidateCreationUpload.single('file'), enforceDocumentMagicBytes, candidateController.parseCv);
 router.post(
   '/upload-with-docs',
   candidateCreationUpload.fields([
@@ -21,6 +32,7 @@ router.post(
     { name: 'skck', maxCount: 1 },
     { name: 'other', maxCount: 5 }
   ]),
+  enforceDocumentMagicBytes,
   candidateController.addCandidateWithDocuments
 );
 

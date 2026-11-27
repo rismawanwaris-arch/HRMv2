@@ -30,8 +30,10 @@ COPY backend/ ./backend/
 # Copy built frontend from stage 1
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
-# Create volume mount point for persistent database
-RUN mkdir -p /app/data
+# Create volume mount point for persistent database and drop root privileges
+RUN mkdir -p /app/data && chown -R node:node /app
+
+USER node
 
 EXPOSE 5002
 

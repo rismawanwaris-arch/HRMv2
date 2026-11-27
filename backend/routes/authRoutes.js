@@ -18,11 +18,23 @@ const loginHandlers = process.env.NODE_ENV === 'test'
   ? [authController.login]
   : [loginLimiter, authController.login];
 
+const changePasswordLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Terlalu banyak percobaan ganti password. Coba lagi dalam 15 menit.' }
+});
+
+const changePasswordHandlers = process.env.NODE_ENV === 'test'
+  ? [authenticateToken, auditLog, authController.changePassword]
+  : [changePasswordLimiter, authenticateToken, auditLog, authController.changePassword];
+
 const { requireRole } = require('../middleware/roleCheck');
 
 router.post('/login', ...loginHandlers);
 router.post('/logout', authenticateToken, auditLog, authController.logout);
-router.post('/change-password', authenticateToken, auditLog, authController.changePassword);
+router.post('/change-password', ...changePasswordHandlers);
 
 // Admin management — master only
 router.get('/admins', authenticateToken, requireRole('master'), authController.listAdmins);

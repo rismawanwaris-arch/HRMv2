@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const ctrl = require('../controllers/claimsController');
 const { requireRole } = require('../middleware/roleCheck');
-const { outletPhotoUpload } = require('../utils/helpers');
+const { outletPhotoUpload, enforceImageMagicBytes } = require('../utils/helpers');
 
 const FINANCE = ['finance', 'master'];
 
@@ -15,7 +15,7 @@ router.delete('/overtime/:id', requireRole(...FINANCE), ctrl.deleteOvertime);
 
 // Reimbursements
 router.get('/reimbursements', ctrl.getReimbursements);
-router.post('/reimbursements', outletPhotoUpload.single('receipt'), ctrl.createReimbursement);
+router.post('/reimbursements', outletPhotoUpload.single('receipt'), enforceImageMagicBytes, ctrl.createReimbursement);
 router.put('/reimbursements/:id/approve', requireRole(...FINANCE), ctrl.approveReimbursement);
 router.put('/reimbursements/:id/reject', requireRole(...FINANCE), ctrl.rejectReimbursement);
 router.delete('/reimbursements/:id', requireRole(...FINANCE), ctrl.deleteReimbursement);

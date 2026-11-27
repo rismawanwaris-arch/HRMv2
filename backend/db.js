@@ -143,9 +143,13 @@ async function initDb() {
     const adminCount = await query.get('SELECT COUNT(*) as count FROM admins');
     const { hashPassword } = require('./utils/crypto');
     if (adminCount.count === 0) {
-      const initialPassword = process.env.ADMIN_INITIAL_PASSWORD || 'admin123';
+      const fromEnv = (process.env.ADMIN_INITIAL_PASSWORD || '').trim();
+      if (process.env.NODE_ENV === 'production' && fromEnv.length < 12) {
+        throw new Error('ADMIN_INITIAL_PASSWORD wajib diisi (minimal 12 karakter) saat inisialisasi database production.');
+      }
+      const initialPassword = fromEnv || 'admin123';
       await query.run('INSERT INTO admins (username, password) VALUES (?, ?)', ['admin', hashPassword(initialPassword)]);
-      if (!process.env.ADMIN_INITIAL_PASSWORD) {
+      if (!fromEnv) {
         console.warn('[db] Seeded admin account with the default password "admin123". Log in and change it immediately, or set ADMIN_INITIAL_PASSWORD.');
       }
     } else {
