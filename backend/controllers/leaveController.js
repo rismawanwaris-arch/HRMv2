@@ -475,8 +475,12 @@ exports.cancelRequest = async (req, res) => {
     if (!['Pending', 'Approved'].includes(reqRow.status)) {
       return res.status(400).json({ success: false, message: `Pengajuan berstatus ${reqRow.status} tidak dapat dibatalkan.` });
     }
-    if (reqRow.status === 'Approved' && !['finance', 'master'].includes(req.user?.role)) {
+    const isApprover = ['finance', 'master'].includes(req.user?.role);
+    if (reqRow.status === 'Approved' && !isApprover) {
       return res.status(403).json({ success: false, code: 'FORBIDDEN_ROLE', message: 'Hanya Finance atau Master yang dapat membatalkan cuti yang sudah disetujui.' });
+    }
+    if (!isApprover && reqRow.requested_by !== req.user?.username) {
+      return res.status(403).json({ success: false, code: 'FORBIDDEN_OWNER', message: 'Akses ditolak. Anda hanya dapat membatalkan pengajuan cuti yang Anda buat sendiri.' });
     }
 
     const actorNotes = req.body.approval_notes ? String(req.body.approval_notes).trim() : null;

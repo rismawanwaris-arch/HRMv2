@@ -52,7 +52,7 @@ test('RBAC: auth tokens and role matrix enforcement', async () => {
   const badTok = await request(app)
     .get('/api/staff')
     .set('Authorization', 'Bearer invalid.jwt.token');
-  assert.equal(badTok.status, 403);
+  assert.equal(badTok.status, 401);
   assert.equal(badTok.body.code, 'TOKEN_INVALID');
 
   // staff allowed vs forbidden

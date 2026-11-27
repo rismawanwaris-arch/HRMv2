@@ -1,7 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const assetController = require('../controllers/assetController');
+const { requireRole } = require('../middleware/roleCheck');
 const { outletPhotoUpload, enforceImageMagicBytes } = require('../utils/helpers');
+
+const FINANCE = ['finance', 'master'];
 
 // Stats & Overview
 router.get('/stats', assetController.getAssetStats);
@@ -14,7 +17,7 @@ router.get('/', assetController.getAssets);
 router.get('/:id', assetController.getAssetDetail);
 router.post('/', outletPhotoUpload.array('photos', 5), enforceImageMagicBytes, assetController.createAsset);
 router.put('/:id', outletPhotoUpload.array('photos', 5), enforceImageMagicBytes, assetController.updateAsset);
-router.delete('/:id', assetController.deleteAsset);
+router.delete('/:id', requireRole(...FINANCE), assetController.deleteAsset);
 
 // Special Action Workflows
 router.post('/:id/replace', outletPhotoUpload.array('photos', 5), enforceImageMagicBytes, assetController.replaceAsset);

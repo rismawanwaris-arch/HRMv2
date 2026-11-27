@@ -32,7 +32,7 @@ test('protected route rejects a tampered token', async () => {
   const res = await request(app)
     .get('/api/candidates')
     .set('Authorization', `Bearer ${token.slice(0, -2)}zz`);
-  assert.equal(res.status, 403);
+  assert.equal(res.status, 401);
 });
 
 test('protected route accepts a valid token', async () => {

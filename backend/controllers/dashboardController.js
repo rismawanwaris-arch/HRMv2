@@ -224,6 +224,14 @@ exports.getMasterSummary = async (req, res) => {
     }
     retentionRiskList.sort((a, b) => b.risk_score - a.risk_score);
 
+    const userRole = req.user?.role || 'staff';
+    const canViewFinancials = ['finance', 'master'].includes(userRole);
+    const isMaster = userRole === 'master';
+
+    const safeBranchList = canViewFinancials
+      ? branchList
+      : branchList.map(({ rent_amount, ...rest }) => rest);
+
     res.json({
       success: true,
       data: {
@@ -243,10 +251,10 @@ exports.getMasterSummary = async (req, res) => {
           gudang: branchGudang ? branchGudang.count : 0,
           kantor: branchKantor ? branchKantor.count : 0,
           petshop: branchPetshop ? branchPetshop.count : 0,
-          total_rent: totalRent ? totalRent.total : 0,
-          list: branchList
+          total_rent: canViewFinancials ? (totalRent ? totalRent.total : 0) : null,
+          list: safeBranchList
         },
-        settings,
+        settings: isMaster ? settings : {},
         late_rules: lateRules,
         contract_alerts: contractAlerts,
         pending_approvals: pendingApprovals,

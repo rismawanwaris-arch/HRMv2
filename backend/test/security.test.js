@@ -298,4 +298,45 @@ describe('Security Hardening & Regression Suite', () => {
     assert.equal(masterRecRes.status, 200);
     assert.equal(masterRecRes.body.success, true);
   });
+
+  it('SEC-09: IDOR leave cancel blocked for non-owner staff, dashboard redacts rent/settings, and DELETE routes enforce RBAC', async () => {
+    // 1. Leave cancel IDOR: master creates a pending leave request; staff cannot cancel it
+    const typesRes = await masterClient.get('/api/leaves/types');
+    assert.equal(typesRes.status, 200);
+    const leaveTypeId = typesRes.body.data[0].id;
+
+    const createLeave = await masterClient.post('/api/leaves/requests').send({
+      employee_id: employeeId,
+      leave_type_id: leaveTypeId,
+      start_date: '2026-12-10',
+      end_date: '2026-12-10',
+      reason: 'IDOR Test',
+    });
+    assert.equal(createLeave.status, 201);
+    const leaveId = createLeave.body.data.id;
+
+    const staffCancel = await staffClient.put(`/api/leaves/requests/${leaveId}/cancel`).send({});
+    assert.equal(staffCancel.status, 403);
+    assert.equal(staffCancel.body.code, 'FORBIDDEN_OWNER');
+
+    // Master can cancel it cleanly
+    const masterCancel = await masterClient.put(`/api/leaves/requests/${leaveId}/cancel`).send({});
+    assert.equal(masterCancel.status, 200);
+
+    // 2. Dashboard summary redacts rent_amount, total_rent, and settings for staff
+    const staffDash = await staffClient.get('/api/dashboard/master-summary');
+    assert.equal(staffDash.status, 200);
+    assert.equal(staffDash.body.data.branches.total_rent, null);
+    assert.deepEqual(staffDash.body.data.settings, {});
+    if (staffDash.body.data.branches.list.length > 0) {
+      assert.equal('rent_amount' in staffDash.body.data.branches.list[0], false);
+    }
+
+    // 3. Staff cannot hard-delete assets, visits, candidates, or stages
+    assert.equal((await staffClient.delete('/api/assets/999999')).status, 403);
+    assert.equal((await staffClient.delete('/api/outlet-activity/visits/999999')).status, 403);
+    assert.equal((await staffClient.delete('/api/outlet-activity/incidents/999999')).status, 403);
+    assert.equal((await staffClient.delete('/api/candidates/999999')).status, 403);
+    assert.equal((await staffClient.delete('/api/stages/999999')).status, 403);
+  });
 });

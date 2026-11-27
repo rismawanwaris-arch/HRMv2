@@ -27,7 +27,7 @@ async function authenticateToken(req, res, next) {
 
     const decoded = verifyToken(token);
     if (!decoded || !decoded.username) {
-      return res.status(403).json({ success: false, code: 'TOKEN_INVALID', message: 'Akses ditolak. Token tidak valid atau kedaluwarsa.' });
+      return res.status(401).json({ success: false, code: 'TOKEN_INVALID', message: 'Akses ditolak. Token tidak valid atau kedaluwarsa.' });
     }
 
     // Verify account still exists in database & enforce live role + token_version (instant revocation support)
