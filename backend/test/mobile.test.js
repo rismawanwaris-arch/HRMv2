@@ -22,14 +22,73 @@ describe('Mobile Sync & HRGA Endpoints', () => {
     branchId = branchRes.body.data.id;
   });
 
-  it('GET /api/mobile/master-data should return branches and dropdown choices', async () => {
+  it('GET /api/mobile/master-data should return branches and dropdown choices synced with web', async () => {
     const res = await client.get('/api/mobile/master-data');
     assert.equal(res.status, 200);
     assert.equal(res.body.success, true);
     assert.ok(Array.isArray(res.body.data.branches));
     assert.ok(res.body.data.branches.length > 0);
-    assert.ok(res.body.data.categories.includes('Elektronik'));
+    assert.ok(res.body.data.categories.includes('Elektronik & HP'));
     assert.ok(res.body.data.asset_conditions.includes('Baik'));
+    assert.ok(res.body.data.visit_purposes.includes('Audit Kebersihan & Keamanan'));
+    assert.ok(res.body.data.incident_categories.includes('Kerusakan Fasilitas'));
+
+    const webOpts = await client.get('/api/dropdown-options');
+    assert.equal(webOpts.status, 200);
+    assert.equal(webOpts.body.success, true);
+    assert.deepEqual(res.body.data.categories, webOpts.body.data.asset_categories);
+    assert.deepEqual(res.body.data.visit_purposes, webOpts.body.data.visit_purposes);
+    assert.deepEqual(res.body.data.incident_categories, webOpts.body.data.incident_categories);
+    assert.deepEqual(res.body.data.asset_conditions, webOpts.body.data.asset_conditions);
+    assert.deepEqual(res.body.data.asset_statuses, webOpts.body.data.asset_statuses);
+    assert.deepEqual(res.body.data.reimbursement_categories, webOpts.body.data.reimbursement_categories);
+    assert.deepEqual(res.body.data.contract_types, webOpts.body.data.contract_types);
+  });
+
+  it('PUT /api/settings/dropdown-options should update both web and mobile dropdowns', async () => {
+    const initialRes = await client.get('/api/dropdown-options');
+    const originalCategories = initialRes.body.data.asset_categories;
+    const originalPurposes = initialRes.body.data.visit_purposes;
+    const originalIncidentCats = initialRes.body.data.incident_categories;
+
+    const updatedCategories = [...originalCategories, 'Peralatan Promo'];
+    const updatedPurposes = [...originalPurposes, 'Audit Khusus Cabang Baru'];
+    const updatedIncidentCats = [...originalIncidentCats, 'Listrik & Jaringan'];
+
+    const saveRes = await client.put('/api/settings/dropdown-options').send({
+      asset_categories: updatedCategories,
+      visit_purposes: updatedPurposes,
+      incident_categories: updatedIncidentCats,
+    });
+    assert.equal(saveRes.status, 200);
+    assert.equal(saveRes.body.success, true);
+
+    const mobileRes = await client.get('/api/mobile/master-data');
+    assert.equal(mobileRes.status, 200);
+    assert.ok(mobileRes.body.data.categories.includes('Peralatan Promo'));
+    assert.ok(mobileRes.body.data.visit_purposes.includes('Audit Khusus Cabang Baru'));
+    assert.ok(mobileRes.body.data.incident_categories.includes('Listrik & Jaringan'));
+
+    // syncIncident should accept the newly added custom incident category
+    const incRes = await client.post('/api/mobile/sync/incident').send({
+      client_uuid: 'custom-inc-cat-' + Date.now(),
+      branch_id: branchId,
+      category: 'Listrik & Jaringan',
+      severity: 'High',
+      title: 'Router Mati',
+      description: 'Koneksi internet outlet terputus',
+      reported_by: 'Tim GA',
+    });
+    assert.equal(incRes.status, 201);
+    assert.equal(incRes.body.success, true);
+
+    // Restore defaults so subsequent tests see clean defaults
+    const restoreRes = await client.put('/api/settings/dropdown-options').send({
+      asset_categories: originalCategories,
+      visit_purposes: originalPurposes,
+      incident_categories: originalIncidentCats,
+    });
+    assert.equal(restoreRes.status, 200);
   });
 
   it('POST /api/mobile/sync/asset should save new asset and handle idempotency', async () => {

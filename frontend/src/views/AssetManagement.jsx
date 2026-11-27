@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { assetApi, branchApi } from '../services/api';
+import { assetApi, branchApi, dropdownOptionsApi } from '../services/api';
+import { DEFAULT_DROPDOWN_OPTIONS, withCurrentOption } from '../utils/dropdownDefaults';
 
 const fmtRp = (n) =>
   new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(n || 0);
@@ -18,6 +19,7 @@ export default function AssetManagement() {
 
   // Master Data
   const [branches, setBranches] = useState([]);
+  const [dropdownOptions, setDropdownOptions] = useState(DEFAULT_DROPDOWN_OPTIONS);
 
   // Asset List State
   const [assets, setAssets] = useState([]);
@@ -137,7 +139,7 @@ export default function AssetManagement() {
     notes: '',
   });
 
-  // Load active branches
+  // Load active branches & shared dropdown options
   useEffect(() => {
     branchApi.getAll()
       .then(res => {
@@ -151,6 +153,17 @@ export default function AssetManagement() {
         }
       })
       .catch(err => console.error('Error loading branches:', err));
+
+    dropdownOptionsApi.getAll()
+      .then(res => {
+        if (res.success && res.data) {
+          setDropdownOptions(prev => ({ ...prev, ...res.data }));
+          if (res.data.asset_categories?.length) {
+            setAddForm(prev => ({ ...prev, category: res.data.asset_categories[0] }));
+          }
+        }
+      })
+      .catch(() => {});
   }, []);
 
   // Fetch Stats
@@ -408,15 +421,10 @@ export default function AssetManagement() {
     }
   };
 
-  // Categories helper
-  const categoriesList = [
-    'Elektronik & HP',
-    'Fasilitas & Mebel',
-    'Branding & Neon Box',
-    'Peralatan Kasir',
-    'Keamanan & CCTV',
-    'Operasional Lainnya'
-  ];
+  // Shared dropdown options (synced with Settings & Mobile)
+  const categoriesList = dropdownOptions.asset_categories || DEFAULT_DROPDOWN_OPTIONS.asset_categories;
+  const conditionsList = dropdownOptions.asset_conditions || DEFAULT_DROPDOWN_OPTIONS.asset_conditions;
+  const statusesList = dropdownOptions.asset_statuses || DEFAULT_DROPDOWN_OPTIONS.asset_statuses;
 
   return (
     <div style={{ maxWidth: '1200px', margin: '0 auto', paddingBottom: '60px' }}>
@@ -696,10 +704,9 @@ export default function AssetManagement() {
               }}
             >
               <option value="">Semua Kondisi</option>
-              <option value="Baik">Baik</option>
-              <option value="Rusak Ringan">Rusak Ringan</option>
-              <option value="Rusak Berat">Rusak Berat</option>
-              <option value="Dalam Perbaikan">Dalam Perbaikan</option>
+              {conditionsList.map(c => (
+                <option key={c} value={c}>{c}</option>
+              ))}
             </select>
 
             {/* Status Filter */}
@@ -716,9 +723,9 @@ export default function AssetManagement() {
               }}
             >
               <option value="">Semua Status</option>
-              <option value="Aktif">Aktif</option>
-              <option value="Diganti">Diganti</option>
-              <option value="Afkir/Scrap">Afkir/Scrap</option>
+              {statusesList.map(s => (
+                <option key={s} value={s}>{s}</option>
+              ))}
             </select>
           </div>
 
@@ -1301,9 +1308,9 @@ export default function AssetManagement() {
                     onChange={(e) => setAddForm({ ...addForm, condition: e.target.value })}
                     style={{ width: '100%', padding: '8px', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}
                   >
-                    <option value="Baik">Baik / Normal</option>
-                    <option value="Rusak Ringan">Rusak Ringan</option>
-                    <option value="Rusak Berat">Rusak Berat</option>
+                    {withCurrentOption(conditionsList, addForm.condition).map(c => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
                   </select>
                 </div>
               </div>
@@ -1741,10 +1748,9 @@ export default function AssetManagement() {
                     onChange={(e) => setSelectedAsset({ ...selectedAsset, condition: e.target.value })}
                     style={{ width: '100%', padding: '8px', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}
                   >
-                    <option value="Baik">Baik</option>
-                    <option value="Rusak Ringan">Rusak Ringan</option>
-                    <option value="Rusak Berat">Rusak Berat</option>
-                    <option value="Dalam Perbaikan">Dalam Perbaikan</option>
+                    {withCurrentOption(conditionsList, selectedAsset.condition).map(c => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
                   </select>
                 </div>
 
@@ -1755,9 +1761,9 @@ export default function AssetManagement() {
                     onChange={(e) => setSelectedAsset({ ...selectedAsset, status: e.target.value })}
                     style={{ width: '100%', padding: '8px', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}
                   >
-                    <option value="Aktif">Aktif</option>
-                    <option value="Diganti">Diganti</option>
-                    <option value="Afkir/Scrap">Afkir/Scrap</option>
+                    {withCurrentOption(statusesList, selectedAsset.status).map(s => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
                   </select>
                 </div>
               </div>

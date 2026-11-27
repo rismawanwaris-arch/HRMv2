@@ -4,6 +4,8 @@ const ctrl = require('../controllers/settingsController');
 
 router.get('/', ctrl.getSettings);
 router.put('/', ctrl.updateSettings);
+router.get('/dropdown-options', ctrl.getDropdownOptions);
+router.put('/dropdown-options', ctrl.updateDropdownOptions);
 router.get('/mobile-config', ctrl.getMobileConfig);
 router.get('/penalty-rules', ctrl.getPenaltyRules);
 router.post('/penalty-rules', ctrl.createPenaltyRule);

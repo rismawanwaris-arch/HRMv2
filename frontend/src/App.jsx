@@ -19,6 +19,7 @@ import LaporanKeuanganKonter from './views/LaporanKeuanganKonter';
 import LaporanKeuanganGudang from './views/LaporanKeuanganGudang';
 import LaporanKonsolidasi from './views/LaporanKonsolidasi';
 import Settings from './views/Settings';
+import DropdownSettings from './views/DropdownSettings';
 import Discipline from './views/Discipline';
 import UploadPelamar from './views/UploadPelamar';
 import OutletActivity from './views/OutletActivity';
@@ -297,6 +298,8 @@ function App() {
         return canAccess.cabang ? <BranchManagement /> : <Denied />;
       case 'settings':
         return canAccess.settings ? <Settings currentRole={currentRole} /> : <Denied />;
+      case 'dropdown-settings':
+        return canAccess.settings ? <DropdownSettings /> : <Denied />;
       case 'attendance':
         return <AttendanceManagement />;
       case 'payroll':
@@ -551,6 +554,13 @@ function App() {
                 )}
               </li>
             )}
+            {canAccess.settings && <li
+              className={`sidebar-item ${view === 'dropdown-settings' ? 'active' : ''}`}
+              onClick={() => navigate('dropdown-settings')}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: '#8b5cf6' }}><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+              Master Dropdown
+            </li>}
             {canAccess.settings && <li
               className={`sidebar-item ${view === 'settings' ? 'active' : ''}`}
               onClick={() => navigate('settings')}

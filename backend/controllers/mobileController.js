@@ -14,6 +14,11 @@ const {
   computeStatus,
   syncEmployeePeriod,
 } = require('../utils/attendanceSync');
+const {
+  getDropdownOptions,
+  LEGACY_INCIDENT_CATEGORIES,
+  LEGACY_ASSET_STATUSES,
+} = require('../utils/dropdownOptions');
 
 function safeParseJsonArray(str) {
   if (!str) return [];
@@ -27,14 +32,6 @@ function safeParseJsonArray(str) {
 }
 
 const CLIENT_UUID_REGEX = /^[a-zA-Z0-9_-]{8,64}$/;
-
-const VALID_CATEGORIES = ['Elektronik', 'Furniture', 'Peralatan', 'Kendaraan', 'Lainnya', 'Elektronik & HP'];
-const VALID_CONDITIONS = ['Baik', 'Rusak Ringan', 'Rusak Berat'];
-const VALID_STATUSES = ['Aktif', 'Dalam Perbaikan', 'Dipensiunkan', 'Dimutasi'];
-const VALID_CONTRACT_TYPES = ['PKWT', 'PKWTT', 'Freelance', 'Magang'];
-const VALID_INCIDENT_CATEGORIES = ['Fasilitas', 'Kehilangan', 'Operasional', 'Lainnya'];
-const VALID_INCIDENT_SEVERITIES = ['Low', 'Medium', 'High', 'Critical'];
-const VALID_INCIDENT_STATUSES = ['Open', 'In Progress', 'Resolved'];
 
 function getTodayDateStr() {
   const now = new Date();
@@ -131,21 +128,23 @@ exports.getMasterData = async (req, res) => {
       'SELECT id, code, name, default_quota, is_paid, attendance_status, requires_attachment FROM leave_types WHERE is_active = 1 ORDER BY id ASC'
     );
     const settings = await getSettings();
+    const dropdowns = await getDropdownOptions();
 
     res.json({
       success: true,
       data: {
         branches,
-        categories: ['Elektronik', 'Furniture', 'Peralatan', 'Kendaraan', 'Lainnya'],
-        asset_conditions: VALID_CONDITIONS,
-        asset_statuses: VALID_STATUSES,
-        contract_types: VALID_CONTRACT_TYPES,
-        incident_categories: VALID_INCIDENT_CATEGORIES,
-        incident_severities: VALID_INCIDENT_SEVERITIES,
-        incident_statuses: VALID_INCIDENT_STATUSES,
-        visit_purposes: ['Audit Rutin', 'Perbaikan/Maintenance', 'Stock Opname Aset', 'Kunjungan Darurat', 'Lainnya'],
+        categories: dropdowns.asset_categories,
+        asset_categories: dropdowns.asset_categories,
+        asset_conditions: dropdowns.asset_conditions,
+        asset_statuses: dropdowns.asset_statuses,
+        contract_types: dropdowns.contract_types,
+        incident_categories: dropdowns.incident_categories,
+        incident_severities: dropdowns.incident_severities,
+        incident_statuses: dropdowns.incident_statuses,
+        visit_purposes: dropdowns.visit_purposes,
         leave_types: leaveTypes,
-        reimbursement_categories: ['Transportasi', 'Operasional Outlet', 'Kesehatan / Medis', 'Perlengkapan', 'Lainnya'],
+        reimbursement_categories: dropdowns.reimbursement_categories,
         shift_cutoffs: {
           pagi: settings.shift_pagi_cutoff || '06:30',
           siang: settings.shift_siang_cutoff || '14:30',
@@ -247,8 +246,14 @@ exports.syncAsset = async (req, res) => {
       photosList = req.files.map(f => f.filename);
     }
 
-    const safeCondition = VALID_CONDITIONS.includes(condition) ? condition : 'Baik';
-    const safeStatus = VALID_STATUSES.includes(status) ? status : 'Aktif';
+    const dropdowns = await getDropdownOptions();
+    const allowedStatuses = [...dropdowns.asset_statuses, ...LEGACY_ASSET_STATUSES];
+    const safeCondition = dropdowns.asset_conditions.includes(condition)
+      ? condition
+      : (dropdowns.asset_conditions[0] || 'Baik');
+    const safeStatus = allowedStatuses.includes(status)
+      ? status
+      : (dropdowns.asset_statuses[0] || 'Aktif');
     const safeCost = clampPositiveMoney(purchase_cost);
     const date = sanitizeText(purchase_date, 20) || getTodayDateStr();
 
@@ -515,9 +520,18 @@ exports.syncIncident = async (req, res) => {
       photosList = req.files.map(f => f.filename);
     }
 
-    const safeCategory = VALID_INCIDENT_CATEGORIES.includes(category) ? category : 'Fasilitas';
-    const safeSeverity = VALID_INCIDENT_SEVERITIES.includes(severity) ? severity : 'Medium';
-    const safeStatus = VALID_INCIDENT_STATUSES.includes(status) ? status : 'Open';
+    const dropdowns = await getDropdownOptions();
+    const allowedIncidentCats = [...dropdowns.incident_categories, ...LEGACY_INCIDENT_CATEGORIES];
+    const cleanIncCat = sanitizeText(category, 100);
+    const safeCategory = allowedIncidentCats.includes(cleanIncCat)
+      ? cleanIncCat
+      : (dropdowns.incident_categories[0] || 'Kerusakan Fasilitas');
+    const safeSeverity = dropdowns.incident_severities.includes(severity)
+      ? severity
+      : (dropdowns.incident_severities.includes('Medium') ? 'Medium' : (dropdowns.incident_severities[0] || 'Medium'));
+    const safeStatus = dropdowns.incident_statuses.includes(status)
+      ? status
+      : (dropdowns.incident_statuses[0] || 'Open');
 
     const insertSql = `
       INSERT INTO outlet_incidents (
@@ -649,7 +663,10 @@ exports.syncEmployee = async (req, res) => {
     );
 
     const candidateId = candidateResult.id;
-    const safeContract = VALID_CONTRACT_TYPES.includes(contract_type) ? contract_type : 'PKWT';
+    const dropdowns = await getDropdownOptions();
+    const safeContract = dropdowns.contract_types.includes(contract_type)
+      ? contract_type
+      : (dropdowns.contract_types[0] || 'PKWT');
     const safeSalary = clampPositiveMoney(salary_offered, 100000000);
     const safeAllowance = clampPositiveMoney(allowance, 50000000);
 

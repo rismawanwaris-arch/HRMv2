@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { staffApi, branchApi, employeeApi } from '../services/api';
+import { staffApi, branchApi, employeeApi, dropdownOptionsApi } from '../services/api';
+import { DEFAULT_DROPDOWN_OPTIONS, withCurrentOption } from '../utils/dropdownDefaults';
 import EmployeeCardModal from '../components/Employee/EmployeeCardModal';
 
 const fmt = (n) => n ? new Intl.NumberFormat('id-ID').format(n) : '0';
@@ -76,6 +77,7 @@ function SectionTitle({ title, color = 'var(--color-primary)' }) {
 export default function EmployeeManagement() {
   const [employees, setEmployees] = useState([]);
   const [branches, setBranches] = useState([]);
+  const [contractTypes, setContractTypes] = useState(DEFAULT_DROPDOWN_OPTIONS.contract_types);
   const [activeStats, setActiveStats] = useState({ total: 0, frontliner: 0, staff: 0 });
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState('');
@@ -184,6 +186,13 @@ export default function EmployeeManagement() {
   useEffect(() => {
     branchApi.getAll()
       .then(r => { if (r.success) setBranches(r.data || []); })
+      .catch(() => {});
+    dropdownOptionsApi.getAll()
+      .then(r => {
+        if (r.success && r.data?.contract_types?.length) {
+          setContractTypes(r.data.contract_types);
+        }
+      })
       .catch(() => {});
   }, []);
 
@@ -690,13 +699,9 @@ export default function EmployeeManagement() {
                     <div className="responsive-grid-2">
                       <FormField label="Tipe Kontrak">
                         <select style={inputStyle} value={form.contract_type} onChange={f('contract_type')}>
-                          <option value="PKWT">PKWT</option>
-                          <option value="PKWTT">PKWTT</option>
-                          <option value="Magang">Magang</option>
-                          <option value="Freelance">Freelance</option>
-                          {form.contract_type && !['PKWT', 'PKWTT', 'Magang', 'Freelance'].includes(form.contract_type) && (
-                            <option value={form.contract_type}>{form.contract_type}</option>
-                          )}
+                          {withCurrentOption(contractTypes, form.contract_type).map(ct => (
+                            <option key={ct} value={ct}>{ct}</option>
+                          ))}
                         </select>
                       </FormField>
                       <FormField label="Cabang Penempatan">

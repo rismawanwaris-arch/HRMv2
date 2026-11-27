@@ -88,6 +88,8 @@ app.use('/api/employees',  authenticateToken, auditLog, requireRole(...FINANCE),
 app.use('/api/candidates', authenticateToken, auditLog, requireRole('staff', 'master'), require('./routes/candidateRoutes'));
 app.use('/api/stages',     authenticateToken, auditLog, requireRole('staff', 'master'), require('./routes/stageRoutes'));
 app.use('/api/branches',   authenticateToken, auditLog, requireRole(...STAFF),   require('./routes/branchRoutes'));
+const settingsController = require('./controllers/settingsController');
+app.get('/api/dropdown-options', authenticateToken, requireRole(...STAFF), settingsController.getDropdownOptions);
 app.use('/api/settings',   authenticateToken, auditLog, requireRole(...MASTER),  require('./routes/settingsRoutes'));
 app.use('/api/staff',      authenticateToken, auditLog, requireRole(...FINANCE), require('./routes/staffRoutes'));
 app.use('/api/attendance', authenticateToken, auditLog, requireRole(...STAFF),   require('./routes/attendanceRoutes'));

@@ -458,11 +458,20 @@ export const portalTrainingApi = {
 export const settingsApi = {
   getSettings: () => api.get('/settings'),
   updateSettings: (data) => api.put('/settings', data),
+  getDropdownOptions: () => api.get('/settings/dropdown-options'),
+  updateDropdownOptions: (data) => api.put('/settings/dropdown-options', data),
   getMobileConfig: () => api.get('/settings/mobile-config'),
   getPenaltyRules: () => api.get('/settings/penalty-rules'),
   createPenaltyRule: (data) => api.post('/settings/penalty-rules', data),
   updatePenaltyRule: (id, data) => api.put(`/settings/penalty-rules/${id}`, data),
   deletePenaltyRule: (id) => api.delete(`/settings/penalty-rules/${id}`),
+};
+
+/**
+ * --- SHARED DROPDOWN OPTIONS API (staff+, Single Source of Truth Web & Mobile) ---
+ */
+export const dropdownOptionsApi = {
+  getAll: () => api.get('/dropdown-options'),
 };
 
 /**

@@ -1,5 +1,10 @@
 const os = require('os');
 const { query } = require('../db');
+const {
+  DEFAULT_DROPDOWN_OPTIONS,
+  getDropdownOptions,
+  saveDropdownOptions,
+} = require('../utils/dropdownOptions');
 
 function getLocalIpAddress() {
   const interfaces = os.networkInterfaces();
@@ -275,6 +280,46 @@ exports.getMobileConfig = async (req, res) => {
   } catch (error) {
     console.error('API Error (getMobileConfig):', error);
     res.status(500).json({ success: false, message: 'Gagal memuat konfigurasi mobile API.' });
+  }
+};
+
+/**
+ * GET /api/dropdown-options (staff+) & GET /api/settings/dropdown-options (master)
+ * Single source of truth untuk seluruh dropdown Web & Mobile.
+ */
+exports.getDropdownOptions = async (req, res) => {
+  try {
+    const data = await getDropdownOptions();
+    res.json({
+      success: true,
+      data,
+      defaults: DEFAULT_DROPDOWN_OPTIONS,
+    });
+  } catch (error) {
+    console.error('API Error (getDropdownOptions):', error);
+    res.status(500).json({ success: false, message: 'Gagal memuat opsi dropdown.' });
+  }
+};
+
+/**
+ * PUT /api/settings/dropdown-options (master only)
+ * Memperbarui opsi dropdown yang otomatis sinkron ke Website dan Mobile API.
+ */
+exports.updateDropdownOptions = async (req, res) => {
+  try {
+    const data = await saveDropdownOptions(req.body);
+    res.json({
+      success: true,
+      message: 'Opsi dropdown berhasil disimpan dan disinkronkan ke Web & Mobile.',
+      data,
+      defaults: DEFAULT_DROPDOWN_OPTIONS,
+    });
+  } catch (error) {
+    if (error.status === 400) {
+      return res.status(400).json({ success: false, message: error.message });
+    }
+    console.error('API Error (updateDropdownOptions):', error);
+    res.status(500).json({ success: false, message: 'Gagal menyimpan opsi dropdown.' });
   }
 };
 

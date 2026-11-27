@@ -1,32 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { outletActivityApi, branchApi } from '../services/api';
-
-const VISIT_PURPOSE_OPTIONS = [
-  { value: 'Audit Kebersihan & Keamanan', label: 'Audit Kebersihan, 5R & Keamanan' },
-  { value: 'Edukasi & Coaching Kasir', label: 'Edukasi & Coaching Karyawan / Kasir' },
-  { value: 'Stock Opname & Cek Kas', label: 'Stock Opname Barang & Cek Uang Fisik' },
-  { value: 'Patroli & Kunjungan Rutin', label: 'Patroli & Kunjungan Rutin' },
-  { value: 'Investigasi Insiden / Kerusakan', label: 'Investigasi Insiden / Kerusakan Fasilitas' },
-  { value: 'Audit Rutin', label: 'Audit Rutin (Mobile)' },
-  { value: 'Perbaikan/Maintenance', label: 'Perbaikan / Maintenance (Mobile)' },
-  { value: 'Stock Opname Aset', label: 'Stock Opname Aset (Mobile)' },
-  { value: 'Kunjungan Darurat', label: 'Kunjungan Darurat (Mobile)' },
-  { value: 'Lainnya', label: 'Lainnya' },
-];
-
-const INCIDENT_CATEGORY_OPTIONS = [
-  { value: 'Kerusakan Fasilitas', label: 'Kerusakan Fasilitas' },
-  { value: 'Kebersihan', label: 'Kebersihan & 5R' },
-  { value: 'Keamanan & Aset', label: 'Keamanan & Aset' },
-  { value: 'Operasional & Kasir', label: 'Operasional & Kasir' },
-  { value: 'Perilaku Karyawan', label: 'Perilaku Karyawan' },
-  { value: 'Komplain Pelanggan', label: 'Komplain Pelanggan' },
-  { value: 'Fasilitas', label: 'Fasilitas (Mobile)' },
-  { value: 'Kehilangan', label: 'Kehilangan (Mobile)' },
-  { value: 'Operasional', label: 'Operasional (Mobile)' },
-  { value: 'Lainnya', label: 'Lainnya' },
-];
+import { outletActivityApi, branchApi, dropdownOptionsApi } from '../services/api';
+import { DEFAULT_DROPDOWN_OPTIONS, withCurrentOption } from '../utils/dropdownDefaults';
 
 const getTodayStr = () => {
   const d = new Date();
@@ -39,8 +14,11 @@ const getTodayStr = () => {
 export default function OutletActivity() {
   const [activeTab, setActiveTab] = useState('summary'); // 'summary' | 'visits' | 'incidents' | 'actions' | 'explorer'
 
-  // Branches master list (Active only)
+  // Branches master list (Active only) & shared dropdown options
   const [branches, setBranches] = useState([]);
+  const [dropdownOptions, setDropdownOptions] = useState(DEFAULT_DROPDOWN_OPTIONS);
+  const visitPurposesList = dropdownOptions.visit_purposes || DEFAULT_DROPDOWN_OPTIONS.visit_purposes;
+  const incidentCategoriesList = dropdownOptions.incident_categories || DEFAULT_DROPDOWN_OPTIONS.incident_categories;
 
   const getDefaultVisitForm = useCallback((dateOverride) => ({
     branch_id: branches[0]?.id ? String(branches[0].id) : '',
@@ -163,7 +141,7 @@ export default function OutletActivity() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [showVisitModal, showIncidentModal, showActionModal, visitSubmitting, incidentSubmitting, actionSubmitting]);
 
-  // Load Active Branches
+  // Load Active Branches & Shared Dropdown Options
   useEffect(() => {
     branchApi.getAll()
       .then(res => {
@@ -180,6 +158,20 @@ export default function OutletActivity() {
         }
       })
       .catch(err => console.error('Error loading branches:', err));
+
+    dropdownOptionsApi.getAll()
+      .then(res => {
+        if (res.success && res.data) {
+          setDropdownOptions(prev => ({ ...prev, ...res.data }));
+          if (res.data.visit_purposes?.length) {
+            setVisitForm(prev => ({ ...prev, purpose: res.data.visit_purposes[0] }));
+          }
+          if (res.data.incident_categories?.length) {
+            setIncidentForm(prev => ({ ...prev, category: res.data.incident_categories[0] }));
+          }
+        }
+      })
+      .catch(() => {});
   }, []);
 
   // Fetch Daily Summary
@@ -1272,8 +1264,8 @@ export default function OutletActivity() {
               }}
             >
               <option value="">Semua Kategori</option>
-              {INCIDENT_CATEGORY_OPTIONS.map(c => (
-                <option key={c.value} value={c.value}>{c.label}</option>
+              {incidentCategoriesList.map(c => (
+                <option key={c} value={c}>{c}</option>
               ))}
             </select>
 
@@ -1961,12 +1953,9 @@ export default function OutletActivity() {
                     marginBottom: '6px'
                   }}
                 >
-                  {VISIT_PURPOSE_OPTIONS.map(opt => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  {withCurrentOption(visitPurposesList, visitForm.purpose).map(opt => (
+                    <option key={opt} value={opt}>{opt}</option>
                   ))}
-                  {visitForm.purpose && !VISIT_PURPOSE_OPTIONS.some(opt => opt.value === visitForm.purpose) && (
-                    <option value={visitForm.purpose}>{visitForm.purpose}</option>
-                  )}
                 </select>
               </div>
 
@@ -2246,12 +2235,9 @@ export default function OutletActivity() {
                     onChange={(e) => setIncidentForm({ ...incidentForm, category: e.target.value })}
                     style={{ width: '100%', padding: '8px', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}
                   >
-                    {INCIDENT_CATEGORY_OPTIONS.map(c => (
-                      <option key={c.value} value={c.value}>{c.label}</option>
+                    {withCurrentOption(incidentCategoriesList, incidentForm.category).map(c => (
+                      <option key={c} value={c}>{c}</option>
                     ))}
-                    {incidentForm.category && !INCIDENT_CATEGORY_OPTIONS.some(c => c.value === incidentForm.category) && (
-                      <option value={incidentForm.category}>{incidentForm.category}</option>
-                    )}
                   </select>
                 </div>
 

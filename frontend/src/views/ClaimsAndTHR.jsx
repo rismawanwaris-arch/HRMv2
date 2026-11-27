@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { claimsApi, attendanceApi } from '../services/api';
+import { claimsApi, attendanceApi, dropdownOptionsApi } from '../services/api';
+import { DEFAULT_DROPDOWN_OPTIONS, withCurrentOption } from '../utils/dropdownDefaults';
 
 const fmt = (n) => new Intl.NumberFormat('id-ID').format(Math.round(n || 0));
 const fmtRp = (n) => `Rp ${fmt(n)}`;
@@ -59,6 +60,7 @@ export default function ClaimsAndTHR({ currentRole = 'master' }) {
   const [otSaving, setOtSaving] = useState(false);
 
   // Reimbursement
+  const [reimbCategories, setReimbCategories] = useState(DEFAULT_DROPDOWN_OPTIONS.reimbursement_categories);
   const [reimbursements, setReimbursements] = useState([]);
   const [showReimbModal, setShowReimbModal] = useState(false);
   const [reimbForm, setReimbForm] = useState({ employee_id: '', claim_date: todayStr(), category: 'Transportasi', amount: '', description: '' });
@@ -78,6 +80,13 @@ export default function ClaimsAndTHR({ currentRole = 'master' }) {
 
   useEffect(() => {
     attendanceApi.getByDate({ date: todayStr() }).then(r => { if (r.success) setEmployees(r.data || []); }).catch(() => {});
+    dropdownOptionsApi.getAll()
+      .then(r => {
+        if (r.success && r.data?.reimbursement_categories?.length) {
+          setReimbCategories(r.data.reimbursement_categories);
+        }
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -535,11 +544,9 @@ export default function ClaimsAndTHR({ currentRole = 'master' }) {
                 <div>
                   <label style={lbl}>Kategori</label>
                   <select style={inp} value={reimbForm.category} onChange={e => setReimbForm(p => ({ ...p, category: e.target.value }))}>
-                    <option value="Transportasi">Transportasi / BBM</option>
-                    <option value="Operasional Outlet">Operasional Outlet</option>
-                    <option value="Kesehatan / Medis">Kesehatan / Medis</option>
-                    <option value="Perlengkapan">Perlengkapan / ATK</option>
-                    <option value="Lainnya">Lainnya</option>
+                    {withCurrentOption(reimbCategories, reimbForm.category).map(cat => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))}
                   </select>
                 </div>
               </div>
