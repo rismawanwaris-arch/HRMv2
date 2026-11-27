@@ -20,11 +20,17 @@ exports.login = async (req, res) => {
         }
       }
       const role = admin.role || 'master';
-      const token = generateToken(admin.username, { role });
+      const isMobile = req.baseUrl === '/api/mobile' || (req.originalUrl || '').startsWith('/api/mobile/');
+      const mobileHours = Math.max(1, parseInt(process.env.MOBILE_TOKEN_TTL_HOURS || '12', 10) || 12);
+      const ttlMs = isMobile ? mobileHours * 3600 * 1000 : 24 * 3600 * 1000;
+      const tv = Number(admin.token_version || 1);
+      const token = generateToken(admin.username, { role, tv, aud: isMobile ? 'mobile' : 'web' }, ttlMs);
       res.json({
         success: true,
         message: 'Login berhasil.',
         token,
+        expires_in: Math.floor(ttlMs / 1000),
+        expires_at: new Date(Date.now() + ttlMs).toISOString(),
         role,
         username: admin.username,
         user: {
@@ -62,8 +68,11 @@ exports.changePassword = async (req, res) => {
     const admin = await query.get('SELECT * FROM admins WHERE username = ?', [username]);
     if (admin && verifyPassword(oldPassword, admin.password)) {
       const hashed = hashPassword(newPassword);
-      await query.run('UPDATE admins SET password = ? WHERE id = ?', [hashed, admin.id]);
-      res.json({ success: true, message: 'Password berhasil diubah.' });
+      await query.run(
+        'UPDATE admins SET password = ?, token_version = COALESCE(token_version, 1) + 1 WHERE id = ?',
+        [hashed, admin.id]
+      );
+      res.json({ success: true, message: 'Password berhasil diubah. Semua sesi aktif lainnya telah dicabut.' });
     } else {
       res.status(401).json({ success: false, message: 'Password lama tidak cocok.' });
     }
@@ -161,6 +170,43 @@ exports.deleteAdmin = async (req, res) => {
     res.json({ success: true, message: 'Akun admin berhasil dihapus.' });
   } catch (err) {
     console.error(err);
+    res.status(500).json({ success: false, message: 'Server error.' });
+  }
+};
+
+exports.logout = async (req, res) => {
+  try {
+    if (!req.user?.id) {
+      return res.status(401).json({ success: false, message: 'Sesi tidak valid.' });
+    }
+    await query.run(
+      'UPDATE admins SET token_version = COALESCE(token_version, 1) + 1 WHERE id = ?',
+      [req.user.id]
+    );
+    res.json({ success: true, message: 'Logout berhasil. Semua sesi aktif akun ini telah dicabut.' });
+  } catch (err) {
+    console.error('Logout error:', err);
+    res.status(500).json({ success: false, message: 'Server error saat logout.' });
+  }
+};
+
+exports.revokeAdminSessions = async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id) || id < 1) {
+      return res.status(400).json({ success: false, message: 'ID admin tidak valid.' });
+    }
+    const target = await query.get('SELECT id FROM admins WHERE id = ?', [id]);
+    if (!target) {
+      return res.status(404).json({ success: false, message: 'Akun admin tidak ditemukan.' });
+    }
+    await query.run(
+      'UPDATE admins SET token_version = COALESCE(token_version, 1) + 1 WHERE id = ?',
+      [id]
+    );
+    res.json({ success: true, message: 'Semua sesi aktif akun tersebut berhasil dicabut.' });
+  } catch (err) {
+    console.error('Revoke admin sessions error:', err);
     res.status(500).json({ success: false, message: 'Server error.' });
   }
 };

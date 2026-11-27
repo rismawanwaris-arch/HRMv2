@@ -21,12 +21,14 @@ const loginHandlers = process.env.NODE_ENV === 'test'
 const { requireRole } = require('../middleware/roleCheck');
 
 router.post('/login', ...loginHandlers);
+router.post('/logout', authenticateToken, auditLog, authController.logout);
 router.post('/change-password', authenticateToken, auditLog, authController.changePassword);
 
 // Admin management — master only
 router.get('/admins', authenticateToken, requireRole('master'), authController.listAdmins);
 router.post('/admins', authenticateToken, auditLog, requireRole('master'), authController.createAdmin);
 router.put('/admins/:id/role', authenticateToken, auditLog, requireRole('master'), authController.updateAdminRole);
+router.post('/admins/:id/revoke-sessions', authenticateToken, auditLog, requireRole('master'), authController.revokeAdminSessions);
 router.delete('/admins/:id', authenticateToken, auditLog, requireRole('master'), authController.deleteAdmin);
 
 module.exports = router;

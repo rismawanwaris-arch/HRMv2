@@ -1,4 +1,5 @@
 const express = require('express');
+const rateLimit = require('express-rate-limit');
 const router = express.Router();
 const testController = require('../controllers/testController');
 
@@ -6,9 +7,19 @@ const { authenticateToken } = require('../middleware/auth');
 const { auditLog } = require('../middleware/audit');
 const { requireRole } = require('../middleware/roleCheck');
 
-router.get('/test/validate/:code', testController.validateTestAccess);
-router.get('/test/questions/:code', testController.getTestQuestions);
-router.post('/test/submit', testController.submitTest);
+const testPortalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Terlalu banyak percobaan akses portal ujian. Coba lagi nanti.' },
+});
+
+const portalGuard = process.env.NODE_ENV === 'test' ? [] : [testPortalLimiter];
+
+router.get('/test/validate/:code', ...portalGuard, testController.validateTestAccess);
+router.get('/test/questions/:code', ...portalGuard, testController.getTestQuestions);
+router.post('/test/submit', ...portalGuard, testController.submitTest);
 
 router.get('/admin/questions', authenticateToken, requireRole('staff', 'master'), testController.getAdminQuestions);
 router.post('/admin/questions', authenticateToken, auditLog, requireRole('staff', 'master'), testController.addAdminQuestion);
@@ -20,7 +31,7 @@ router.post('/admin/training-questions', authenticateToken, auditLog, requireRol
 router.put('/admin/training-questions/:id', authenticateToken, auditLog, requireRole('staff', 'master'), testController.updateTrainingQuestion);
 router.delete('/admin/training-questions/:id', authenticateToken, auditLog, requireRole('master'), testController.deleteTrainingQuestion);
 
-router.get('/training-test/validate/:code', testController.validateTrainingTest);
-router.post('/training-test/submit', testController.submitTrainingTest);
+router.get('/training-test/validate/:code', ...portalGuard, testController.validateTrainingTest);
+router.post('/training-test/submit', ...portalGuard, testController.submitTrainingTest);
 
 module.exports = router;

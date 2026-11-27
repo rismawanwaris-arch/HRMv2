@@ -13,6 +13,37 @@ function getLocalIpAddress() {
   return '127.0.0.1';
 }
 
+function isAllowedCleartextHost(hostname) {
+  const h = (hostname || '').toLowerCase();
+  if (h === 'localhost' || h === '127.0.0.1' || h === '10.0.2.2') return true;
+  const ipv4 = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!ipv4) return false;
+  const octets = ipv4.slice(1).map(Number);
+  if (octets.some((o) => o < 0 || o > 255)) return false;
+  const [a, b] = octets;
+  if (a === 10) return true; // RFC1918 10.0.0.0/8
+  if (a === 192 && b === 168) return true; // RFC1918 192.168.0.0/16
+  if (a === 172 && b >= 16 && b <= 31) return true; // RFC1918 172.16.0.0/12
+  if (a === 100 && b >= 64 && b <= 127) return true; // Tailscale CGNAT 100.64.0.0/10
+  return false;
+}
+
+function isSafeMobileBaseUrl(raw) {
+  const val = String(raw || '').trim();
+  if (!val) return true;
+  if (val.length > 256) return false;
+  let parsed;
+  try {
+    parsed = new URL(val);
+  } catch {
+    return false;
+  }
+  if (parsed.username || parsed.password || !parsed.hostname) return false;
+  if (parsed.protocol === 'https:') return true;
+  if (parsed.protocol === 'http:') return isAllowedCleartextHost(parsed.hostname);
+  return false;
+}
+
 exports.getSettings = async (req, res) => {
   try {
     const rows = await query.all('SELECT key, value FROM system_settings');
@@ -62,6 +93,12 @@ exports.updateSettings = async (req, res) => {
 
     if (req.body.mobile_api_base_url !== undefined) {
       const val = String(req.body.mobile_api_base_url).trim();
+      if (!isSafeMobileBaseUrl(val)) {
+        return res.status(400).json({
+          success: false,
+          message: 'mobile_api_base_url tidak valid. Gunakan HTTPS untuk domain publik, atau HTTP hanya untuk localhost/LAN/Tailscale.',
+        });
+      }
       await query.run(
         "INSERT INTO system_settings (key, value, updated_at) VALUES ('mobile_api_base_url', ?, CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
         [val]

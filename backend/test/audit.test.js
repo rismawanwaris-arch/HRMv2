@@ -40,24 +40,30 @@ test('audit detail records touched field names but not values', async () => {
 
 test('change-password is audited without leaking the passwords', async () => {
   const token = await login();
-  await require('./helpers').request(require('../app'))
+  const app = require('../app');
+  await require('./helpers').request(app)
     .post('/api/change-password')
     .set('Authorization', `Bearer ${token}`)
     .send({ oldPassword: 'admin123', newPassword: 'temp-password-9' });
 
-  const res = await api.get('/api/audit-log?limit=10');
+  // Prior tokens are revoked upon password change; re-authenticate with the new password
+  const relogin = await require('./helpers').request(app)
+    .post('/api/login').send({ username: 'admin', password: 'temp-password-9' });
+  assert.equal(relogin.status, 200);
+
+  const res = await authed(relogin.body.token).get('/api/audit-log?limit=10');
+  assert.equal(res.status, 200);
   const entry = res.body.data.find((e) => e.path === '/api/change-password');
   assert.ok(entry, 'change-password call was logged');
   const detail = JSON.parse(entry.detail);
   assert.deepEqual(detail.bodyKeys, []); // oldPassword / newPassword are stripped
 
   // restore
-  const relogin = await require('./helpers').request(require('../app'))
-    .post('/api/login').send({ username: 'admin', password: 'temp-password-9' });
-  await require('./helpers').request(require('../app'))
+  await require('./helpers').request(app)
     .post('/api/change-password')
     .set('Authorization', `Bearer ${relogin.body.token}`)
     .send({ oldPassword: 'temp-password-9', newPassword: 'admin123' });
+  api = authed(await login());
 });
 
 test('audit-log endpoint requires auth', async () => {

@@ -18,19 +18,47 @@ if (process.env.TRUST_PROXY) {
 app.use(helmet({ contentSecurityPolicy: false }));
 
 // CORS: restrict to configured origins. In production the frontend is served
-// same-origin by this server, so no CORS headers are needed unless CORS_ORIGIN
-// is set. In development the Vite dev server is cross-origin, so allow it.
+// same-origin by this server, so browser cross-origin access is blocked unless
+// CORS_ORIGIN explicitly lists allowed origins. Native mobile apps (no Origin)
+// are unaffected by CORS.
 const allowedOrigins = (process.env.CORS_ORIGIN || '')
   .split(',')
   .map((s) => s.trim())
-  .filter(Boolean);
+  .filter((s) => Boolean(s) && (process.env.NODE_ENV !== 'production' || s !== '*'));
 if (allowedOrigins.length > 0) {
-  app.use(cors({ origin: allowedOrigins }));
+  app.use(cors({
+    origin(origin, callback) {
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+      return callback(null, false);
+    },
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Mobile-App-Key'],
+  }));
 } else if (process.env.NODE_ENV !== 'production') {
-  app.use(cors());
+  app.use(cors({
+    origin(origin, callback) {
+      if (!origin || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+        return callback(null, true);
+      }
+      return callback(null, false);
+    },
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Mobile-App-Key'],
+  }));
+} else {
+  app.use(cors({ origin: false }));
 }
 
 app.use(express.json({ limit: '1mb' }));
+
+// Harden all /api responses against proxy/browser caching and referrer leaks
+app.use('/api', (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  next();
+});
 
 // Kick off schema initialization. Consumers can await `app.locals.dbReady`
 // before serving traffic / running tests.
@@ -84,8 +112,13 @@ app.all('/api/*', (req, res) => {
   });
 });
 
-// --- SERVE DOCUMENTATION & FRONTEND STATIC FILES ---
-app.use('/docs', express.static(path.join(__dirname, '..', 'docs')));
+// --- SERVE DOCUMENTATION (MASTER ONLY) & FRONTEND STATIC FILES ---
+app.use(
+  '/docs',
+  authenticateToken,
+  requireRole(...MASTER),
+  express.static(path.join(__dirname, '..', 'docs'), { dotfiles: 'deny', index: false })
+);
 const frontendBuildPath = path.join(__dirname, '..', 'frontend', 'dist');
 app.use(express.static(frontendBuildPath));
 

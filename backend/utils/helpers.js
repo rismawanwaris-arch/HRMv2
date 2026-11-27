@@ -216,6 +216,24 @@ function verifyImageMagicBytes(files) {
 }
 
 /**
+ * Express middleware enforcing magic-byte validation on uploaded image files.
+ * @param {import('express').Request} req
+ * @param {import('express').Response} res
+ * @param {import('express').NextFunction} next
+ */
+function enforceImageMagicBytes(req, res, next) {
+  const files = Array.isArray(req.files) ? req.files : (req.file ? [req.file] : []);
+  if (files.length > 0 && !verifyImageMagicBytes(files)) {
+    cleanupUploadedFiles(files);
+    return res.status(400).json({
+      success: false,
+      message: 'File foto tidak valid atau terdeteksi bukan gambar asli (JPG/PNG/WEBP).'
+    });
+  }
+  return next();
+}
+
+/**
  * Generate a random access code using a CSPRNG.
  * @param {string} [prefix] - Optional prefix (e.g. 'MAN-' for manual entries).
  * @returns {string}
@@ -239,5 +257,6 @@ module.exports = {
   outletPhotosDir,
   cleanupUploadedFiles,
   verifyImageMagicBytes,
+  enforceImageMagicBytes,
   generateAccessCode
 };

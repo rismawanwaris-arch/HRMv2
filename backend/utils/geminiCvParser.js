@@ -117,24 +117,38 @@ Anda WAJIB memberikan output dalam bentuk JSON murni tanpa markdown pembungkus (
     }
   };
 
+  const VALID_MODEL_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
+  const ALLOWED_GEMINI_HOST = 'generativelanguage.googleapis.com';
   let lastError = null;
 
   // Try each supported model in order
   for (const model of GEMINI_MODELS) {
+    if (!VALID_MODEL_REGEX.test(String(model))) {
+      console.warn('[Gemini CV Parser] Skipping invalid model identifier.');
+      continue;
+    }
     try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-      const response = await fetch(url, {
+      const urlStr = `https://${ALLOWED_GEMINI_HOST}/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+      const parsedUrl = new URL(urlStr);
+      if (parsedUrl.protocol !== 'https:' || parsedUrl.hostname !== ALLOWED_GEMINI_HOST) {
+        throw new Error('Blocked untrusted Gemini endpoint host.');
+      }
+
+      const response = await fetch(parsedUrl.toString(), {
         method: 'POST',
+        redirect: 'error',
+        signal: AbortSignal.timeout(30000),
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'x-goog-api-key': apiKey
         },
         body: JSON.stringify(requestBody)
       });
 
       if (!response.ok) {
-        const errText = await response.text();
+        const errText = (await response.text()).replaceAll(apiKey, '[REDACTED]').slice(0, 200);
         console.warn(`[Gemini CV Parser] Model ${model} failed with HTTP ${response.status}: ${errText}`);
-        lastError = new Error(`Gemini API error (${response.status}): ${errText}`);
+        lastError = new Error(`Gemini API request failed with HTTP ${response.status}`);
         continue; // Try next model
       }
 
@@ -155,8 +169,9 @@ Anda WAJIB memberikan output dalam bentuk JSON murni tanpa markdown pembungkus (
       const parsedData = JSON.parse(cleanedJson);
       return parsedData;
     } catch (err) {
-      console.warn(`[Gemini CV Parser] Exception with model ${model}:`, err.message);
-      lastError = err;
+      const safeMsg = String(err?.message || 'unknown error').replaceAll(apiKey, '[REDACTED]').slice(0, 200);
+      console.warn(`[Gemini CV Parser] Exception with model ${model}: ${safeMsg}`);
+      lastError = new Error('Gagal memproses CV dengan Google Gemini API.');
     }
   }
 

@@ -94,10 +94,13 @@ function needsRehash(storedPassword) {
 /**
  * Generate a cryptographically signed HMAC token for an admin session.
  * @param {string} username - Admin username.
+ * @param {Object} [extra] - Extra claims (role, tv, aud, etc.).
+ * @param {number} [ttlMs] - Token lifetime in milliseconds (defaults to 24h).
  * @returns {string} The signed session token.
  */
-function generateToken(username, extra = {}) {
-  const payload = JSON.stringify({ username, ...extra, exp: Date.now() + 24 * 60 * 60 * 1000 });
+function generateToken(username, extra = {}, ttlMs = 24 * 60 * 60 * 1000) {
+  const now = Date.now();
+  const payload = JSON.stringify({ username, ...extra, iat: now, exp: now + ttlMs });
   const signature = crypto.createHmac('sha256', SECRET).update(payload).digest('hex');
   return Buffer.from(payload).toString('base64') + '.' + signature;
 }
@@ -109,7 +112,7 @@ function generateToken(username, extra = {}) {
  */
 function verifyToken(token) {
   try {
-    if (!token) return null;
+    if (!token || typeof token !== 'string') return null;
     const parts = token.split('.');
     if (parts.length !== 2) return null;
     const payload = Buffer.from(parts[0], 'base64').toString('utf8');
@@ -117,7 +120,8 @@ function verifyToken(token) {
     const expectedSignature = crypto.createHmac('sha256', SECRET).update(payload).digest('hex');
     if (!safeEqualHex(signature, expectedSignature)) return null;
     const parsed = JSON.parse(payload);
-    if (parsed.exp < Date.now()) return null;
+    if (!parsed || typeof parsed.username !== 'string' || parsed.username.length === 0) return null;
+    if (typeof parsed.exp !== 'number' || !Number.isFinite(parsed.exp) || parsed.exp < Date.now()) return null;
     return parsed;
   } catch (e) {
     return null;

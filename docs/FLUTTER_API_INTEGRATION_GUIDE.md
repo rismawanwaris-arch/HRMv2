@@ -2,7 +2,7 @@
 
 Dokumen ini dirancang sebagai acuan tunggal untuk merapikan koneksi REST API di **project aplikasi Flutter** agar terhubung 100% stabil ke **Backend HRMv2** (versi 2.0, termasuk modul HRGA offline sync & modul adaptasi SunFish HR).
 
-> **Catatan Keamanan:** Seluruh dokumen lain (`ANDROID_SECURITY_AND_SYNC_GUIDE.md` & `FLUTTER_HRGA_SPEC.md`) tetap relevan, namun **kontrak path & client API terbaru mengacu pada dokumen ini**.
+> **Catatan Keamanan (Diperbarui):** Untuk perbaikan keamanan koneksi & sesi terbaru (pencegahan kebocoran API ke host tak dikenal, `POST /mobile/logout`, pencabutan sesi `SESSION_REVOKED`, pembatasan `sync/employee` ke `Finance/Master`, serta opsi `X-Mobile-App-Key`), wajib ikuti **[`MOBILE_SECURITY_REMEDIATION_GUIDE.md`](./MOBILE_SECURITY_REMEDIATION_GUIDE.md)** bersamaan dengan dokumen ini dan [`ANDROID_SECURITY_AND_SYNC_GUIDE.md`](./ANDROID_SECURITY_AND_SYNC_GUIDE.md).
 
 ---
 

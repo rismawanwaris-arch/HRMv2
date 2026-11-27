@@ -66,11 +66,13 @@ async function initDb() {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT UNIQUE NOT NULL,
         password TEXT NOT NULL,
-        role TEXT NOT NULL DEFAULT 'master'
+        role TEXT NOT NULL DEFAULT 'master',
+        token_version INTEGER NOT NULL DEFAULT 1
       )
     `);
-    // Migration: add role column for existing databases
+    // Migration: add role and token_version columns for existing databases
     await query.run("ALTER TABLE admins ADD COLUMN role TEXT NOT NULL DEFAULT 'master'").catch(() => {});
+    await query.run('ALTER TABLE admins ADD COLUMN token_version INTEGER NOT NULL DEFAULT 1').catch(() => {});
 
     // 0a. Audit log (who changed what, via middleware/audit.js)
     await query.run(`

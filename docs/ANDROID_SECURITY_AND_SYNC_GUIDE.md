@@ -2,6 +2,8 @@
 
 Dokumen ini adalah spesifikasi wajib yang harus diterapkan pada **repository aplikasi Android Flutter** agar selaras 100% dengan sistem keamanan terbaru di **Backend HRMv2 (Port 5002)** serta melindungi **Data Pribadi Karyawan (PII)** dari kebocoran di perangkat maupun di jaringan.
 
+> **Pembaruan Penting (Security Hardening):** Untuk panduan lengkap koneksi sesi baru (`POST /mobile/logout`, `SESSION_REVOKED`, `ApiHostGuard` agar API tidak terkirim ke sumber tak dikenal, pembatasan `?token=`, `X-Mobile-App-Key`, dan `sync/employee` khusus Finance/Master), baca juga **[`MOBILE_SECURITY_REMEDIATION_GUIDE.md`](./MOBILE_SECURITY_REMEDIATION_GUIDE.md)** dan **[`FLUTTER_API_INTEGRATION_GUIDE.md`](./FLUTTER_API_INTEGRATION_GUIDE.md)**.
+
 ---
 
 ## 1. Perubahan Kebijakan Keamanan Backend yang Wajib Diketahui Android

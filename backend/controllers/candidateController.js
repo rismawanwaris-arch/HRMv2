@@ -274,17 +274,35 @@ exports.getCandidateDocuments = async (req, res) => {
  * @param {import('express').Response} res - Express response object.
  * @returns {Promise<any>}
  */
+const ALLOWED_DOC_MIMES = new Set([
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+]);
+
 exports.downloadDocument = async (req, res) => {
   try {
     const candidateId = parseInt(String(req.params.id), 10);
     const docId = parseInt(String(req.params.doc_id), 10);
     const doc = await query.get('SELECT * FROM candidate_documents WHERE id = ? AND candidate_id = ?', [docId, candidateId]);
-    if (!doc || !fs.existsSync(doc.file_path)) return res.status(404).send('File tidak ditemukan');
+    if (!doc) return res.status(404).send('File tidak ditemukan');
+    const uploadsRoot = path.resolve(uploadsDir);
+    const resolved = path.resolve(doc.file_path);
+    if (!resolved.startsWith(uploadsRoot + path.sep)) {
+      return res.status(403).send('Akses file ditolak.');
+    }
+    if (!fs.existsSync(resolved)) return res.status(404).send('File tidak ditemukan');
     const rawName = String(doc.original_name || 'document');
     const safeAscii = rawName.replace(/[\r\n"\\]/g, '_').replace(/[^\x20-\x7E]/g, '_') || 'document';
-    res.setHeader('Content-Type', doc.file_type || 'application/octet-stream');
+    const safeMime = ALLOWED_DOC_MIMES.has(doc.file_type) ? doc.file_type : 'application/octet-stream';
+    res.setHeader('Content-Type', safeMime);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Security-Policy', "default-src 'none'");
     res.setHeader('Content-Disposition', `inline; filename="${safeAscii}"; filename*=UTF-8''${encodeURIComponent(rawName.replace(/[\r\n]/g, '_'))}`);
-    res.sendFile(path.resolve(doc.file_path));
+    res.sendFile(resolved);
   } catch (error) {
     console.error('API Error (serve document file):', error);
     res.status(500).send('Server error retrieving file');

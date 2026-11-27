@@ -103,10 +103,11 @@ exports.approveOvertime = async (req, res) => {
 
     const actor = req.user?.username || 'system';
     const notes = req.body.approval_notes ? String(req.body.approval_notes).trim() : null;
-    await query.run(
-      "UPDATE overtime_requests SET status = 'Approved', approved_by = ?, approved_at = CURRENT_TIMESTAMP, approval_notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+    const upd = await query.run(
+      "UPDATE overtime_requests SET status = 'Approved', approved_by = ?, approved_at = CURRENT_TIMESTAMP, approval_notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'Pending'",
       [actor, notes, id]
     );
+    if (!upd.changes) return res.status(400).json({ success: false, message: 'Lembur sudah diproses sebelumnya.' });
     const updated = await query.get('SELECT * FROM overtime_requests WHERE id = ?', [id]);
     res.json({ success: true, data: updated, message: 'Lembur disetujui.' });
   } catch (err) {
@@ -124,10 +125,11 @@ exports.rejectOvertime = async (req, res) => {
 
     const actor = req.user?.username || 'system';
     const notes = req.body.approval_notes ? String(req.body.approval_notes).trim() : null;
-    await query.run(
-      "UPDATE overtime_requests SET status = 'Rejected', approved_by = ?, approved_at = CURRENT_TIMESTAMP, approval_notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+    const upd = await query.run(
+      "UPDATE overtime_requests SET status = 'Rejected', approved_by = ?, approved_at = CURRENT_TIMESTAMP, approval_notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'Pending'",
       [actor, notes, id]
     );
+    if (!upd.changes) return res.status(400).json({ success: false, message: 'Lembur sudah diproses sebelumnya.' });
     const updated = await query.get('SELECT * FROM overtime_requests WHERE id = ?', [id]);
     res.json({ success: true, data: updated, message: 'Lembur ditolak.' });
   } catch (err) {
@@ -260,10 +262,11 @@ exports.approveReimbursement = async (req, res) => {
 
     const actor = req.user?.username || 'system';
     const notes = req.body.approval_notes ? String(req.body.approval_notes).trim() : null;
-    await query.run(
-      "UPDATE reimbursements SET status = 'Approved', payroll_period = ?, approved_by = ?, approved_at = CURRENT_TIMESTAMP, approval_notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+    const upd = await query.run(
+      "UPDATE reimbursements SET status = 'Approved', payroll_period = ?, approved_by = ?, approved_at = CURRENT_TIMESTAMP, approval_notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'Pending'",
       [bodyPeriod, actor, notes, id]
     );
+    if (!upd.changes) return res.status(400).json({ success: false, message: 'Klaim sudah diproses sebelumnya.' });
     const updated = await query.get('SELECT * FROM reimbursements WHERE id = ?', [id]);
     res.json({ success: true, data: updated, message: `Klaim disetujui untuk periode payroll ${bodyPeriod}.` });
   } catch (err) {
@@ -281,10 +284,11 @@ exports.rejectReimbursement = async (req, res) => {
 
     const actor = req.user?.username || 'system';
     const notes = req.body.approval_notes ? String(req.body.approval_notes).trim() : null;
-    await query.run(
-      "UPDATE reimbursements SET status = 'Rejected', approved_by = ?, approved_at = CURRENT_TIMESTAMP, approval_notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+    const upd = await query.run(
+      "UPDATE reimbursements SET status = 'Rejected', approved_by = ?, approved_at = CURRENT_TIMESTAMP, approval_notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'Pending'",
       [actor, notes, id]
     );
+    if (!upd.changes) return res.status(400).json({ success: false, message: 'Klaim sudah diproses sebelumnya.' });
     const updated = await query.get('SELECT * FROM reimbursements WHERE id = ?', [id]);
     res.json({ success: true, data: updated, message: 'Klaim ditolak.' });
   } catch (err) {

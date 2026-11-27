@@ -1,4 +1,5 @@
 const { app, request, dbReady, login, authed } = require('./helpers');
+const { getPeriodForDate } = require('../utils/payrollCalc');
 const { describe, it, before } = require('node:test');
 const assert = require('node:assert/strict');
 
@@ -279,17 +280,19 @@ describe('Mobile Sync & HRGA Endpoints', () => {
     const attToday = await staffClient.get('/api/mobile/attendance/today');
     assert.equal(attToday.status, 200);
 
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     const checkinRes = await staffClient.post('/api/mobile/attendance/checkin').send({
       employee_id: empId,
       shift: 'Pagi',
-      date: '2026-11-25',
-      check_in_time: '06:15',
     });
     assert.equal(checkinRes.status, 200);
+    assert.equal(checkinRes.body.data.date, todayStr);
 
-    const attHist = await staffClient.get(`/api/mobile/attendance/history?employee_id=${empId}&period=2026-11`);
+    const currentPeriod = getPeriodForDate(todayStr, 29, 28);
+    const attHist = await staffClient.get(`/api/mobile/attendance/history?employee_id=${empId}&period=${currentPeriod}`);
     assert.equal(attHist.status, 200);
-    assert.ok(attHist.body.data.some((d) => d.date === '2026-11-25'));
+    assert.ok(attHist.body.data.some((d) => d.date === todayStr));
 
     // Leaves & Overtime via /api/mobile/*
     const ltRes = await staffClient.get('/api/mobile/leaves/types');

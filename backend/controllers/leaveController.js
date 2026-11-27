@@ -390,17 +390,21 @@ exports.approveRequest = async (req, res) => {
 
     await query.run('BEGIN TRANSACTION');
     try {
+      const upd = await query.run(
+        "UPDATE leave_requests SET status = 'Approved', approved_by = ?, approved_at = CURRENT_TIMESTAMP, approval_notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'Pending'",
+        [actor, approvalNotes, id]
+      );
+      if (!upd.changes) {
+        await query.run('ROLLBACK').catch(() => {});
+        return res.status(400).json({ success: false, message: 'Pengajuan cuti sudah diproses sebelumnya.' });
+      }
+
       if (lt.default_quota > 0) {
         await query.run(
           'UPDATE leave_balances SET used = used + ?, updated_at = CURRENT_TIMESTAMP WHERE employee_id = ? AND leave_type_id = ? AND year = ?',
           [reqRow.total_days, reqRow.employee_id, lt.id, year]
         );
       }
-
-      await query.run(
-        "UPDATE leave_requests SET status = 'Approved', approved_by = ?, approved_at = CURRENT_TIMESTAMP, approval_notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-        [actor, approvalNotes, id]
-      );
 
       for (const dateStr of dates) {
         await query.run(
@@ -448,10 +452,13 @@ exports.rejectRequest = async (req, res) => {
 
     const actor = req.user?.username || 'system';
     const notes = req.body.approval_notes ? String(req.body.approval_notes).trim() : null;
-    await query.run(
-      "UPDATE leave_requests SET status = 'Rejected', approved_by = ?, approved_at = CURRENT_TIMESTAMP, approval_notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+    const upd = await query.run(
+      "UPDATE leave_requests SET status = 'Rejected', approved_by = ?, approved_at = CURRENT_TIMESTAMP, approval_notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'Pending'",
       [actor, notes, id]
     );
+    if (!upd.changes) {
+      return res.status(400).json({ success: false, message: 'Pengajuan cuti sudah diproses sebelumnya.' });
+    }
     const updated = await query.get('SELECT * FROM leave_requests WHERE id = ?', [id]);
     res.json({ success: true, data: updated, message: 'Pengajuan cuti ditolak.' });
   } catch (err) {

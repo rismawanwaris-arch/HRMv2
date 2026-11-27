@@ -76,6 +76,7 @@ exports.health = (req, res) => {
     success: true,
     status: 'ok',
     api_version: '2.0',
+    app_key_required: Boolean((process.env.MOBILE_API_KEY || '').trim()),
     server_time: new Date().toISOString(),
     features: ['offline_sync', 'geofence_checkin', 'leaves', 'overtime', 'reimbursements'],
   });
@@ -95,6 +96,7 @@ exports.me = (req, res) => {
       role,
       permissions: {
         can_approve: ['finance', 'master'].includes(role),
+        can_register_employee: ['finance', 'master'].includes(role),
         can_manage_loans: ['finance', 'master'].includes(role),
         can_manage_settings: role === 'master',
       },
@@ -834,6 +836,11 @@ exports.checkInAttendance = async (req, res) => {
 
     const lat = req.body.latitude !== undefined && req.body.latitude !== '' ? parseFloat(req.body.latitude) : null;
     const lng = req.body.longitude !== undefined && req.body.longitude !== '' ? parseFloat(req.body.longitude) : null;
+    if ((lat !== null && (!Number.isFinite(lat) || lat < -90 || lat > 90)) ||
+        (lng !== null && (!Number.isFinite(lng) || lng < -180 || lng > 180))) {
+      cleanupUploadedFiles(uploadedFiles);
+      return res.status(400).json({ success: false, message: 'Koordinat GPS (latitude/longitude) tidak valid.' });
+    }
     let distanceM = null;
 
     if (emp.branch_lat !== null && emp.branch_lat !== undefined && emp.branch_lng !== null && emp.branch_lng !== undefined) {
@@ -856,11 +863,12 @@ exports.checkInAttendance = async (req, res) => {
     }
 
     const now = new Date();
-    const dateStr = req.body.date && /^\d{4}-\d{2}-\d{2}$/.test(req.body.date)
+    const currentHHMM = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    const canOverrideTime = ['finance', 'master'].includes(req.user?.role);
+    const dateStr = (canOverrideTime && req.body.date && /^\d{4}-\d{2}-\d{2}$/.test(req.body.date))
       ? req.body.date
       : getTodayDateStr();
-    const currentHHMM = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-    const checkInTime = req.body.check_in_time
+    const checkInTime = (canOverrideTime && req.body.check_in_time)
       ? (normalizeTimeHHMM(req.body.check_in_time) || currentHHMM)
       : currentHHMM;
     const shift = req.body.shift === 'Siang' ? 'Siang' : 'Pagi';

@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const controller = require('../controllers/outletActivityController');
-const { outletPhotoUpload } = require('../utils/helpers');
+const { outletPhotoUpload, enforceImageMagicBytes } = require('../utils/helpers');
 
 // Daily Executive Summary & 1-Click WhatsApp Report
 router.get('/summary', controller.getDailySummary);
@@ -9,14 +9,14 @@ router.get('/summary', controller.getDailySummary);
 // Store Visits & Inspection Log
 router.get('/visits', controller.getVisits);
 router.get('/visits/:id', controller.getVisitDetail);
-router.post('/visits', outletPhotoUpload.array('photos', 5), controller.createVisit);
-router.put('/visits/:id', outletPhotoUpload.array('photos', 5), controller.updateVisit);
+router.post('/visits', outletPhotoUpload.array('photos', 5), enforceImageMagicBytes, controller.createVisit);
+router.put('/visits/:id', outletPhotoUpload.array('photos', 5), enforceImageMagicBytes, controller.updateVisit);
 router.delete('/visits/:id', controller.deleteVisit);
 
 // Outlet Incidents / Unique Event Log per Cabang
 router.get('/incidents', controller.getIncidents);
-router.post('/incidents', outletPhotoUpload.array('photos', 5), controller.createIncident);
-router.put('/incidents/:id', outletPhotoUpload.array('photos', 5), controller.updateIncident);
+router.post('/incidents', outletPhotoUpload.array('photos', 5), enforceImageMagicBytes, controller.createIncident);
+router.put('/incidents/:id', outletPhotoUpload.array('photos', 5), enforceImageMagicBytes, controller.updateIncident);
 router.delete('/incidents/:id', controller.deleteIncident);
 
 // Action Items / PR Follow-up

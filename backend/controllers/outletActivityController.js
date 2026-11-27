@@ -533,13 +533,16 @@ exports.deleteVisit = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Data kunjungan tidak ditemukan.' });
     }
 
-    // Delete photo files
+    // Delete photo files securely within outletPhotosDir
     if (existing.photos) {
       try {
-        const photoArr = JSON.parse(existing.photos);
+        const photoArr = safeParseJsonArray(existing.photos);
+        const rootDir = path.resolve(outletPhotosDir);
         photoArr.forEach(p => {
-          const filePath = path.join(outletPhotosDir, p);
-          if (fs.existsSync(filePath)) {
+          const safeName = path.basename(String(p || ''));
+          if (!safeName || safeName === '.' || safeName === '..') return;
+          const filePath = path.resolve(rootDir, safeName);
+          if (filePath.startsWith(rootDir + path.sep) && fs.existsSync(filePath)) {
             try { fs.unlinkSync(filePath); } catch (e) {}
           }
         });
@@ -961,14 +964,24 @@ exports.getBranchHistory = async (req, res) => {
  */
 exports.servePhoto = (req, res) => {
   try {
-    const filename = path.basename(req.params.filename);
-    const filePath = path.join(outletPhotosDir, filename);
+    const filename = path.basename(String(req.params.filename || ''));
+    if (!filename || filename === '.' || filename === '..') {
+      return res.status(400).json({ success: false, message: 'Nama file tidak valid.' });
+    }
+    const rootDir = path.resolve(outletPhotosDir);
+    const resolved = path.resolve(rootDir, filename);
 
-    if (!fs.existsSync(filePath)) {
+    if (!resolved.startsWith(rootDir + path.sep)) {
+      return res.status(403).json({ success: false, message: 'Akses file ditolak.' });
+    }
+
+    if (!fs.existsSync(resolved)) {
       return res.status(404).json({ success: false, message: 'Foto tidak ditemukan.' });
     }
 
-    res.sendFile(filePath);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Security-Policy', "default-src 'none'");
+    res.sendFile(resolved);
   } catch (error) {
     console.error('API Error (servePhoto):', error);
     res.status(500).json({ success: false, message: 'Gagal memuat file foto.' });
